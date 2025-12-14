@@ -10,8 +10,8 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=sqlite:///./zhixueban.db
-      - SECRET_KEY=G3nt0PWEq3rIE5XrdhBGETx3zW46olCcJ_ZSoRkiPjw
-      - ENCRYPTION_KEY=1AMMrt66ET56jRVl0qG6Agb-nHeh4kVjCADGIzMPRc4=
+      - SECRET_KEY=
+      - ENCRYPTION_KEY=
     volumes:
       - ./backend:/app
       - backend_data:/app/data
