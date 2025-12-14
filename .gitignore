@@ -135,6 +135,13 @@ backend/智学伴*.pptx
 # 参赛相关文档（不需要上传）
 documents/
 
+# 临时文档和指南（不需要上传）
+GitHub上传完整指南.md
+GITHUB_UPLOAD_CHECKLIST.md
+项目整理说明.md
+上传到GitHub的步骤.md
+创建数据库.sql
+
 # 其他
 .cursor/
 *.pyc
