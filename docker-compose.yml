@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: zhixueban-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./zhixueban.db
+      - SECRET_KEY=G3nt0PWEq3rIE5XrdhBGETx3zW46olCcJ_ZSoRkiPjw
+      - ENCRYPTION_KEY=1AMMrt66ET56jRVl0qG6Agb-nHeh4kVjCADGIzMPRc4=
+    volumes:
+      - ./backend:/app
+      - backend_data:/app/data
+    restart: unless-stopped
+    networks:
+      - zhixueban-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: zhixueban-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - zhixueban-network
+
+volumes:
+  backend_data:
+
+networks:
+  zhixueban-network:
+    driver: bridge
+

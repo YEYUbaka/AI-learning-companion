@@ -1,0 +1,132 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 虚拟环境
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 日志文件
+logs/
+*.log
+*.log.*
+
+# 上传文件
+uploads/
+backend/uploads/
+backend/reports/
+frontend/dist/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm
+.eslintcache
+
+# 构建产物
+dist/
+build/
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.backup
+dummy
+query
+
+# 部署脚本（本地使用，不提交到 GitHub）
+*.bat
+部署脚本/
+
+# 文档和压缩包（保留在本地）
+*.zip
+*.rar
+*.7z
+Web4.zip
+
+# 项目特定
+backend/test_*.pdf
+backend/test_*.py
+backend/*.md
+backend/快速*.py
+backend/测试*.py
+backend/诊断*.py
+backend/调试*.py
+backend/清理*.py
+backend/重置*.py
+backend/检查*.py
+backend/迁移*.py
+backend/验证*.md
+backend/问题*.md
+backend/修复*.md
+backend/上下文*.md
+backend/故障*.md
+backend/数据库*.md
+backend/日志*.md
+backend/登录*.md
+backend/环境*.md
+backend/配置*.md
+backend/项目*.txt
+backend/智学伴*.docx
+backend/智学伴*.pptx
+
+# 其他
+.cursor/
+*.pyc
+*.pyo
+*.pyd
+
