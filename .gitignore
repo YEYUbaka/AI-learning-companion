@@ -132,6 +132,9 @@ backend/项目*.txt
 backend/智学伴*.docx
 backend/智学伴*.pptx
 
+# 参赛相关文档（不需要上传）
+documents/
+
 # 其他
 .cursor/
 *.pyc
