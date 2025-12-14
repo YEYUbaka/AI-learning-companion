@@ -98,6 +98,14 @@ query
 *.7z
 Web4.zip
 
+# 大文件（视频、大文档等，超过 GitHub 100MB 限制）
+*.mp4
+*.avi
+*.mov
+*.mkv
+documents/参赛总文件夹/*.mp4
+documents/参赛文件夹/*.mp4
+
 # 项目特定
 backend/test_*.pdf
 backend/test_*.py
