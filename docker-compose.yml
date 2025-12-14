@@ -9,9 +9,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=sqlite:///./zhixueban.db
-      - SECRET_KEY=
-      - ENCRYPTION_KEY=
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./zhixueban.db}
+      - SECRET_KEY=${SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    env_file:
+      - ./backend/.env
     volumes:
       - ./backend:/app
       - backend_data:/app/data
