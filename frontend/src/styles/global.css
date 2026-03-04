@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: #f4f6fb;
+  --color-text: #0f172a;
+  --color-card: rgba(255, 255, 255, 0.95);
+  --color-border: rgba(15, 23, 42, 0.1);
+}
+
+:root[data-theme='dark'] {
+  --color-bg: #05060a;
+  --color-text: #f8fafc;
+  --color-card: rgba(255, 255, 255, 0.05);
+  --color-border: rgba(255, 255, 255, 0.15);
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  transition: background-color 0.3s ease, color 0.3s ease;
+  /* 移动端优化 */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 移动端触摸优化 */
+button, a {
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+  touch-action: manipulation;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+.recharts-wrapper:focus,
+.recharts-wrapper svg:focus,
+.recharts-wrapper path:focus {
+  outline: none;
+}
+
+/* 自定义滚动条样式 - 夜间主题 */
+.scrollbar-dark {
+  scrollbar-width: thin;  /* Firefox */
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.scrollbar-dark::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollbar-dark::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-dark::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.scrollbar-dark::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 自定义滚动条样式 - 日间主题 */
+.scrollbar-light {
+  scrollbar-width: thin;  /* Firefox */
+  scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
+}
+
+.scrollbar-light::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollbar-light::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-light::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.scrollbar-light::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+

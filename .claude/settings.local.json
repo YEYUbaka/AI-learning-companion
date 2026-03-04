@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(done)",
+      "Bash(node:*)",
+      "Bash(npm --version:*)",
+      "Bash(npm install:*)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "Bash(./python.exe:*)",
+      "Bash(venv/Scripts/python.exe -m pip install:*)",
+      "Bash(taskkill:*)",
+      "Bash(mysql:*)",
+      "Bash(venv/Scripts/python.exe:*)",
+      "Bash(tasklist:*)",
+      "Bash(venv/Scripts/pip install:*)",
+      "Bash(findstr:*)",
+      "Bash(timeout:*)",
+      "Bash(powershell -Command \"Get-Process python | Stop-Process -Force\")",
+      "Bash(python:*)",
+      "Bash(git init)",
+      "Bash(git remote add origin https://github.com/YEYUbaka/AI-learning-companion.git)",
+      "Bash(git add .)",
+      "Bash(git commit -m \"Initial commit: 智学伴 AI 学习平台基础版本\")"
+    ]
+  }
+}
