@@ -19,11 +19,11 @@
 
 ### 3. 已知泄露的 API Key 检查
 检查了以下 5 个已知泄露的 API key：
-- ❌ `sk-hrrwzmmxydqkpitunkfonggkghnnxoshuakucxarfxczpmab` (DeepSeek) - **未找到**
-- ❌ `bce-v3/ALTAK-XDuOngF6DSzjfieL4DKFa/781e24ebf7517adef48a710c33456e6ec562cf5e` (文心一言) - **未找到**
-- ❌ `JMOgmicVdhAFRBgxoHpN:dsAPOFeFLhJsuGUTKSlg` (星火) - **未找到**
-- ❌ `1ca8634609d04a46ac94302e2bc60f50.GUXC0vCuV69W9If4` (智谱清言) - **未找到**
-- ❌ `sk-e9yys2uIO6iVcQ8ztFIvB6FVP9q5rL2J9if9TJOg1IylwXT9` (Kimi) - **未找到**
+- ❌ `sk-` (DeepSeek) - **未找到**
+- ❌ `bce-` (文心一言) - **未找到**
+- ❌ `` (星火) - **未找到**
+- ❌ `` (智谱清言) - **未找到**
+- ❌ `sk-` (Kimi) - **未找到**
 
 ### 4. 临时清理脚本
 - ✅ 已删除 `clean_api_keys.sh` 和 `clean_history.py`（这些脚本包含 API key 仅用于清理目的）
@@ -64,6 +64,6 @@ grep -r "sk-[a-zA-Z0-9]{40,}" . --exclude-dir=node_modules
 git log --all --full-history -p | grep -E "sk-|bce-v3"
 
 # 检查特定密钥
-git log --all --full-history -p | grep "sk-hrrwzmmxydqkpitunkfonggkghnnxoshuakucxarfxczpmab"
+git log --all --full-history -p | grep "sk-"
 ```
 
