@@ -35,7 +35,9 @@
       "Bash(git add frontend/src/pages/Login.jsx frontend/src/pages/Register.jsx frontend/src/pages/Dashboard.jsx frontend/src/pages/AIChat.jsx frontend/src/pages/StudyPlan.jsx frontend/src/pages/LearningMap.jsx frontend/src/pages/Quiz.jsx)",
       "Bash(git commit -m \"移除 AI 风格配色：去除渐变和磨砂效果，使用商业级纯色设计\")",
       "Bash(grep -l \"bg-gradient\\\\|backdrop-blur\" frontend/src/pages/Admin/*.jsx)",
-      "Bash(git commit -m \"完成 UI 重构：移除所有页面的渐变和磨砂效果\")"
+      "Bash(git commit -m \"完成 UI 重构：移除所有页面的渐变和磨砂效果\")",
+      "Bash(git pull --rebase origin main)",
+      "Bash(git commit -m \"更新本地设置\")"
     ]
   }
 }
