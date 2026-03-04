@@ -67,7 +67,7 @@ function QuizResult() {
           )}
           
           {/* 得分展示 */}
-          <div className="inline-block bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-6 mb-4">
+          <div className="inline-block bg-blue-50 rounded-xl p-6 mb-4">
             <div className={`text-6xl font-bold ${getScoreColor(score)} mb-2`}>
               {score}
             </div>

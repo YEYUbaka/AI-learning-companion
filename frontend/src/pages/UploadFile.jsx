@@ -27,20 +27,20 @@ function UploadFile() {
             uploadArea:
               'border-2 border-dashed border-white/20 rounded-lg p-6 text-center hover:border-blue-400/70 transition-colors bg-[#0b1220]',
             uploadText: 'text-white/80',
-            btnPrimary: 'bg-gradient-to-r from-blue-600 to-purple-600 text-white',
+            btnPrimary: 'bg-blue-600 text-white hover:bg-blue-700',
             btnSecondary: 'bg-blue-600 text-white hover:bg-blue-500',
             alertInfo: 'bg-blue-500/10 border border-blue-500/40 text-blue-100',
             alertError: 'bg-red-500/10 border border-red-500/40 text-red-100',
           }
         : {
-            page: 'min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 text-slate-900',
+            page: 'min-h-screen bg-gray-50 text-slate-900',
             card: 'bg-white rounded-xl shadow-lg p-8 border border-slate-100',
             input:
               'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent',
             uploadArea:
               'border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors bg-white',
             uploadText: 'text-gray-600',
-            btnPrimary: 'bg-gradient-to-r from-blue-600 to-purple-600 text-white',
+            btnPrimary: 'bg-blue-600 text-white hover:bg-blue-700',
             btnSecondary: 'bg-blue-600 text-white hover:bg-blue-700',
             alertInfo: 'bg-blue-50 border border-blue-200 text-blue-800',
             alertError: 'bg-red-50 border border-red-200 text-red-800',
