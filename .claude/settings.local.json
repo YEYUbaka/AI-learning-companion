@@ -22,7 +22,12 @@
       "Bash(git init)",
       "Bash(git remote add origin https://github.com/YEYUbaka/AI-learning-companion.git)",
       "Bash(git add .)",
-      "Bash(git commit -m \"Initial commit: 智学伴 AI 学习平台基础版本\")"
+      "Bash(git commit -m \"Initial commit: 智学伴 AI 学习平台基础版本\")",
+      "Bash(git branch -M main)",
+      "Bash(git push -u origin main)",
+      "Bash(git pull origin main --allow-unrelated-histories)",
+      "Bash(git add .claude/settings.local.json)",
+      "Bash(git commit -m \"Update local settings\")"
     ]
   }
 }
