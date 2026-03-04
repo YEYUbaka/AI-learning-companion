@@ -41,43 +41,43 @@ const LearningMap = () => {
     () =>
       isDark
         ? {
-            page: 'p-6 space-y-6 relative min-h-screen bg-gradient-to-b from-[#05060a] via-[#070b13] to-[#0c111f] text-white',
-            floatingCard: 'fixed right-6 top-28 w-96 bg-[#101628] text-white rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.5)] border border-white/10 z-30 p-6',
-            infoLabel: 'text-white/60',
-            infoSection: 'text-white/75',
-            primaryPanel: 'bg-[#0f1527] rounded-2xl shadow-2xl border border-white/10 p-6 text-white',
-            secondaryPanel: 'bg-[#10192f] rounded-2xl shadow-xl border border-white/10 p-6 text-white',
-            uploadArea: 'flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-white/20 rounded-xl bg-[#0b1326] hover:border-cyan-400/60 hover:bg-[#0d172f] transition cursor-pointer',
+            page: 'p-6 space-y-6 relative min-h-screen bg-slate-900 text-white',
+            floatingCard: 'fixed right-6 top-28 w-96 bg-slate-800 text-white rounded-2xl shadow-lg border border-slate-700 z-30 p-6',
+            infoLabel: 'text-slate-400',
+            infoSection: 'text-slate-300',
+            primaryPanel: 'bg-slate-800 rounded-2xl shadow-lg border border-slate-700 p-6 text-white',
+            secondaryPanel: 'bg-slate-800 rounded-2xl shadow-lg border border-slate-700 p-6 text-white',
+            uploadArea: 'flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-slate-600 rounded-xl bg-slate-800 hover:border-blue-500 hover:bg-slate-700 transition cursor-pointer',
             input:
-              'w-full rounded-xl border border-white/10 bg-[#0a1120] px-4 py-3 text-white placeholder:text-white/40 transition focus:bg-[#0e172c] focus:border-cyan-400/60 focus:ring-2 focus:ring-cyan-400/30 focus:outline-none shadow-inner',
+              'w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-white placeholder:text-slate-400 transition focus:bg-slate-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:outline-none',
             button:
-              'w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-semibold shadow-lg shadow-cyan-900/40 hover:shadow-cyan-900/60 hover:-translate-y-0.5 transition disabled:opacity-40',
-            status: 'text-sm text-white/60 bg-white/5 rounded-lg px-3 py-2',
-            historyActive: 'border-cyan-500 bg-cyan-500/10 text-cyan-100',
-            historyInactive: 'border-white/10 hover:border-cyan-400/60 text-white',
-            graphPanel: 'lg:col-span-2 bg-[#0c111f] rounded-2xl shadow-2xl border border-white/10 p-6',
-            legendText: 'text-white/70',
-            graphBg: '#05060a',
+              'w-full py-3 rounded-xl bg-blue-600 text-white font-semibold shadow-lg hover:bg-blue-700 hover:-translate-y-0.5 transition disabled:opacity-40',
+            status: 'text-sm text-slate-400 bg-slate-700 rounded-lg px-3 py-2',
+            historyActive: 'border-blue-500 bg-blue-500/10 text-blue-300',
+            historyInactive: 'border-slate-700 hover:border-blue-500 text-white',
+            graphPanel: 'lg:col-span-2 bg-slate-900 rounded-2xl shadow-lg border border-slate-700 p-6',
+            legendText: 'text-slate-300',
+            graphBg: '#0f172a',
             nodeText: '#f8fafc',
-            nodeFill: '#10172a',
-            historyMeta: 'text-white/50',
+            nodeFill: '#1e293b',
+            historyMeta: 'text-slate-400',
           }
         : {
-            page: 'p-6 space-y-6 relative min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 text-slate-900',
-            floatingCard: 'fixed right-6 top-28 w-96 bg-white rounded-2xl shadow-2xl border border-gray-100 z-30 p-6',
+            page: 'p-6 space-y-6 relative min-h-screen bg-gray-50 text-slate-900',
+            floatingCard: 'fixed right-6 top-28 w-96 bg-white rounded-2xl shadow-lg border border-gray-200 z-30 p-6',
             infoLabel: 'text-gray-500',
             infoSection: 'text-gray-700',
-            primaryPanel: 'bg-white rounded-2xl shadow-lg shadow-blue-50 p-6 border border-gray-100',
-            secondaryPanel: 'bg-white rounded-2xl shadow-lg shadow-blue-50 p-6 border border-gray-100',
-            uploadArea: 'flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-200 rounded-xl bg-slate-50 hover:border-primary/50 hover:bg-white transition cursor-pointer',
+            primaryPanel: 'bg-white rounded-2xl shadow-lg p-6 border border-gray-200',
+            secondaryPanel: 'bg-white rounded-2xl shadow-lg p-6 border border-gray-200',
+            uploadArea: 'flex flex-col items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 hover:border-blue-500 hover:bg-white transition cursor-pointer',
             input:
-              'w-full rounded-xl border border-transparent bg-slate-50 px-4 py-3 text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:border-primary/60 focus:ring-2 focus:ring-primary/30 focus:outline-none shadow-inner',
+              'w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 placeholder:text-gray-400 transition focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 focus:outline-none',
             button:
-              'w-full py-3 rounded-xl bg-primary text-white font-semibold shadow-lg shadow-blue-200 hover:shadow-primary/40 hover:-translate-y-0.5 transition disabled:opacity-50',
-            status: 'text-sm text-gray-600 bg-slate-50 rounded-lg px-3 py-2',
-            historyActive: 'border-primary bg-blue-50 text-blue-700',
-            historyInactive: 'border-gray-100 hover:border-primary/40 text-gray-700',
-            graphPanel: 'lg:col-span-2 bg-white rounded-2xl shadow-lg shadow-blue-50 border border-gray-100 p-6',
+              'w-full py-3 rounded-xl bg-blue-600 text-white font-semibold shadow-lg hover:bg-blue-700 hover:-translate-y-0.5 transition disabled:opacity-50',
+            status: 'text-sm text-gray-600 bg-gray-100 rounded-lg px-3 py-2',
+            historyActive: 'border-blue-600 bg-blue-50 text-blue-700',
+            historyInactive: 'border-gray-200 hover:border-blue-500 text-gray-700',
+            graphPanel: 'lg:col-span-2 bg-white rounded-2xl shadow-lg border border-gray-200 p-6',
             legendText: 'text-gray-600',
             graphBg: '#f8fafc',
             nodeText: '#0f172a',
@@ -360,7 +360,7 @@ const LearningMap = () => {
         <div className="space-y-6">
           <div className={`${palette.primaryPanel} min-h-[360px] transition hover:-translate-y-0.5`}>
             <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-cyan-500 text-white text-base">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white text-base">
                 ①
               </span>
               知识图谱生成

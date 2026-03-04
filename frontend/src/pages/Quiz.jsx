@@ -37,32 +37,32 @@ function Quiz() {
     () =>
       isDark
         ? {
-            page: 'min-h-screen bg-gradient-to-b from-[#05060a] via-[#0a0f1e] to-[#08101f] text-white',
-            card: 'bg-[#101529] border border-white/10 rounded-3xl shadow-2xl shadow-black/30',
-            textMuted: 'text-white/60',
+            page: 'min-h-screen bg-slate-900 text-white',
+            card: 'bg-slate-800 border border-slate-700 rounded-2xl shadow-lg',
+            textMuted: 'text-slate-400',
             input:
-              'flex-1 px-4 py-3 rounded-2xl bg-[#0f172a] border border-white/10 focus:ring-2 focus:ring-cyan-400 focus:border-transparent placeholder:text-white/40 text-white',
+              'flex-1 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-slate-400 text-white',
             gradientButton:
-              'bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white px-6 py-3 rounded-2xl shadow-lg shadow-fuchsia-900/40 hover:shadow-fuchsia-900/60 disabled:opacity-50 disabled:cursor-not-allowed transition',
-            alert: 'p-4 rounded-2xl bg-red-500/10 border border-red-500/40 text-red-100',
-            questionCard: 'bg-[#131b33] border border-white/10 rounded-2xl',
+              'bg-blue-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition',
+            alert: 'p-4 rounded-xl bg-red-900/20 border border-red-500/40 text-red-200',
+            questionCard: 'bg-slate-800 border border-slate-700 rounded-xl',
             choice:
-              'flex items-center p-3 rounded-xl border-2 transition cursor-pointer text-white bg-[#0f1425]',
-            choiceActive: 'bg-gradient-to-r from-blue-600 to-cyan-500 border-transparent text-white',
-            choiceInactive: 'border-white/10 hover:border-blue-500/60',
+              'flex items-center p-3 rounded-lg border-2 transition cursor-pointer text-white bg-slate-800',
+            choiceActive: 'bg-blue-600 border-transparent text-white',
+            choiceInactive: 'border-slate-700 hover:border-blue-500',
             inputSmall:
-              'w-full px-4 py-3 rounded-2xl bg-[#0f172a] border border-white/10 focus:ring-2 focus:ring-blue-400 placeholder:text-white/40 text-white',
+              'w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 focus:ring-2 focus:ring-blue-500 placeholder:text-slate-400 text-white',
           }
         : {
-            page: 'min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 text-slate-900',
-            card: 'bg-white rounded-3xl shadow-xl border border-slate-100',
+            page: 'min-h-screen bg-gray-50 text-slate-900',
+            card: 'bg-white rounded-2xl shadow-lg border border-gray-200',
             textMuted: 'text-gray-500',
             input:
               'flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent',
             gradientButton:
-              'bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-lg shadow-lg shadow-blue-200 hover:shadow-blue-300 disabled:bg-gray-400 disabled:cursor-not-allowed transition',
+              'bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition',
             alert: 'mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800',
-            questionCard: 'bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl',
+            questionCard: 'bg-white border border-gray-200 rounded-xl',
             choice:
               'flex items-center p-3 rounded-lg cursor-pointer transition-colors bg-white border-2 border-gray-200',
             choiceActive: 'bg-blue-100 border-blue-500',
@@ -304,8 +304,8 @@ function Quiz() {
               className={`px-6 py-2 rounded-lg transition ${
                 mode === 'regular'
                   ? isDark
-                    ? 'bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white'
-                    : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-blue-600 text-white'
                   : isDark
                   ? 'bg-gray-700 text-white/60 hover:text-white'
                   : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
@@ -318,8 +318,8 @@ function Quiz() {
               className={`px-6 py-2 rounded-lg transition ${
                 mode === 'custom'
                   ? isDark
-                    ? 'bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white'
-                    : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-blue-600 text-white'
                   : isDark
                   ? 'bg-gray-700 text-white/60 hover:text-white'
                   : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
@@ -594,7 +594,7 @@ function Quiz() {
                 <button
                   onClick={handleSubmit}
                   disabled={submitting}
-                  className="bg-gradient-to-r from-green-500 to-teal-500 text-white px-8 py-3 rounded-2xl shadow-lg shadow-emerald-900/40 hover:shadow-emerald-900/60 disabled:opacity-50"
+                  className="bg-green-600 text-white px-8 py-3 rounded-xl shadow-lg hover:bg-green-700 disabled:opacity-50"
                 >
                   {submitting ? '提交中...' : '提交测验'}
                 </button>

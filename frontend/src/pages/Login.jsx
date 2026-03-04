@@ -51,14 +51,14 @@ function Login() {
 
   return (
     <div className={`min-h-screen flex items-center justify-center py-12 px-4 ${
-      isDark 
-        ? 'bg-gradient-to-br from-slate-900 to-slate-800' 
-        : 'bg-gradient-to-br from-blue-50 to-indigo-100'
+      isDark
+        ? 'bg-slate-900'
+        : 'bg-gray-50'
     }`}>
-      <div className={`max-w-md w-full space-y-8 p-8 rounded-lg shadow-xl ${
-        isDark 
-          ? 'bg-slate-800/90 border border-slate-700' 
-          : 'bg-white'
+      <div className={`max-w-md w-full space-y-8 p-8 rounded-lg shadow-lg ${
+        isDark
+          ? 'bg-slate-800 border border-slate-700'
+          : 'bg-white border border-gray-200'
       }`}>
         <div>
           <h2 className={`text-center text-3xl font-extrabold ${

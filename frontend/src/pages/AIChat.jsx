@@ -332,7 +332,7 @@ function AIChat() {
             historyActive: 'ring-2 ring-blue-500/60',
             historyMeta: 'text-xs text-white/40',
             historyDelete: 'text-white/40 hover:text-red-400 text-xs',
-            chatWrapper: 'flex-1 flex flex-col bg-gradient-to-b from-[#10131c] to-[#05060a]',
+            chatWrapper: 'flex-1 flex flex-col bg-slate-900',
             header: 'px-10 py-6 border-b border-white/5',
             headerSub: 'text-xs uppercase tracking-[0.4em] text-white/40 mb-1',
             headerCopy: 'text-sm text-white/40 mt-1',
@@ -345,7 +345,7 @@ function AIChat() {
             emptyStateIcon: 'text-6xl mb-4',
             emptyStateText: 'text-lg text-white/40',
             userBubble:
-              'bg-gradient-to-r from-blue-600 to-indigo-500 text-white shadow-lg shadow-blue-900/40 border border-transparent',
+              'bg-blue-600 text-white shadow-lg border border-transparent',
             aiBubble: 'bg-[#151924] text-white border border-white/5 shadow-lg shadow-black/30',
             userCopy: 'text-white/70 hover:text-white',
             aiCopy: 'text-white/50 hover:text-white',
@@ -363,11 +363,11 @@ function AIChat() {
             inputField:
               'flex-1 px-5 py-3 rounded-2xl bg-[#111524] border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500/40',
             sendButton:
-              'px-8 py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 shadow-lg shadow-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed',
+              'px-8 py-3 rounded-2xl bg-blue-600 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed',
           }
         : {
             root:
-              'h-[calc(100vh-4rem)] min-h-[640px] w-full overflow-hidden bg-gradient-to-b from-slate-100 via-white to-slate-100 text-slate-900',
+              'h-[calc(100vh-4rem)] min-h-[640px] w-full overflow-hidden bg-gray-50 text-slate-900',
             main: 'flex h-full',
             rail:
               'w-20 bg-white/90 border-r border-slate-200 flex flex-col items-center py-6 space-y-6 text-slate-500',
@@ -389,10 +389,10 @@ function AIChat() {
             selectDisabled:
               'bg-slate-50 border border-slate-200 rounded-2xl px-4 pr-10 py-2 text-sm text-slate-400 cursor-not-allowed',
             caret: 'text-slate-400',
-            messages: 'flex-1 overflow-y-auto px-10 py-8 space-y-5 bg-gradient-to-b from-white via-white to-slate-50 scrollbar-light',
+            messages: 'flex-1 overflow-y-auto px-10 py-8 space-y-5 bg-white scrollbar-light',
             emptyStateIcon: 'text-6xl mb-4 text-slate-300',
             emptyStateText: 'text-lg text-slate-400',
-            userBubble: 'bg-gradient-to-r from-blue-600 to-sky-500 text-white shadow-blue-100',
+            userBubble: 'bg-blue-600 text-white shadow-lg',
             aiBubble: 'bg-white text-slate-900 border border-slate-100 shadow-slate-200',
             userCopy: 'text-white/80 hover:text-white',
             aiCopy: 'text-gray-400 hover:text-gray-600',
@@ -410,7 +410,7 @@ function AIChat() {
             inputField:
               'flex-1 px-5 py-3 rounded-2xl bg-white border border-slate-200 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40',
             sendButton:
-              'px-8 py-3 bg-gradient-to-r from-blue-600 to-sky-500 text-white rounded-2xl shadow-lg shadow-blue-200 hover:shadow-blue-300 disabled:opacity-50 disabled:cursor-not-allowed transition',
+              'px-8 py-3 bg-blue-600 text-white rounded-2xl shadow-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition',
           },
     [isDark]
   );
@@ -1137,7 +1137,7 @@ function AIChat() {
             <h2 className={`text-xl font-semibold mt-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>所有对话</h2>
             <button
               onClick={handleNewSession}
-              className="w-full mt-4 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 py-2 text-sm font-semibold shadow-lg shadow-blue-500/30 text-white"
+              className="w-full mt-4 rounded-2xl bg-blue-600 py-2 text-sm font-semibold shadow-lg text-white hover:bg-blue-700"
             >
               + 新建对话
             </button>
