@@ -194,3 +194,14 @@ npm run build  # 生产构建
 2. **中文支持**: 所有文件使用 UTF-8 编码
 3. **SQL Server**: 需要 ODBC Driver for SQL Server
 4. **种子数据**: 修改 `.env` 或 JSON 后重启后端自动同步
+
+## 修改记录
+
+### 2026-03-04
+- 初始化 Git 仓库并推送到 GitHub
+- 添加 UI/UX 设计规范，禁止使用 emoji 和 AI 风格配色
+- 完成商业级 UI 重构：
+  - 移除所有页面的渐变背景和磨砂效果
+  - 统一使用纯色设计（暗色：slate-900/800，亮色：gray-50/white）
+  - 重构 Login、Register、Dashboard、AIChat、StudyPlan、LearningMap、Quiz 等主要页面
+  - 批量处理管理后台页面
