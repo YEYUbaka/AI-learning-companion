@@ -154,3 +154,9 @@ backend/seed_data/PROMPT_DESIGN_GUIDE.md
 *.pyo
 *.pyd
 
+# 第三方框架目录
+agent-zero-main/
+
+# 误创建的文件
+backend/nul
+
