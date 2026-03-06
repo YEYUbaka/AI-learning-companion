@@ -37,7 +37,26 @@
       "Bash(grep -l \"bg-gradient\\\\|backdrop-blur\" frontend/src/pages/Admin/*.jsx)",
       "Bash(git commit -m \"完成 UI 重构：移除所有页面的渐变和磨砂效果\")",
       "Bash(git pull --rebase origin main)",
-      "Bash(git commit -m \"更新本地设置\")"
+      "Bash(git commit -m \"更新本地设置\")",
+      "Bash(git commit -m \"添加修改记录到 CLAUDE.md\")",
+      "Bash(npm run:*)",
+      "Bash(./venv/Scripts/python.exe:*)",
+      "Bash(venvScriptsactivate:*)",
+      "Bash(source:*)",
+      "Bash(pkill:*)",
+      "Bash(wc:*)",
+      "Bash(net start:*)",
+      "Bash(sc query:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(gh repo:*)",
+      "Bash(gh api:*)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(pip install:*)",
+      "Bash(timeout 180 python:*)",
+      "Bash(pip:*)",
+      "Bash(uvicorn main:app:*)",
+      "Bash(xargs grep:*)"
     ]
   }
 }
