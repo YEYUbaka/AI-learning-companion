@@ -26,26 +26,34 @@ class AIProvider(ABC):
 
 
 class DeepSeekProvider(AIProvider):
-    """DeepSeek提供商"""
-    
+    """DeepSeek提供商（支持官方API和硅基流动）"""
+
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         self.api_key = api_key
         self.base_url = base_url or "https://api.deepseek.com/v1/chat/completions"
-    
+        # 判断是否使用硅基流动
+        self.is_siliconflow = "siliconflow" in (base_url or "").lower()
+
     def call(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
         """调用DeepSeek API"""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        
+
+        # 根据不同平台选择默认模型
+        if self.is_siliconflow:
+            default_model = "deepseek-ai/DeepSeek-V3"
+        else:
+            default_model = "deepseek-chat"
+
         payload = {
-            "model": kwargs.get("model", "deepseek-chat"),
+            "model": kwargs.get("model", default_model),
             "messages": messages,
             "temperature": kwargs.get("temperature", 0.7),
             "max_tokens": kwargs.get("max_tokens", 2000)
         }
-        
+
         with httpx.Client(timeout=settings.AI_TIMEOUT) as client:
             response = client.post(self.base_url, json=payload, headers=headers)
             response.raise_for_status()
@@ -53,7 +61,7 @@ class DeepSeekProvider(AIProvider):
             return {
                 "text": result["choices"][0]["message"]["content"],
                 "usage": result.get("usage", {}),
-                "model": result.get("model", "deepseek-chat")
+                "model": result.get("model", default_model)
             }
 
 
@@ -300,7 +308,7 @@ class ModelRegistry:
         """调用AI，支持fallback"""
         # 获取启用的提供商列表（按优先级排序）
         providers = list(self._providers.keys())
-        
+
         if preferred_provider:
             if preferred_provider not in providers:
                 raise ValueError(f"未启用的模型: {preferred_provider}")
@@ -309,8 +317,10 @@ class ModelRegistry:
                 providers = [preferred_provider]
         elif not providers:
             raise ValueError("未配置任何可用模型")
-        
+
         last_error = None
+        error_details = []
+
         for provider_name in providers:
             try:
                 provider = self._providers[provider_name]
@@ -319,18 +329,149 @@ class ModelRegistry:
                 start_time = time.time()
                 result = provider.call(messages, **call_kwargs)
                 latency = (time.time() - start_time) * 1000
-                
+
                 result["provider"] = provider_name
                 result["latency_ms"] = latency
                 logger.info(f"AI调用成功: {provider_name}, 延迟: {latency:.2f}ms")
                 return result
+            except httpx.HTTPStatusError as e:
+                # 解析 HTTP 错误
+                status_code = e.response.status_code
+                error_msg = self._parse_http_error(provider_name, status_code, e.response)
+                error_details.append({"provider": provider_name, "error": error_msg})
+                last_error = error_msg
+                logger.warning(f"AI调用失败: {provider_name}, 错误: {error_msg}")
+                continue
+            except httpx.HTTPError as e:
+                # 捕获其他 HTTP 相关错误（连接超时、网络错误等）
+                error_msg = f"{provider_name} 网络连接失败，请检查网络或稍后重试"
+                error_details.append({"provider": provider_name, "error": error_msg})
+                last_error = error_msg
+                logger.warning(f"AI调用失败: {provider_name}, 网络错误: {e}")
+                continue
             except Exception as e:
-                last_error = e
+                # 捕获其他异常，但尝试解析是否包含 HTTP 错误信息
+                error_str = str(e)
+                if "400" in error_str or "Bad Request" in error_str:
+                    error_msg = f"{provider_name} API 密钥无效或请求参数错误"
+                elif "401" in error_str or "Unauthorized" in error_str:
+                    error_msg = f"{provider_name} 认证失败，请检查 API 密钥"
+                elif "429" in error_str or "Too Many Requests" in error_str:
+                    error_msg = f"{provider_name} 请求过于频繁，请稍后重试"
+                elif "500" in error_str or "Internal Server Error" in error_str:
+                    error_msg = f"{provider_name} 服务器错误，请稍后重试"
+                elif "503" in error_str or "Service Unavailable" in error_str:
+                    error_msg = f"{provider_name} 服务暂时不可用"
+                else:
+                    error_msg = f"{provider_name} 调用失败: {error_str[:100]}"
+
+                error_details.append({"provider": provider_name, "error": error_msg})
+                last_error = error_msg
                 logger.warning(f"AI调用失败: {provider_name}, 错误: {e}")
                 continue
-        
+
+        # 所有提供商都失败，返回友好错误
+        raise Exception(self._build_friendly_error(error_details))
+
+    def _parse_http_error(self, provider_name: str, status_code: int, response) -> str:
+        """解析 HTTP 错误为友好提示"""
+        try:
+            error_data = response.json()
+            detail = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
+        except:
+            detail = ""
+
+        if status_code == 400:
+            if "invalid" in detail.lower() or "api" in detail.lower():
+                return f"{provider_name} API 密钥无效或已过期"
+            return f"{provider_name} 请求参数错误"
+        elif status_code == 401:
+            return f"{provider_name} 认证失败，请检查 API 密钥"
+        elif status_code == 403:
+            return f"{provider_name} 无权限访问，请检查账户状态"
+        elif status_code == 429:
+            return f"{provider_name} 请求过于频繁，请稍后重试"
+        elif status_code == 500:
+            return f"{provider_name} 服务器错误，请稍后重试"
+        elif status_code == 503:
+            return f"{provider_name} 服务暂时不可用"
+        else:
+            return f"{provider_name} 调用失败 (HTTP {status_code})"
+
+    def _build_friendly_error(self, error_details: List[Dict]) -> str:
+        """构建友好的错误提示"""
+        if not error_details:
+            return "AI 服务调用失败，请稍后重试"
+
+        # 统计错误类型
+        auth_errors = [e for e in error_details if "认证" in e["error"] or "密钥" in e["error"]]
+        rate_errors = [e for e in error_details if "频繁" in e["error"]]
+        server_errors = [e for e in error_details if "服务器" in e["error"] or "不可用" in e["error"]]
+
+        if len(auth_errors) == len(error_details):
+            return "所有 AI 模型的 API 密钥配置有误，请前往管理后台检查配置"
+        elif len(rate_errors) > 0:
+            return "AI 服务请求过于频繁，请稍后重试"
+        elif len(server_errors) > 0:
+            return "AI 服务暂时不可用，请稍后重试"
+        else:
+            # 返回第一个错误的详细信息
+            return f"AI 调用失败：{error_details[0]['error']}"
+
+    def call_with_function_calling(
+        self,
+        messages: List[Dict[str, str]],
+        tools: List[Dict[str, Any]],
+        preferred_provider: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """调用支持 Function Calling 的 AI 模型"""
+        # 优先使用支持 Function Calling 的模型
+        fc_providers = ["deepseek", "chatglm", "qwen"]
+
+        providers = list(self._providers.keys())
+
+        # 重新排序：优先使用 FC 支持的模型
+        if preferred_provider and preferred_provider in providers:
+            providers = [preferred_provider] + [p for p in providers if p != preferred_provider]
+        else:
+            # 将支持 FC 的模型放在前面
+            fc_available = [p for p in fc_providers if p in providers]
+            other_providers = [p for p in providers if p not in fc_providers]
+            providers = fc_available + other_providers
+
+        if not providers:
+            raise ValueError("未配置任何可用模型")
+
+        last_error = None
+        for provider_name in providers:
+            try:
+                provider = self._providers[provider_name]
+                default_params = self._provider_params.get(provider_name, {})
+
+                # 构建 Function Calling 请求
+                # 注意：这里需要使用原始的 HTTP 调用，因为不同模型的 FC 格式可能不同
+                # 为简化实现，我们使用统一的 OpenAI 格式
+
+                # 如果 provider 支持 Function Calling，直接调用
+                if hasattr(provider, 'call_with_tools'):
+                    result = provider.call_with_tools(messages, tools, **kwargs)
+                else:
+                    # 降级：使用标准调用 + 工具描述
+                    logger.warning(f"{provider_name} 不支持原生 Function Calling，降级到 ReAct")
+                    raise Exception(f"{provider_name} 不支持 Function Calling")
+
+                result["provider"] = provider_name
+                logger.info(f"Function Calling 调用成功: {provider_name}")
+                return result
+
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Function Calling 调用失败: {provider_name}, 错误: {e}")
+                continue
+
         # 所有提供商都失败
-        raise Exception(f"所有AI提供商调用失败，最后错误: {last_error}")
+        raise Exception(f"所有 Function Calling 提供商调用失败，最后错误: {last_error}")
 
     def build_provider_from_config(
         self, config

@@ -75,7 +75,7 @@ function Navbar() {
               <Link to="/dashboard" className={navLinkClass('/dashboard')}>
                 首页
               </Link>
-              <Link to="/ai" className={navLinkClass('/ai')}>
+              <Link to="/agent" className={navLinkClass('/agent')}>
                 AI助手
               </Link>
               <Link
@@ -186,10 +186,10 @@ function Navbar() {
                 首页
               </Link>
               <Link
-                to="/ai"
+                to="/agent"
                 onClick={() => setMobileMenuOpen(false)}
                 className={`block px-3 py-2 rounded-lg text-base font-medium ${
-                  location.pathname === '/ai'
+                  location.pathname === '/agent'
                     ? isDark
                       ? 'bg-white/10 text-white'
                       : 'bg-blue-50 text-primary'

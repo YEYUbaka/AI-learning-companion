@@ -14,7 +14,8 @@ if sys.platform == 'win32':
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import auth, ai, files, plan, quiz, analytics, admin, learning_map, chat
+from routers import auth, ai, files, plan, quiz, analytics, admin, learning_map, chat, agent
+from routers import agent_stream
 from core.logger import logger, log_file, error_log_file
 from core.security_middleware import SecurityMiddleware
 
@@ -173,7 +174,7 @@ async def startup_event():
     try:
         # 导入所有模型，确保表被创建
         from models import users, quizzes, study_plans, prompt, model_config, learning_map, chat_sessions  # noqa: F401
-        from models import quiz_paper  # noqa: F401
+        from models import quiz_paper, agent_session  # noqa: F401
         logger.info("开始创建数据库表...")
         Base.metadata.create_all(bind=engine)
         print("✅ 数据库表创建成功")
@@ -239,6 +240,8 @@ app.include_router(analytics.router)
 app.include_router(admin.router)
 app.include_router(learning_map.router)
 app.include_router(chat.router)
+app.include_router(agent.router)
+app.include_router(agent_stream.router)  # Agent 流式输出路由
 
 
 # 根路由

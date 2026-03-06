@@ -3,7 +3,7 @@
  * 作者：智学伴开发团队
  * 目的：管理AI模型配置
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import AdminLayout from '../../components/AdminLayout';
 import api, { testModelCall } from '../../api/apiClient';
 import { useThemeStore } from '../../store/themeStore';
@@ -13,7 +13,8 @@ const ModelManagement = () => {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingModel, setEditingModel] = useState(null);
-  const [testResult, setTestResult] = useState(null);
+  const [testResults, setTestResults] = useState({});
+  const [testingAll, setTestingAll] = useState(false);
   const [formData, setFormData] = useState({
     provider_name: '',
     api_key: '',
@@ -23,59 +24,12 @@ const ModelManagement = () => {
     params: {},
   });
 
-  useEffect(() => {
-    fetchModels();
-  }, []);
-
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
 
-  const palette = useMemo(
-    () =>
-      isDark
-        ? {
-            heading: 'text-white',
-            buttonPrimary:
-              'px-4 py-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-lg shadow-lg shadow-cyan-900/40 hover:shadow-cyan-900/60',
-            buttonSecondary:
-              'px-4 py-2 bg-white/10 text-white rounded-lg border border-white/20 hover:bg-white/20',
-            alertSuccess: 'mb-6 p-4 rounded-lg bg-emerald-500/10 border border-emerald-400/40 text-white',
-            alertError: 'mb-6 p-4 rounded-lg bg-red-500/10 border border-red-400/40 text-red-100',
-            formCard: 'mb-6 bg-[#111a2f] rounded-2xl shadow-2xl border border-white/10 p-6 text-white',
-            input:
-              'w-full px-3 py-2 rounded-xl bg-[#0f172a] border border-white/10 text-white placeholder:text-white/40 focus:ring-2 focus:ring-cyan-400 focus:border-transparent',
-            checkboxLabel: 'text-sm text-white/70',
-            tableCard: 'bg-[#101629] rounded-2xl shadow-2xl border border-white/10 overflow-hidden',
-            tableHead: 'bg-white/5 text-white/60',
-            tableText: 'text-white/80',
-            badgeEnabled: 'bg-emerald-500/15 text-emerald-200',
-            badgeDisabled: 'bg-white/10 text-white/60',
-            linkPrimary: 'text-cyan-300 hover:text-white',
-            linkEdit: 'text-emerald-300 hover:text-white',
-            linkDelete: 'text-red-300 hover:text-red-100',
-            empty: 'text-white/60',
-          }
-        : {
-            heading: 'text-gray-800',
-            buttonPrimary: 'px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700',
-            buttonSecondary: 'px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300',
-            alertSuccess: 'mb-6 p-4 rounded-lg bg-green-50 border border-green-200',
-            alertError: 'mb-6 p-4 rounded-lg bg-red-50 border border-red-200',
-            formCard: 'mb-6 bg-white rounded-xl shadow-sm p-6 border border-gray-100',
-            input: 'w-full px-3 py-2 border border-gray-300 rounded-lg',
-            checkboxLabel: 'text-sm text-gray-700',
-            tableCard: 'bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden',
-            tableHead: 'bg-gray-50 text-gray-500',
-            tableText: 'text-gray-700',
-            badgeEnabled: 'bg-green-100 text-green-800',
-            badgeDisabled: 'bg-gray-100 text-gray-800',
-            linkPrimary: 'text-blue-600 hover:text-blue-800',
-            linkEdit: 'text-green-600 hover:text-green-800',
-            linkDelete: 'text-red-600 hover:text-red-800',
-            empty: 'text-gray-500',
-          },
-    [isDark]
-  );
+  useEffect(() => {
+    fetchModels();
+  }, []);
 
   const fetchModels = async () => {
     try {
@@ -116,7 +70,7 @@ const ModelManagement = () => {
     setEditingModel(model);
     setFormData({
       provider_name: model.provider_name,
-      api_key: '', // 不显示已加密的密钥
+      api_key: '',
       base_url: model.base_url || '',
       priority: model.priority,
       enabled: model.enabled,
@@ -136,143 +90,165 @@ const ModelManagement = () => {
   };
 
   const handleTest = async (providerName) => {
-    const testPrompt = prompt('请输入测试提示词:', '你好，请介绍一下你自己');
-    if (!testPrompt) return;
+    const testPrompt = '你好，请用一句话介绍你自己';
 
     try {
-      setTestResult({ loading: true });
+      setTestResults(prev => ({ ...prev, [providerName]: { loading: true } }));
       const response = await testModelCall(providerName, testPrompt);
-      setTestResult(response.data);
+      setTestResults(prev => ({ ...prev, [providerName]: response.data }));
     } catch (error) {
-      setTestResult({
-        success: false,
-        error: error.response?.data?.detail || error.message,
-      });
+      setTestResults(prev => ({
+        ...prev,
+        [providerName]: {
+          success: false,
+          error: error.response?.data?.detail || error.message,
+        }
+      }));
     }
+  };
+
+  const handleTestAll = async () => {
+    setTestingAll(true);
+    setTestResults({});
+
+    for (const model of models.filter(m => m.enabled)) {
+      await handleTest(model.provider_name);
+      // 添加延迟避免请求过快
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    setTestingAll(false);
   };
 
   return (
     <AdminLayout>
       <div>
-        <div className="flex justify-between items-center mb-6">
-          <h2 className={`text-2xl font-bold ${palette.heading}`}>模型管理</h2>
-          <button
-            onClick={() => {
-              setShowForm(true);
-              setEditingModel(null);
-              setFormData({
-                provider_name: '',
-                api_key: '',
-                base_url: '',
-                priority: 0,
-                enabled: true,
-                params: {},
-              });
-            }}
-            className={palette.buttonPrimary}
-          >
-            添加模型
-          </button>
-        </div>
-
-        {/* 测试结果 */}
-        {testResult && (
-          <div className={testResult.success ? palette.alertSuccess : palette.alertError}>
-            <h3 className="font-semibold mb-2">测试结果</h3>
-            {testResult.loading ? (
-              <p>测试中...</p>
-            ) : testResult.success ? (
-              <div>
-                <p className={`text-sm ${palette.tableText}`}>提供商: {testResult.provider}</p>
-                <p className={`text-sm ${palette.tableText}`}>延迟: {testResult.latency_ms?.toFixed(2)}ms</p>
-                <p className={`text-sm ${palette.tableText} mt-2`}>原始响应:</p>
-                <pre className="bg-black/20 p-2 rounded text-xs overflow-auto max-h-32">
-                  {testResult.raw_response}
-                </pre>
-                <p className={`text-sm ${palette.tableText} mt-2`}>清理后:</p>
-                <pre className="bg-black/20 p-2 rounded text-xs overflow-auto max-h-32">
-                  {testResult.cleaned_text}
-                </pre>
-              </div>
-            ) : (
-              <p className="text-sm">错误: {testResult.error}</p>
-            )}
+        {/* 顶部操作栏 */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <h2 className={`text-2xl font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            模型管理
+          </h2>
+          <div className="flex gap-3">
             <button
-              onClick={() => setTestResult(null)}
-              className={`mt-2 text-sm ${palette.tableText} hover:text-white`}
+              onClick={handleTestAll}
+              disabled={testingAll || models.filter(m => m.enabled).length === 0}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                isDark
+                  ? 'bg-purple-600 text-white hover:bg-purple-700 disabled:bg-slate-700 disabled:text-slate-500'
+                  : 'bg-purple-600 text-white hover:bg-purple-700 disabled:bg-gray-200 disabled:text-gray-400'
+              }`}
             >
-              关闭
+              {testingAll ? '测试中...' : '一键测试所有模型'}
+            </button>
+            <button
+              onClick={() => {
+                setShowForm(true);
+                setEditingModel(null);
+                setFormData({
+                  provider_name: '',
+                  api_key: '',
+                  base_url: '',
+                  priority: 0,
+                  enabled: true,
+                  params: {},
+                });
+              }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                isDark
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+            >
+              添加模型
             </button>
           </div>
-        )}
+        </div>
 
         {/* 表单 */}
         {showForm && (
-          <div className={palette.formCard}>
-            <h3 className="text-lg font-semibold mb-4">
+          <div className={`mb-6 rounded-lg p-6 border ${
+            isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'
+          }`}>
+            <h3 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
               {editingModel ? '编辑模型' : '添加模型'}
             </h3>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
                   提供商名称
                 </label>
                 <input
                   type="text"
                   value={formData.provider_name}
                   onChange={(e) => setFormData({ ...formData, provider_name: e.target.value })}
-                  className={palette.input}
+                  className={`w-full px-3 py-2 rounded-lg border ${
+                    isDark
+                      ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400'
+                      : 'bg-white border-gray-300 text-gray-900'
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500`}
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
                   API密钥
                 </label>
                 <input
                   type="password"
                   value={formData.api_key}
                   onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                  className={palette.input}
+                  className={`w-full px-3 py-2 rounded-lg border ${
+                    isDark
+                      ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400'
+                      : 'bg-white border-gray-300 text-gray-900'
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500`}
                   placeholder={editingModel ? '留空则不更新' : '请输入API密钥'}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
                   Base URL
                 </label>
                 <input
                   type="text"
                   value={formData.base_url}
                   onChange={(e) => setFormData({ ...formData, base_url: e.target.value })}
-                  className={palette.input}
+                  className={`w-full px-3 py-2 rounded-lg border ${
+                    isDark
+                      ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400'
+                      : 'bg-white border-gray-300 text-gray-900'
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500`}
                   placeholder="可选，使用默认URL"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
                   优先级
                 </label>
                 <input
                   type="number"
                   value={formData.priority}
                   onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) })}
-                  className={palette.input}
+                  className={`w-full px-3 py-2 rounded-lg border ${
+                    isDark
+                      ? 'bg-slate-700 border-slate-600 text-white'
+                      : 'bg-white border-gray-300 text-gray-900'
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500`}
                 />
               </div>
-              <div className="flex items-center">
+          <div className="flex items-center">
                 <input
                   type="checkbox"
                   checked={formData.enabled}
                   onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
-                  className="mr-2"
+                  className="mr-2 w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
                 />
-                <label className={palette.checkboxLabel}>启用</label>
+                <label className={`text-sm ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>启用</label>
               </div>
-              <div className="flex space-x-2">
+              <div className="flex gap-3">
                 <button
                   type="submit"
-                  className={palette.buttonPrimary}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
                 >
                   保存
                 </button>
@@ -282,7 +258,11 @@ const ModelManagement = () => {
                     setShowForm(false);
                     setEditingModel(null);
                   }}
-                  className={palette.buttonSecondary}
+                  className={`px-4 py-2 rounded-lg transition ${
+                    isDark
+                      ? 'bg-slate-700 text-white hover:bg-slate-600'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
                 >
                   取消
                 </button>
@@ -291,65 +271,126 @@ const ModelManagement = () => {
           </div>
         )}
 
-        {/* 模型列表 */}
+        {/* 模型卡片列表 */}
         {loading ? (
-          <div className={`text-center py-8 ${palette.empty}`}>加载中...</div>
+          <div className={`text-center py-12 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+            加载中...
+          </div>
+        ) : models.length === 0 ? (
+          <div className={`text-center py-12 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+            暂无模型配置
+          </div>
         ) : (
-          <div className={palette.tableCard}>
-            <table className="w-full">
-              <thead className={palette.tableHead}>
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase">提供商</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase">Base URL</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase">优先级</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase">状态</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase">操作</th>
-                </tr>
-              </thead>
-              <tbody className={`divide-y ${isDark ? 'divide-white/10' : 'divide-gray-200'}`}>
-                {models.map((model) => (
-                  <tr key={model.id}>
-                    <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${palette.tableText}`}>
-                      {model.provider_name}
-                    </td>
-                    <td className={`px-6 py-4 text-sm ${palette.tableText}`}>
-                      {model.base_url || '默认'}
-                    </td>
-                    <td className={`px-6 py-4 text-sm ${palette.tableText}`}>{model.priority}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        model.enabled ? palette.badgeEnabled : palette.badgeDisabled
-                      }`}>
-                        {model.enabled ? '启用' : '禁用'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
-                      <button
-                        onClick={() => handleTest(model.provider_name)}
-                        className={palette.linkPrimary}
-                      >
-                        测试
-                      </button>
-                      <button
-                        onClick={() => handleEdit(model)}
-                        className={palette.linkEdit}
-                      >
-                        编辑
-                      </button>
-                      <button
-                        onClick={() => handleDelete(model.id)}
-                        className={palette.linkDelete}
-                      >
-                        删除
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {models.length === 0 && (
-              <div className={`text-center py-8 ${palette.empty}`}>暂无模型配置</div>
-            )}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {models.map((model) => {
+              const testResult = testResults[model.provider_name];
+              return (
+                <div
+                  key={model.id}
+                  className={`rounded-lg p-6 border transition ${
+                    isDark
+                      ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
+                      : 'bg-white border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  {/* 卡片头部 */}
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                          {model.provider_name}
+                        </h3>
+                        <span className={`px-2 py-1 text-xs rounded-full ${
+                          model.enabled
+                            ? isDark
+                              ? 'bg-green-500/20 text-green-300'
+                              : 'bg-green-100 text-green-800'
+                            : isDark
+                            ? 'bg-slate-700 text-slate-400'
+                            : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {model.enabled ? '启用' : '禁用'}
+                        </span>
+                      </div>
+                      <div className={`text-sm space-y-1 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
+                        <p>Base URL: {model.base_url || '默认'}</p>
+                        <p>优先级: {model.priority}</p>
+                      </div>
+                    </div>
+                    <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+                      <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                  </div>
+
+                  {/* 测试结果 */}
+                  {testResult && (
+                    <div className={`mb-4 p-3 rounded-lg text-sm ${
+                      testResult.loading
+                        ? isDark ? 'bg-blue-500/10 border border-blue-500/30' : 'bg-blue-50 border border-blue-200'
+                        : testResult.success
+                        ? isDark ? 'bg-green-500/10 border border-green-500/30' : 'bg-green-50 border border-green-200'
+                        : isDark ? 'bg-red-500/10 border border-red-500/30' : 'bg-red-50 border border-red-200'
+                    }`}>
+                      {testResult.loading ? (
+                        <p className={isDark ? 'text-blue-300' : 'text-blue-700'}>测试中...</p>
+                      ) : testResult.success ? (
+                        <div className={isDark ? 'text-green-300' : 'text-green-700'}>
+                          <p className="font-medium mb-1">测试成功</p>
+                          <p className={`text-xs ${isDark ? 'text-green-400' : 'text-green-600'}`}>
+                            延迟: {testResult.latency_ms?.toFixed(0)}ms
+                          </p>
+                          <p className={`mt-2 text-xs ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
+                            {testResult.cleaned_text?.substring(0, 100)}...
+                          </p>
+                        </div>
+                      ) : (
+                        <div className={isDark ? 'text-red-300' : 'text-red-700'}>
+                          <p className="font-medium mb-1">测试失败</p>
+                   <p className="text-xs">{testResult.error}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 操作按钮 */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleTest(model.provider_name)}
+                      disabled={testResult?.loading}
+                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition ${
+                        isDark
+                          ? 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-700 disabled:text-slate-500'
+                          : 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400'
+                      }`}
+                    >
+                      测试
+                    </button>
+                    <button
+                      onClick={() => handleEdit(model)}
+                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition ${
+                        isDark
+                          ? 'bg-slate-700 text-white hover:bg-slate-600'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      编辑
+                    </button>
+                    <button
+                      onClick={() => handleDelete(model.id)}
+                      className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+                        isDark
+                          ? 'bg-red-600/20 text-red-300 hover:bg-red-600/30'
+                          : 'bg-red-50 text-red-600 hover:bg-red-100'
+                      }`}
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -358,4 +399,3 @@ const ModelManagement = () => {
 };
 
 export default ModelManagement;
-

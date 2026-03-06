@@ -205,3 +205,18 @@ npm run build  # 生产构建
   - 统一使用纯色设计（暗色：slate-900/800，亮色：gray-50/white）
   - 重构 Login、Register、Dashboard、AIChat、StudyPlan、LearningMap、Quiz 等主要页面
   - 批量处理管理后台页面
+
+### 2026-03-06
+- 修复 Agent 系统核心问题：
+  - 实现响应去重机制（80% 相似度检测）
+  - 解决"只说不做"问题（降低 Temperature 至 0.1，添加关键词触发规则）
+  - 修复搜索功能（升级 duckduckgo-search → ddgs 9.8.0）
+  - 确保搜索结果返回可点击的 Markdown 链接
+  - 添加关键词强制检测机制 `_detect_keyword_and_hint()`，解决 AI 调用错误工具的问题
+  - 修复 `build_learning_map` 工具：修正静态类调用方式、参数映射（`content`→`course_topic`）、返回值处理
+  - 修复前端 `execution_time_ms` 空值显示问题
+- 关键文件：
+  - `backend/services/agent_executor.py`：核心执行引擎，含去重机制和关键词检测
+  - `backend/utils/agent_tools.py`：工具定义和实现
+  - `frontend/src/components/AgentStepViewer.jsx`：步骤展示组件，支持 Markdown 渲染
+- 测试结果：搜索、学习计划、知识图谱功能均正常

@@ -8,6 +8,7 @@ from .prompt import Prompt
 from .model_config import ModelConfig
 from .api_call_log import APICallLog
 from .learning_map import LearningMapFile, LearningNode, LearningEdge
+from .agent_session import AgentSession, AgentStep, AgentToolCall
 
 __all__ = [
     "User",
@@ -19,4 +20,7 @@ __all__ = [
     "LearningMapFile",
     "LearningNode",
     "LearningEdge",
+    "AgentSession",
+    "AgentStep",
+    "AgentToolCall",
 ]

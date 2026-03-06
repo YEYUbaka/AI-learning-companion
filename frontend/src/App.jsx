@@ -2,7 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'r
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import AIChat from './pages/AIChat';
+import AgentChat from './pages/AgentChat';
 import UploadFile from './pages/UploadFile';
 import StudyPlan from './pages/StudyPlan';
 import Quiz from './pages/Quiz';
@@ -58,9 +58,13 @@ const AppContent = () => {
         />
         <Route
           path="/ai"
+          element={<Navigate to="/agent" replace />}
+        />
+        <Route
+          path="/agent"
           element={
             <ProtectedRoute>
-              <AIChat />
+              <AgentChat />
             </ProtectedRoute>
           }
         />
