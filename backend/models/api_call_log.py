@@ -15,7 +15,7 @@ class APICallLog(Base):
     provider = Column(String(64), nullable=True)
     source = Column(String(32), nullable=False, default="user")  # user/admin_test等
     success = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
 
 
 __all__ = ["APICallLog"]

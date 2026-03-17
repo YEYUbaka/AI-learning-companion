@@ -14,8 +14,8 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """应用配置类"""
     
-    # 数据库配置
-    DATABASE_URL: str = "sqlite:///./zhixueban.db"
+    # 数据库配置（默认 MySQL，通过 .env 配置）
+    DATABASE_URL: str = "mysql+pymysql://root:password@localhost:3306/zhixueban?charset=utf8mb4"
     
     # JWT配置
     SECRET_KEY: str = "your-secret-key-change-in-production-please-use-strong-random-key"
@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     PROMPT_SEED_PATH: Optional[str] = None
     MODEL_CONFIG_SEED_JSON: Optional[str] = None
     MODEL_CONFIG_SEED_PATH: Optional[str] = None
+
+    # 知识库配置
+    KNOWLEDGE_BASE_DIR: str = "knowledge_base"
+    CHROMA_DB_DIR: str = "knowledge_base/_index"
     
     class Config:
         env_file = ".env"

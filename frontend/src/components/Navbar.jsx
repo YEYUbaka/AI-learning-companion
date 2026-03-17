@@ -1,35 +1,130 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useThemeStore } from '../store/themeStore';
+
+const SunIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+      d="M12 3v1m0 16v1m8.66-9H21M3 12H2m15.07-6.07l-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M12 5a7 7 0 100 14A7 7 0 0012 5z" />
+  </svg>
+);
+
+const MoonIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+      d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+  </svg>
+);
+
+const MonitorIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+      d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+  </svg>
+);
+
+const THEME_OPTIONS = [
+  { key: 'light', label: '浅色模式', sub: '始终使用浅色主题', Icon: SunIcon },
+  { key: 'dark',  label: '深色模式', sub: '始终使用深色主题', Icon: MoonIcon },
+  { key: 'auto',  label: '自动模式', sub: '跟随系统主题设置', Icon: MonitorIcon },
+];
+
+function ThemeDropdown({ isDark, mode, setMode, theme }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const CurrentIcon = mode === 'light' ? SunIcon : mode === 'dark' ? MoonIcon : MonitorIcon;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={`p-2 rounded-lg border transition-colors ${
+          isDark
+            ? 'bg-white/5 text-white border-white/15 hover:bg-white/10'
+            : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
+        }`}
+        title="切换主题"
+      >
+        <CurrentIcon />
+      </button>
+
+      {open && (
+        <div className={`absolute right-0 top-full mt-2 w-52 rounded-xl border shadow-lg z-[60] overflow-hidden ${
+          isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'
+        }`}>
+          {THEME_OPTIONS.map(({ key, label, sub, Icon }) => (
+            <button
+              key={key}
+              onClick={() => { setMode(key); setOpen(false); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                mode === key
+                  ? isDark
+                    ? 'bg-blue-900/30 text-blue-400'
+                    : 'bg-blue-50 text-blue-600'
+                  : isDark
+                  ? 'text-slate-300 hover:bg-slate-700/60'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <span className="flex-shrink-0"><Icon /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium leading-tight">{label}</div>
+                <div className={`text-xs mt-0.5 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{sub}</div>
+              </div>
+              {mode === key && (
+                <span className="flex-shrink-0 ml-1"><CheckIcon /></span>
+              )}
+            </button>
+          ))}
+          {mode === 'auto' && (
+            <div className={`px-4 py-2 border-t text-xs ${
+              isDark ? 'border-slate-700 text-slate-500' : 'border-gray-100 text-gray-400'
+            }`}>
+              当前跟随系统：{theme === 'dark' ? '深色' : '浅色'}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { theme, toggleTheme } = useThemeStore();
+  const { theme, mode, setMode } = useThemeStore();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isDark = theme === 'dark';
-  const storedUser =
-    sessionStorage.getItem('userInfo') || localStorage.getItem('userInfo');
   let userInfo = {};
   try {
-    userInfo = storedUser ? JSON.parse(storedUser) : {};
+    userInfo = JSON.parse(sessionStorage.getItem('userInfo') || '{}');
   } catch {
     userInfo = {};
   }
-  const isAdmin =
-    userInfo?.role === 'admin' || userInfo?.email?.toLowerCase().startsWith('admin');
+  const isAdmin = userInfo?.role === 'admin';
 
-  // 如果在登录或注册页面，不显示导航栏
   if (location.pathname === '/login' || location.pathname === '/register') {
     return null;
   }
 
   const handleLogout = () => {
-    // 清除所有存储的认证信息
     sessionStorage.removeItem('token');
     sessionStorage.removeItem('userInfo');
-    localStorage.removeItem('token');
-    localStorage.removeItem('userInfo');
     navigate('/login');
   };
 
@@ -76,21 +171,15 @@ function Navbar() {
                 首页
               </Link>
               <Link to="/agent" className={navLinkClass('/agent')}>
-                AI助手
+                智学助手
               </Link>
-              <Link
-                to="/study-plan"
-                className={navLinkClass('/study-plan')}
-              >
+              <Link to="/study-plan" className={navLinkClass('/study-plan')}>
                 学习计划
               </Link>
               <Link to="/quiz" className={navLinkClass('/quiz')}>
                 AI测评
               </Link>
-              <Link
-                to="/learning-map"
-                className={navLinkClass('/learning-map')}
-              >
+              <Link to="/learning-map" className={navLinkClass('/learning-map')}>
                 知识图谱
               </Link>
               {isAdmin && (
@@ -101,18 +190,9 @@ function Navbar() {
             </div>
           </div>
 
-          {/* 桌面端用户信息与退出按钮 */}
+          {/* 桌面端用户信息与按钮 */}
           <div className="hidden sm:flex items-center space-x-2 lg:space-x-4">
-            <button
-              onClick={toggleTheme}
-              className={`px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-medium border transition ${
-                isDark
-                  ? 'bg-white/5 text-white border-white/15 hover:bg-white/10'
-                  : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
-              }`}
-            >
-              {isDark ? '日间' : '夜间'}
-            </button>
+            <ThemeDropdown isDark={isDark} mode={mode} setMode={setMode} theme={theme} />
             <div className="text-right hidden lg:block">
               <p className={`text-xs sm:text-sm font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
                 {userInfo?.name || userInfo?.nickname || userInfo?.email || '学习者'}
@@ -135,16 +215,7 @@ function Navbar() {
 
           {/* 移动端菜单按钮 */}
           <div className="flex sm:hidden items-center space-x-2">
-            <button
-              onClick={toggleTheme}
-              className={`px-2 py-1.5 rounded-lg text-xs font-medium border ${
-                isDark
-                  ? 'bg-white/5 text-white border-white/15'
-                  : 'bg-gray-100 text-gray-700 border-gray-200'
-              }`}
-            >
-              {isDark ? '日间' : '夜间'}
-            </button>
+            <ThemeDropdown isDark={isDark} mode={mode} setMode={setMode} theme={theme} />
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className={`p-2 rounded-lg ${
@@ -175,12 +246,8 @@ function Navbar() {
                 onClick={() => setMobileMenuOpen(false)}
                 className={`block px-3 py-2 rounded-lg text-base font-medium ${
                   location.pathname === '/dashboard'
-                    ? isDark
-                      ? 'bg-white/10 text-white'
-                      : 'bg-blue-50 text-primary'
-                    : isDark
-                    ? 'text-white/70 hover:bg-white/5'
-                    : 'text-gray-700 hover:bg-gray-50'
+                    ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
+                    : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >
                 首页
@@ -190,27 +257,19 @@ function Navbar() {
                 onClick={() => setMobileMenuOpen(false)}
                 className={`block px-3 py-2 rounded-lg text-base font-medium ${
                   location.pathname === '/agent'
-                    ? isDark
-                      ? 'bg-white/10 text-white'
-                      : 'bg-blue-50 text-primary'
-                    : isDark
-                    ? 'text-white/70 hover:bg-white/5'
-                    : 'text-gray-700 hover:bg-gray-50'
+                    ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
+                    : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >
-                AI助手
+                智学助手
               </Link>
               <Link
                 to="/study-plan"
                 onClick={() => setMobileMenuOpen(false)}
                 className={`block px-3 py-2 rounded-lg text-base font-medium ${
                   location.pathname === '/study-plan' || location.pathname === '/upload-file'
-                    ? isDark
-                      ? 'bg-white/10 text-white'
-                      : 'bg-blue-50 text-primary'
-                    : isDark
-                    ? 'text-white/70 hover:bg-white/5'
-                    : 'text-gray-700 hover:bg-gray-50'
+                    ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
+                    : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >
                 学习计划
@@ -220,12 +279,8 @@ function Navbar() {
                 onClick={() => setMobileMenuOpen(false)}
                 className={`block px-3 py-2 rounded-lg text-base font-medium ${
                   location.pathname === '/quiz' || location.pathname === '/quiz-result'
-                    ? isDark
-                      ? 'bg-white/10 text-white'
-                      : 'bg-blue-50 text-primary'
-                    : isDark
-                    ? 'text-white/70 hover:bg-white/5'
-                    : 'text-gray-700 hover:bg-gray-50'
+                    ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
+                    : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >
                 AI测评
@@ -235,12 +290,8 @@ function Navbar() {
                 onClick={() => setMobileMenuOpen(false)}
                 className={`block px-3 py-2 rounded-lg text-base font-medium ${
                   location.pathname === '/learning-map'
-                    ? isDark
-                      ? 'bg-white/10 text-white'
-                      : 'bg-blue-50 text-primary'
-                    : isDark
-                    ? 'text-white/70 hover:bg-white/5'
-                    : 'text-gray-700 hover:bg-gray-50'
+                    ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
+                    : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >
                 知识图谱
@@ -251,12 +302,8 @@ function Navbar() {
                   onClick={() => setMobileMenuOpen(false)}
                   className={`block px-3 py-2 rounded-lg text-base font-medium ${
                     location.pathname.startsWith('/admin')
-                      ? isDark
-                        ? 'bg-white/10 text-white'
-                        : 'bg-blue-50 text-primary'
-                      : isDark
-                      ? 'text-white/70 hover:bg-white/5'
-                      : 'text-gray-700 hover:bg-gray-50'
+                      ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
+                      : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
                   }`}
                 >
                   管理后台
@@ -272,15 +319,8 @@ function Navbar() {
                   )}
                 </div>
                 <button
-                  onClick={() => {
-                    handleLogout();
-                    setMobileMenuOpen(false);
-                  }}
-                  className={`w-full mt-2 px-3 py-2 text-sm font-medium rounded-lg ${
-                    isDark
-                      ? 'text-white bg-red-600 hover:bg-red-700'
-                      : 'text-white bg-red-600 hover:bg-red-700'
-                  }`}
+                  onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
+                  className="w-full mt-2 px-3 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700"
                 >
                   退出登录
                 </button>
@@ -294,4 +334,3 @@ function Navbar() {
 }
 
 export default Navbar;
-

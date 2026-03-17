@@ -280,7 +280,7 @@ Action Input: {"topic": "Python基础", "num_questions": 5, "difficulty": "mediu
 - build_learning_map: 构建知识图谱（参数：content, title）
 - web_search: 网络搜索（参数：query, max_results）
 - parse_file: 解析文件（参数：file_path）- 仅当用户明确上传文件时使用
-- search_knowledge: 搜索知识库（参数：query）
+- search_knowledge: 语义搜索本地知识库（参数：query, limit, grade_level, subject）
 
 【关键词触发规则 - 必须严格遵守】
 ⚠️ 当用户输入包含以下关键词时，必须调用对应工具，禁止直接回答：
@@ -296,6 +296,9 @@ Action Input: {"topic": "Python基础", "num_questions": 5, "difficulty": "mediu
 
 4. "知识图谱"、"知识结构"、"思维导图" → 必须调用 build_learning_map
    示例：用户说"画个知识图谱" → Action: build_learning_map
+
+5. "知识点"、"概念"、"定义"、"公式"、"原理"、"例题"、"真题"、"考点" → 必须先调用 search_knowledge
+   示例：用户说"分数加减法的知识点" → Action: search_knowledge
 
 ⚠️ 特别强调：
 - 用户说"搜索XX"时，绝对不能直接回答你知道的内容
@@ -386,6 +389,10 @@ D. 选项 D
         # 知识图谱关键词
         if any(kw in goal_lower for kw in ["知识图谱", "知识结构", "思维导图", "知识地图"]):
             return "⚠️ 检测到知识图谱关键词！你必须立即调用 build_learning_map 工具！\n\n"
+
+        # 知识点/概念关键词 → 先搜索本地知识库
+        if any(kw in goal_lower for kw in ["知识点", "概念", "定义", "公式", "原理", "解题方法", "例题", "真题", "考点"]):
+            return "⚠️ 检测到知识点查询关键词！你必须先调用 search_knowledge 工具搜索本地知识库，再结合结果作答！\n\n"
 
         return ""
 

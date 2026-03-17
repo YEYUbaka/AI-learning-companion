@@ -14,6 +14,7 @@ import PromptEditor from './pages/Admin/PromptEditor';
 import SystemConfig from './pages/Admin/SystemConfig';
 import UserManagement from './pages/Admin/UserManagement';
 import APICallLogs from './pages/Admin/APICallLogs';
+import KnowledgeAdmin from './pages/Admin/KnowledgeAdmin';
 import Navbar from './components/Navbar';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminProtectedRoute from './components/AdminProtectedRoute';
@@ -154,6 +155,14 @@ const AppContent = () => {
           element={
             <AdminProtectedRoute>
               <APICallLogs />
+            </AdminProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/knowledge"
+          element={
+            <AdminProtectedRoute>
+              <KnowledgeAdmin />
             </AdminProtectedRoute>
           }
         />

@@ -109,6 +109,9 @@ documents/参赛文件夹/*.mp4
 # 项目特定
 backend/test_*.pdf
 backend/test_*.py
+
+# RAG 知识库索引（运行时生成）
+knowledge_base/_index/
 backend/*.md
 backend/快速*.py
 backend/测试*.py

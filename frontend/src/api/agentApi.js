@@ -51,9 +51,12 @@ const agentApi = {
    * @returns {EventSource} EventSource 实例
    */
   createTaskStream: (goal, mode, onMessage, onComplete, onError) => {
-    // 优先使用 sessionStorage，如果没有则使用 localStorage
-    const token = sessionStorage.getItem('token') || localStorage.getItem('token');
-    const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    const token = sessionStorage.getItem('token');
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol;
+    const baseURL = (hostname === 'localhost' || hostname === '127.0.0.1')
+      ? 'http://127.0.0.1:8000'
+      : `${protocol}//${hostname}:8000`;
 
     // 构建 URL（包含认证 token）
     const url = `${baseURL}/api/agent/task/stream`;

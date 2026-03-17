@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 cd backend
 python -m venv venv
 venv\Scripts\activate  # Windows
-uvicorn main:app --reload --port 8000
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 pytest  # 运行测试
 ```
 
@@ -60,10 +60,12 @@ npm run build  # 生产构建
 7. **品牌替换**: AI 返回含模型签名时，替换为："我是智学伴，一个由全国大学生计算机设计大赛参赛团队开发的 AI 学习助手，不属于任何商业AI公司。"
 
 ### 数据库规范
-- 使用 SQLite（默认）或 SQL Server
+- **唯一支持：MySQL**（不再支持 SQLite，仅测试环境使用内存 SQLite）
+- 连接字符串格式：`mysql+pymysql://root:password@localhost:3306/zhixueban?charset=utf8mb4`
 - 结构化字段使用 `Column(JSON)` 而非字符串
 - 密钥存储前调用 `core/security.encrypt_secret()`，读取时 `decrypt_secret()`
 - 开发模式使用 `Base.metadata.create_all(bind=engine)` 自动建表
+- DateTime 字段不带 timezone 参数（MySQL 兼容性）
 
 ### 文件解析
 统一在 `backend/utils/file_parser.py` 处理：
@@ -76,10 +78,28 @@ npm run build  # 生产构建
 ### 前端规范
 - **状态管理**: 使用 Zustand（`src/store/`）
 - **API 调用**: 统一通过 `src/api/apiClient.js`，自动注入 JWT header
+- **Token 存储**: 严格使用 sessionStorage，禁止 localStorage 存储 token/userInfo
+- **Admin 判断**: 仅通过 `userInfo.role === 'admin'` 判断，禁止 email 前缀检查
 - **Markdown 渲染**: 使用 `react-markdown` + `remark-gfm`
 - **图表**: 统一使用 Recharts
 - **知识图谱**: 使用 `react-force-graph-2d`
 - **组件拆分**: 避免 300+ 行巨型页面，拆分为小组件
+
+### RAG 知识库（可选功能）
+- 核心依赖在 `requirements-rag.txt`，与主项目分离
+- 安装：`pip install -r requirements-rag.txt`
+- 不安装时后端仍可正常启动，RAG 功能自动禁用
+- Torch CPU 版：`pip install torch --index-url https://download.pytorch.org/whl/cpu`
+
+### 技术栈变更规范（强制）
+
+每次引入新技术、框架或依赖时，必须同步更新：
+1. `CLAUDE.md` 的"架构规范"章节
+2. `README.md` 的技术栈描述
+3. `requirements.txt` 或 `package.json`
+4. `.env.example`（如有新环境变量）
+
+未同步文档的技术变更视为不完整，需在下次提交时补全。
 
 ## 关键模块
 
@@ -101,14 +121,15 @@ npm run build  # 生产构建
 
 ## 环境配置
 
-关键环境变量（`.env`）：
-- `DATABASE_URL`: 数据库连接
+关键环境变量（`.env`，参考 `.env.example`）：
+- `DATABASE_URL`: MySQL 连接字符串
 - `SECRET_KEY`: JWT 密钥（生产必改）
 - `ENCRYPTION_KEY`: API 密钥加密密钥
 - `DEFAULT_AI_PROVIDER`: 默认 AI 提供商
 - `AUTO_SYNC_SEED_DATA`: 是否自动同步种子数据（true/false）
-- `PROMPT_SEED_PATH`: Prompt 种子数据路径
-- `MODEL_CONFIG_SEED_PATH`: 模型配置种子数据路径V_NAME}` 占位符，启动时自动替换。
+- `PROMPT_SEED_PATH`: Prompt 种子数据路径（相对于 backend/ 目录）
+- `MODEL_CONFIG_SEED_PATH`: 模型配置种子数据路径
+- `VITE_ALLOWED_HOSTS`: Vite 开发服务器允许的域名（逗号分隔）
 
 ## 测试规范
 
@@ -122,7 +143,8 @@ npm run build  # 生产构建
 1. 所有敏感接口必须使用 JWT 认证
 2. Admin API 必须 `Depends(get_current_admin)`
 3. API keys 不写入代码，存入数据库（加密）或 `.env`
-4. 禁止前端保存密码或 Token 到 localStorage（仅 sessionStorage）
+4. **禁止前端保存密码或 Token 到 localStorage（仅 sessionStorage）**
+5. Admin 权限判断仅通过 `role === 'admin'`，禁止 email 前缀检查
 
 ## 代码风格
 
@@ -136,11 +158,10 @@ npm run build  # 生产构建
 ### 禁止使用的元素
 
 1. **Emoji 表情符号**
-   - [禁止] 代码中禁止使用任何 emoji（✅ ❌ 🚀 📝 等）
+   - [禁止] 代码中禁止使用任何 emoji（✅ ❌ 🚀 📝 等）(如有必要可以阿里巴巴的矢量图标库https://www.iconfont.cn/使用svg图标)
    - [禁止] 日志输出禁止使用 emoji
    - [禁止] 文档中避免使用 emoji（README 除外）
    - [允许] 使用文字标记：[OK]、[FAIL]、[INFO]、[WARNING]
-
 2. **AI 风格配色**
    - [禁止] 禁止使用渐变蓝紫色（blue-purple gradient）
    - [禁止] 禁止使用磨砂效果（backdrop-blur、glassmorphism）
@@ -150,12 +171,16 @@ npm run build  # 生产构建
 ### 推荐的设计风格
 
 **配色方案**：
+
+- 网站应该采用一种统一的配色方案，最多不超过四种颜色。使用过多的颜色会使网站显得杂乱无章。建议遵循 60-30-10 设计规则：使用 60% 的主色、30% 的辅助色和 10% 的强调色
+
 - 主色调：专业蓝（#2563eb）、深灰（#1e293b）
 - 辅助色：绿色（成功）、红色（错误）、橙色（警告）
 - 背景：纯白/浅灰（亮色模式）、深灰/黑色（暗色模式）
 - 避免：渐变背景、过度阴影、透明模糊
 
 **参考项目**：
+
 - GitHub、GitLab（代码托管平台）
 - Notion、Linear（生产力工具）
 - Stripe、Vercel（开发者平台）
@@ -192,7 +217,7 @@ npm run build  # 生产构建
 
 1. **Windows 路径**: 使用完整绝对路径（带盘符和反斜杠）
 2. **中文支持**: 所有文件使用 UTF-8 编码
-3. **SQL Server**: 需要 ODBC Driver for SQL Server
+3. **数据库**: 必须使用 MySQL，确保服务已启动
 4. **种子数据**: 修改 `.env` 或 JSON 后重启后端自动同步
 
 ## 修改记录
@@ -220,3 +245,28 @@ npm run build  # 生产构建
   - `backend/utils/agent_tools.py`：工具定义和实现
   - `frontend/src/components/AgentStepViewer.jsx`：步骤展示组件，支持 Markdown 渲染
 - 测试结果：搜索、学习计划、知识图谱功能均正常
+
+### 2026-03-07（企业级审查整改）
+- 数据库切换为 MySQL（唯一支持）：
+  - 添加 `pymysql>=1.1.0`，移除 `pyodbc==5.1.0`
+  - 更新 `.env` 启用 MySQL 连接字符串
+  - `config.py` 默认值改为 MySQL
+  - `api_call_log.py` DateTime 去掉 timezone 参数
+- RAG 依赖分离到 `requirements-rag.txt`（可选功能）
+- 后端代码规范：
+  - `main.py` 删除所有 print/sys.stdout.write，统一使用 logger
+  - `main.py` 修复重复导入，日志输出改为 [OK]/[FAIL]/[WARN] 标记
+  - `models/__init__.py` 补充 knowledge 模型导出
+  - 删除意外文件 `backend/=6.0.0`
+- 前端代码规范：
+  - 删除废弃文件 `AIChat.jsx`（59KB）
+  - 移除所有 localStorage token/userInfo 存储，严格使用 sessionStorage
+  - `AdminProtectedRoute.jsx` 移除 email 前缀检查，仅保留 role 判断
+  - `Navbar.jsx` 同步修复
+  - `AdminLayout.jsx` emoji 图标全部替换为 SVG
+  - `agentApi.js` 移除硬编码 URL，复用 apiClient 逻辑
+  - `themeStore.js` 修正 toggleTheme 变量命名（newTheme → newMode/newTheme）
+  - `vite.config.js` allowedHosts 改为读取环境变量 VITE_ALLOWED_HOSTS
+- 文档同步更新（CLAUDE.md、README.md）
+- 新建 `backend/.env.example`
+- 新增"技术栈变更规范"章节（强制同步文档）

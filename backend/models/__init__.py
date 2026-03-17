@@ -9,6 +9,7 @@ from .model_config import ModelConfig
 from .api_call_log import APICallLog
 from .learning_map import LearningMapFile, LearningNode, LearningEdge
 from .agent_session import AgentSession, AgentStep, AgentToolCall
+from .knowledge import KnowledgeDocument, KnowledgeChunk
 
 __all__ = [
     "User",
@@ -23,4 +24,6 @@ __all__ = [
     "AgentSession",
     "AgentStep",
     "AgentToolCall",
+    "KnowledgeDocument",
+    "KnowledgeChunk",
 ]

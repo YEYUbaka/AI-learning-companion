@@ -4,7 +4,6 @@ import {
   uploadLearningMapFile,
   generateLearningMap,
   getLearningMapGraph,
-  getModelConfigs,
   getLearningMapHistory,
   deleteLearningMapSession,
 } from '../api/apiClient';
@@ -25,8 +24,6 @@ const LearningMap = () => {
   const [fileInfo, setFileInfo] = useState(null);
   const [courseTopic, setCourseTopic] = useState('');
   const [status, setStatus] = useState('');
-  const [provider, setProvider] = useState('');
-  const [modelOptions, setModelOptions] = useState([]);
   const graphRef = useRef(null);
   const graphContainerRef = useRef(null);
   const [graphSize, setGraphSize] = useState({ width: 0, height: 0 });
@@ -147,19 +144,6 @@ const LearningMap = () => {
   }, [userInfo?.id]);
 
   useEffect(() => {
-    const fetchModels = async () => {
-      try {
-        const { data } = await getModelConfigs(0, 200);
-        const enabledModels = data.filter((m) => m.enabled);
-        setModelOptions(enabledModels);
-      } catch (error) {
-        console.error('获取模型列表失败', error);
-      }
-    };
-    fetchModels();
-  }, []);
-
-  useEffect(() => {
     const updateGraphSize = () => {
       if (!graphContainerRef.current) return;
       const { clientWidth, clientHeight } = graphContainerRef.current;
@@ -204,7 +188,6 @@ const LearningMap = () => {
         user_id: userInfo.id,
         file_id: fileInfo?.file_id,
         course_topic: courseTopic,
-        provider: provider || undefined,
       });
       await fetchHistory();
       await fetchGraph(data.session_id);
@@ -395,21 +378,6 @@ const LearningMap = () => {
                   placeholder="例如：高中函数、线性代数"
                   className={inputBaseClasses}
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-2">指定模型（可选）</label>
-                <select
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value)}
-                  className={`${inputBaseClasses} pr-10`}
-                >
-                  <option value="">使用默认模型（根据优先级自动选择）</option>
-                  {modelOptions.map((model) => (
-                    <option key={model.id} value={model.provider_name}>
-                      {model.provider_name}
-                    </option>
-                  ))}
-                </select>
               </div>
               <button
                 onClick={handleGenerate}

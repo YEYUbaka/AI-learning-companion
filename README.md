@@ -1,28 +1,31 @@
 # 智学伴 AI个性化学习平台
 
-> 全国大学生计算机设计大赛院赛屎山参赛作品
-
 一个基于 AI 大模型的智能个性化学习平台，支持学习计划生成、智能组卷、知识图谱构建、AI 问答等功能。
 
-## ✨ 核心功能
+## 核心功能
 
-- 📚 **智能学习计划生成** - 基于上传教材和用户目标，AI 自动生成个性化学习计划
-- 📝 **智能组卷系统** - 支持自定义难度、题型分布，AI 自动生成试卷
-- 🧠 **知识图谱可视化** - 自动提取知识点并构建知识图谱，支持交互式探索
-- 💬 **AI 智能问答** - 多模型支持，支持上下文记忆和教师人格切换
-- 📊 **学习数据分析** - 测验成绩统计、错题分析、学习进度跟踪
-- 📄 **报告导出** - 支持 PDF/Word 格式的学习报告导出
+- **智能学习计划生成** - 基于上传教材和用户目标，AI 自动生成个性化学习计划
+- **智能组卷系统** - 支持自定义难度、题型分布，AI 自动生成试卷
+- **知识图谱可视化** - 自动提取知识点并构建知识图谱，支持交互式探索
+- **AI 智能问答（Agent）** - 多工具支持，可搜索、生成学习计划、构建知识图谱
+  - ReAct 模式：完整的思考→行动→观察循环
+  - Chain of Thought 模式：纯推理模式，逐步展示思考过程
+  - Function Calling 模式：直接调用工具
+- **RAG 知识库** - 基于 ChromaDB 的语义检索，支持知识文档导入、索引、检索
+- **学习数据分析** - 测验成绩统计、错题分析、学习进度跟踪
+- **报告导出** - 支持 PDF/Word 格式的学习报告导出
 
-## 🛠️ 技术栈
+## 技术栈
 
 ### 后端
 - **FastAPI** - 现代、快速的 Web 框架
 - **SQLAlchemy** - ORM 数据库操作
-- **SQLite** - 轻量级数据库（支持 SQL Server）
+- **MySQL** - 企业级数据库（唯一支持，通过 pymysql 驱动）
 - **Pydantic** - 数据验证和设置管理
 - **JWT** - 用户认证和授权
 - **ReportLab** - PDF 报告生成
 - **PyMuPDF / python-docx / python-pptx** - 文档解析
+- **ddgs** - 网络搜索（Agent 功能）
 
 ### 前端
 - **React 18** - UI 框架
@@ -35,18 +38,24 @@
 - **react-markdown** - Markdown 渲染
 
 ### AI 集成
-- 支持多模型提供商（DeepSeek、OpenAI、硅基流动等）
+- 支持多模型提供商（DeepSeek、文心一言、星火、ChatGLM、Moonshot 等）
 - 统一的 AI 服务接口
 - 模型配置管理和自动切换
-- Prompt 模板管理
+- Prompt 模板管理（数据库存储，支持版本控制）
 
-## 🚀 快速开始
+### RAG 知识库（可选）
+- **ChromaDB** - 向量数据库
+- **sentence-transformers** - 语义嵌入模型
+- 安装方式：`pip install -r requirements-rag.txt`
+- 不安装时后端正常运行，RAG 功能自动禁用
+
+## 快速开始
 
 ### 环境要求
 
 - **Python**: 3.10+
 - **Node.js**: 18+
-- **数据库**: SQLite（默认）或 SQL Server 2012+
+- **MySQL**: 8.0+
 
 ### 1. 克隆项目
 
@@ -73,39 +82,45 @@ source venv/bin/activate
 # 安装依赖
 pip install -r requirements.txt
 
-# 复制环境变量模板
-cp ../.env.example .env
+# 可选：安装 RAG 依赖（知识库语义检索功能）
+# pip install -r requirements-rag.txt
 
-# 编辑 .env 文件，填入你的配置（特别是 SECRET_KEY 和 AI API 密钥）
+# 复制环境变量模板
+cp .env.example .env
+# 编辑 .env，填入 MySQL 连接信息和 AI API 密钥
 ```
 
-### 3. 前端配置
+### 3. 数据库初始化
+
+```sql
+-- 在 MySQL 中创建数据库
+CREATE DATABASE zhixueban CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
+启动后端时会自动创建表结构（`Base.metadata.create_all`）。
+
+### 4. 前端配置
 
 ```bash
-# 进入前端目录
 cd frontend
-
-# 安装依赖
 npm install
-
-# 启动开发服务器
 npm run dev
 ```
 
-### 4. 启动后端服务
+### 5. 启动后端服务
 
 ```bash
 # 在 backend 目录下
-uvicorn main:app --reload --port 8000
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 5. 访问应用
+### 6. 访问应用
 
 - **前端**: http://localhost:5173
 - **后端 API 文档**: http://localhost:8000/docs
 - **健康检查**: http://localhost:8000/health
 
-## 📁 项目结构
+## 项目结构
 
 ```
 Web/
@@ -124,7 +139,9 @@ Web/
 │   ├── utils/              # 工具函数
 │   ├── seed_data/          # 种子数据
 │   ├── tests/              # 单元测试
-│   └── requirements.txt    # Python 依赖
+│   ├── requirements.txt    # Python 核心依赖
+│   ├── requirements-rag.txt # RAG 可选依赖
+│   └── .env.example        # 环境变量模板
 ├── frontend/               # 前端应用
 │   ├── src/
 │   │   ├── pages/          # 页面组件
@@ -134,22 +151,22 @@ Web/
 │   │   └── utils/          # 工具函数
 │   ├── package.json        # Node.js 依赖
 │   └── vite.config.js      # Vite 配置
-├── .env.example            # 环境变量模板
-├── .gitignore             # Git 忽略文件
-└── README.md              # 项目说明
+├── knowledge_base/          # 知识库文档（corpus/ 目录）
+├── .gitignore
+└── README.md
 ```
 
-## 🔧 配置说明
+## 配置说明
 
 ### 环境变量
 
-详细配置请参考 `.env.example` 文件。主要配置项：
+详细配置请参考 `backend/.env.example` 文件。主要配置项：
 
-- `DATABASE_URL`: 数据库连接字符串
+- `DATABASE_URL`: MySQL 连接字符串（必填）
 - `SECRET_KEY`: JWT 密钥（生产环境必须修改）
-- `ENCRYPTION_KEY`: API 密钥加密密钥
-- `DEFAULT_AI_PROVIDER`: 默认 AI 提供商
-- `AUTO_SYNC_SEED_DATA`: 是否自动同步种子数据
+- `ENCRYPTION_KEY`: API 密钥加密密钥（生产环境必须修改）
+- `AUTO_SYNC_SEED_DATA`: 是否自动同步种子数据（true/false）
+- `VITE_ALLOWED_HOSTS`: Vite 允许的域名（逗号分隔，用于远程访问）
 
 ### AI 模型配置
 
@@ -158,13 +175,7 @@ Web/
 3. 设置模型优先级和超时时间
 4. 系统会自动选择可用的模型
 
-### Prompt 管理
-
-1. 在管理后台管理 Prompt 模板
-2. 支持版本控制和启用/禁用
-3. 支持从 JSON 文件自动同步
-
-## 📖 使用指南
+## 使用指南
 
 ### 用户功能
 
@@ -173,7 +184,7 @@ Web/
 3. **生成学习计划** - 基于教材和目标生成个性化学习计划
 4. **智能组卷** - 配置试卷参数，AI 自动生成试卷
 5. **知识图谱** - 查看知识点关系图谱
-6. **AI 问答** - 与 AI 助手对话，获取学习帮助
+6. **AI 助手** - 与 Agent 对话，支持搜索、学习计划、知识图谱等工具
 
 ### 管理员功能
 
@@ -181,53 +192,36 @@ Web/
 2. **Prompt 管理** - 编辑和管理 Prompt 模板
 3. **API 日志** - 查看 API 调用记录和统计
 4. **用户管理** - 管理用户账户
+5. **知识库管理** - 管理 RAG 知识文档
 
-## 🧪 测试
+## 测试
 
 ```bash
 # 后端测试
 cd backend
 pytest
-
-# 前端测试（如配置了测试框架）
-cd frontend
-npm test
 ```
 
-## 📦 部署
-
-### Docker 部署
-
-```bash
-# 使用 docker-compose
-docker-compose up -d
-```
-
-### 生产环境注意事项
+## 部署注意事项
 
 1. **修改默认密钥** - 必须修改 `.env` 中的 `SECRET_KEY` 和 `ENCRYPTION_KEY`
 2. **配置 CORS** - 修改 `CORS_ORIGINS` 为实际域名
-3. **数据库迁移** - 使用 Alembic 进行数据库版本管理
+3. **数据库迁移** - 生产环境推荐使用 Alembic 进行数据库版本管理
 4. **HTTPS** - 配置反向代理（Nginx）启用 HTTPS
 5. **日志管理** - 配置日志轮转和监控
 
-## 🤝 贡献
+## 贡献
 
 欢迎提交 Issue 和 Pull Request！
 
-## 📄 许可证
+## 许可证
 
 MIT License
 
-## 👥 团队
+## 团队
 
 全国大学生计算机设计大赛智学伴参赛团队
 
-## 🙏 致谢
-
-感谢所有为项目做出贡献参考指导的开发者和用户！
-
 ---
 
-**注意**: 本项目为参赛作品，仅供学习和参考使用。生产环境部署请务必修改所有默认密钥和配置。
-
+**注意**: 生产环境部署请务必修改所有默认密钥和配置。

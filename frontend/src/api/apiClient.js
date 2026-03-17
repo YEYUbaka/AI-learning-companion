@@ -34,11 +34,10 @@ const api = axios.create({
 });
 
 
-// 请求拦截器（可用于添加 Token）
+// 请求拦截器（自动注入 JWT token）
 api.interceptors.request.use(
   (config) => {
-    // 优先使用sessionStorage中的token，如果没有则使用localStorage（向后兼容）
-    const token = sessionStorage.getItem('token') || localStorage.getItem('token');
+    const token = sessionStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -60,9 +59,6 @@ api.interceptors.response.use(
       if (error.response.status === 401) {
         sessionStorage.removeItem('token');
         sessionStorage.removeItem('userInfo');
-        localStorage.removeItem('token');
-        localStorage.removeItem('userInfo');
-        // 如果不在登录页，则跳转
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';
         }

@@ -56,7 +56,15 @@
       "Bash(timeout 180 python:*)",
       "Bash(pip:*)",
       "Bash(uvicorn main:app:*)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(venv/Scripts/pip.exe install:*)",
+      "Bash(__NEW_LINE_21d537d20a266f23__ python:*)",
+      "Bash(__NEW_LINE_10f15c8e5766cb55__ python:*)",
+      "Bash(__NEW_LINE_22957330c6311d49__ python:*)",
+      "Bash(grep:*)",
+      "Bash(del:*)",
+      "Bash(Remove-Item:*)",
+      "Bash(cmd:*)"
     ]
   }
 }

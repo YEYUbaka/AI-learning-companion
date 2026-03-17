@@ -1,0 +1,9 @@
+# RAG 知识库可选依赖
+# 安装方法：pip install -r requirements-rag.txt
+# 安装后重启后端，RAG 功能自动启用
+#
+# 注意：torch CPU 版本安装命令：
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+chromadb>=0.5.0
+sentence-transformers>=3.0.0

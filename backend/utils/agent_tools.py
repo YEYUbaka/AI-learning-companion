@@ -399,18 +399,18 @@ class WebSearchTool(BaseTool):
 
 
 class KnowledgeSearchTool(BaseTool):
-    """本地知识库搜索工具"""
+    """本地知识库语义搜索工具（RAG）"""
 
     def get_definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="search_knowledge",
-            description="在本地知识库中搜索相关内容，包括用户上传的文档、学习记录等",
+            description="在本地知识库中语义搜索学科知识、真题、概念解析等。适用：数学公式、物理定律、化学原理、语文知识、历史事件、真题解析、知识点讲解",
             category="search",
             parameters=[
                 ToolParameter(
                     name="query",
                     type="string",
-                    description="搜索关键词",
+                    description="搜索查询（支持自然语言，如：分数加减法如何计算）",
                     required=True
                 ),
                 ToolParameter(
@@ -419,78 +419,69 @@ class KnowledgeSearchTool(BaseTool):
                     description="最大返回结果数（默认 5）",
                     required=False,
                     default=5
+                ),
+                ToolParameter(
+                    name="grade_level",
+                    type="string",
+                    description="年级过滤：小学/初中/高中/大学/通用（可选）",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="subject",
+                    type="string",
+                    description="学科过滤：数学/物理/化学/生物/语文/英语/历史/地理/政治/信息技术（可选）",
+                    required=False,
+                    default=None
                 )
             ]
         )
 
     async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
-        """执行知识库搜索"""
+        """执行 RAG 语义检索"""
         try:
             params = self.validate_params(kwargs)
             query = params["query"]
             limit = params.get("limit", 5)
+            grade_level = params.get("grade_level")
+            subject = params.get("subject")
 
-            # 搜索用户的学习记录
-            from models.learning_map import LearningMap
-            from models.quiz import Quiz
-            from sqlalchemy import or_, func
+            from services.rag_service import RAGService
 
-            results = []
-
-            # 1. 搜索知识图谱
-            maps = db.query(LearningMap).filter(
-                LearningMap.user_id == user_id,
-                or_(
-                    LearningMap.title.contains(query),
-                    func.json_extract(LearningMap.nodes, '$').contains(query)
-                )
-            ).limit(limit).all()
-
-            for map_item in maps:
-                results.append({
-                    "type": "知识图谱",
-                    "title": map_item.title,
-                    "content": f"包含 {len(map_item.nodes)} 个知识点",
-                    "created_at": map_item.created_at.strftime("%Y-%m-%d")
-                })
-
-            # 2. 搜索测验记录
-            quizzes = db.query(Quiz).filter(
-                Quiz.user_id == user_id,
-                or_(
-                    Quiz.topic.contains(query),
-                    func.json_extract(Quiz.questions, '$').contains(query)
-                )
-            ).limit(limit).all()
-
-            for quiz in quizzes:
-                results.append({
-                    "type": "测验",
-                    "title": quiz.topic,
-                    "content": f"难度: {quiz.difficulty}, 题目数: {len(quiz.questions)}",
-                    "created_at": quiz.created_at.strftime("%Y-%m-%d")
-                })
+            results = RAGService.search(
+                query=query,
+                n_results=limit,
+                grade_level=grade_level,
+                subject=subject
+            )
 
             if not results:
                 return {
                     "success": True,
                     "query": query,
-                    "text": f"在知识库中未找到与 '{query}' 相关的内容",
+                    "text": f"知识库中暂无与「{query}」相关的内容。请尝试换个关键词，或通过管理后台上传相关知识文档。",
                     "count": 0
                 }
 
-            # 格式化搜索结果
-            formatted_results = "\n\n".join([
-                f"**{i+1}. [{r['type']}] {r['title']}**\n{r['content']}\n创建时间: {r['created_at']}"
-                for i, r in enumerate(results)
-            ])
+            # 构建 RAG context
+            rag_context = RAGService.build_rag_context(query, results)
 
             return {
                 "success": True,
                 "query": query,
-                "results": results,
-                "text": formatted_results,
-                "count": len(results)
+                "text": rag_context,
+                "count": len(results),
+                "results": [
+                    {
+                        "title": r.title,
+                        "grade_level": r.grade_level,
+                        "subject": r.subject,
+                        "section_title": r.section_title,
+                        "text_preview": r.text[:200],
+                        "image_paths": r.image_paths
+                    }
+                    for r in results
+                ]
             }
         except Exception as e:
             logger.error(f"知识库搜索失败: {str(e)}")

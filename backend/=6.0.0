@@ -1,0 +1,5 @@
+Looking in indexes: https://mirrors.aliyun.com/pypi/simple/
+Collecting pyyaml
+  Downloading https://mirrors.aliyun.com/pypi/packages/f0/0c/25113e0b5e103d7f1490c0e947e303fe4a696c10b501dea7a9f49d4e876c/pyyaml-6.0.3-cp39-cp39-win_amd64.whl (158 kB)
+Installing collected packages: pyyaml
+Successfully installed pyyaml-6.0.3
