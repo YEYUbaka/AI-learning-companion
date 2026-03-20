@@ -1,40 +1,28 @@
-# 文档目录说明
+# 文档总入口
 
-## 目录结构
+本目录是项目文档的统一入口。目标是减少根目录噪音，并让“启动、开发、部署、排障、历史报告”都能快速定位。
 
-- **development/**: 开发相关文档
-  - API 安全检查
-  - GitHub 上传指南
-  - 开发规范
+## 快速导航
 
-- **deployment/**: 部署相关文档
-  - 打包指南
-  - 项目整理说明
+- `project/FULLSTACK_DEV_RUNBOOK.md`: 本地完整运行前后端（开发联调入口）
+- `project/README.md`: 项目文档分区规则与根目录整理说明
+- `development/`: 开发规范、开发说明、安全检查
+- `deployment/`: 打包与部署文档
+- `troubleshooting/`: 问题排查与修复记录
+- `RAG/`: 知识库与资料整理说明
+- `competition/`: 参赛相关资料与交付文档
+- `superpowers/specs/` + `superpowers/plans/`: 设计说明与实施计划
 
-- **troubleshooting/**: 故障排查文档
-  - backend/: 后端相关问题排查
-  - 各类配置和修复指南
+## 本次整理结果（2026-03-20）
 
-- **competition/**: 比赛相关文档
-  - 参赛文档
-  - 设计文档
-  - 技术栈说明
+- 根目录历史报告迁移到 `project/reports/`
+- 根目录项目说明类文档迁移到 `project/`
+- 根目录保留 `README.md` 作为对外总说明，日常维护文档统一从 `docs/` 进入
 
-- **architecture.md**: 系统架构文档
+## 后续新增文档建议
 
-## 文档索引
-
-### 快速开始
-- 项目根目录 `README.md`: 项目总体说明
-- `backend/README.md`: 后端快速开始
-- `frontend/README.md`: 前端快速开始
-
-### 开发指南
-- `CLAUDE.md`: Claude Code 开发指南
-- `development/DEVELOPMENT.md`: 详细开发文档
-
-### 部署指南
-- `deployment/`: 部署相关文档
-
-### 问题排查
-- `troubleshooting/backend/`: 后端问题排查
+- 新开发规范：放 `development/`
+- 新部署文档：放 `deployment/`
+- 新排障记录：放 `troubleshooting/`
+- 阶段报告/总结：放 `project/reports/`
+- 临时草稿：先放 `project/`，确认长期价值后再归档
