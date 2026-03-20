@@ -1,48 +1,127 @@
-import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { useState, useEffect, useRef } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
 import { useThemeStore } from '../store/themeStore';
-
-const SunIcon = () => (
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-      d="M12 3v1m0 16v1m8.66-9H21M3 12H2m15.07-6.07l-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M12 5a7 7 0 100 14A7 7 0 0012 5z" />
-  </svg>
-);
-
-const MoonIcon = () => (
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-      d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-  </svg>
-);
-
-const MonitorIcon = () => (
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-      d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-  </svg>
-);
-
-const CheckIcon = () => (
-  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-  </svg>
-);
+import IconFontSymbol from './icons/IconFontSymbol.jsx';
+import { HOMEPAGE_ICON_NAMES } from './icons/homepageIconNames.js';
+import BrandMark from './homepage/BrandMark.jsx';
 
 const THEME_OPTIONS = [
   { key: 'light', label: '浅色模式', sub: '始终使用浅色主题', Icon: SunIcon },
-  { key: 'dark',  label: '深色模式', sub: '始终使用深色主题', Icon: MoonIcon },
-  { key: 'auto',  label: '自动模式', sub: '跟随系统主题设置', Icon: MonitorIcon },
+  { key: 'dark', label: '深色模式', sub: '始终使用深色主题', Icon: MoonIcon },
+  { key: 'auto', label: '跟随系统', sub: '根据系统外观自动切换', Icon: MonitorIcon },
 ];
 
-function ThemeDropdown({ isDark, mode, setMode, theme }) {
+const NAV_ITEMS = [
+  { key: 'home', label: '首页', path: '/dashboard', icon: HOMEPAGE_ICON_NAMES.home },
+  { key: 'agent', label: '智学助手', path: '/agent', icon: HOMEPAGE_ICON_NAMES.agent },
+  {
+    key: 'plan',
+    label: '学习计划',
+    path: '/study-plan',
+    icon: HOMEPAGE_ICON_NAMES.plan,
+    activePaths: ['/study-plan', '/upload-file'],
+  },
+  {
+    key: 'quiz',
+    label: 'AI 测评',
+    path: '/quiz',
+    icon: HOMEPAGE_ICON_NAMES.quiz,
+    activePaths: ['/quiz', '/quiz-result'],
+  },
+  {
+    key: 'map',
+    label: '知识图谱',
+    path: '/learning-map',
+    icon: HOMEPAGE_ICON_NAMES.map,
+  },
+];
+
+const ADMIN_ITEM = {
+  key: 'admin',
+  label: '管理后台',
+  path: '/admin/dashboard',
+  icon: null,
+  activePrefix: '/admin',
+};
+
+function SunIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 3v1m0 16v1m8.66-9H21M3 12H2m15.07-6.07l-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M12 5a7 7 0 100 14A7 7 0 0012 5z"
+      />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+      />
+    </svg>
+  );
+}
+
+function MonitorIcon() {
+  return (
+    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+      />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
+function matchesNavItem(pathname, item) {
+  if (item.activePrefix) return pathname.startsWith(item.activePrefix);
+  if (item.activePaths) return item.activePaths.includes(pathname);
+  return pathname === item.path;
+}
+
+function navLinkClass(isActive, isMobile = false) {
+  if (isMobile) {
+    return `flex items-center gap-3 rounded-xl px-3 py-2.5 text-base font-medium transition-colors ${
+      isActive
+        ? 'bg-[var(--academy-surface-soft)] text-[var(--academy-brand)]'
+        : 'text-[var(--academy-text-muted)] hover:bg-[var(--academy-surface-soft)] hover:text-[var(--academy-text)]'
+    }`;
+  }
+
+  return `inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap ${
+    isActive
+      ? 'border-[color:var(--academy-accent)] bg-[var(--academy-surface-soft)] text-[var(--academy-brand)] shadow-sm'
+      : 'border-transparent text-[var(--academy-text-muted)] hover:border-[color:var(--academy-border)] hover:bg-[var(--academy-surface-soft)] hover:text-[var(--academy-text)]'
+  }`;
+}
+
+function ThemeDropdown({ mode, setMode, theme }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
   useEffect(() => {
-    const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    const handler = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) setOpen(false);
     };
+
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
@@ -52,52 +131,50 @@ function ThemeDropdown({ isDark, mode, setMode, theme }) {
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen(v => !v)}
-        className={`p-2 rounded-lg border transition-colors ${
-          isDark
-            ? 'bg-white/5 text-white border-white/15 hover:bg-white/10'
-            : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
-        }`}
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--academy-border)] bg-[var(--academy-surface)] text-[var(--academy-text)] transition-colors hover:bg-[var(--academy-surface-soft)]"
         title="切换主题"
+        aria-label="切换主题"
       >
         <CurrentIcon />
       </button>
 
       {open && (
-        <div className={`absolute right-0 top-full mt-2 w-52 rounded-xl border shadow-lg z-[60] overflow-hidden ${
-          isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'
-        }`}>
+        <div className="absolute right-0 top-full z-[60] mt-2 w-56 overflow-hidden rounded-2xl border border-[color:var(--academy-border)] bg-[var(--academy-surface)] shadow-[0_20px_50px_rgba(44,35,29,0.14)]">
           {THEME_OPTIONS.map(({ key, label, sub, Icon }) => (
             <button
               key={key}
-              onClick={() => { setMode(key); setOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+              type="button"
+              onClick={() => {
+                setMode(key);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
                 mode === key
-                  ? isDark
-                    ? 'bg-blue-900/30 text-blue-400'
-                    : 'bg-blue-50 text-blue-600'
-                  : isDark
-                  ? 'text-slate-300 hover:bg-slate-700/60'
-                  : 'text-gray-700 hover:bg-gray-50'
+                  ? 'bg-[var(--academy-surface-soft)] text-[var(--academy-brand)]'
+                  : 'text-[var(--academy-text)] hover:bg-[var(--academy-surface-soft)]'
               }`}
             >
-              <span className="flex-shrink-0"><Icon /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium leading-tight">{label}</div>
-                <div className={`text-xs mt-0.5 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>{sub}</div>
-              </div>
-              {mode === key && (
-                <span className="flex-shrink-0 ml-1"><CheckIcon /></span>
-              )}
+              <span className="flex-shrink-0">
+                <Icon />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium leading-tight">{label}</span>
+                <span className="mt-0.5 block text-xs text-[var(--academy-text-muted)]">{sub}</span>
+              </span>
+              {mode === key ? (
+                <span className="ml-1 flex-shrink-0">
+                  <CheckIcon />
+                </span>
+              ) : null}
             </button>
           ))}
-          {mode === 'auto' && (
-            <div className={`px-4 py-2 border-t text-xs ${
-              isDark ? 'border-slate-700 text-slate-500' : 'border-gray-100 text-gray-400'
-            }`}>
+          {mode === 'auto' ? (
+            <div className="border-t border-[color:var(--academy-border)] px-4 py-2 text-xs text-[var(--academy-text-muted)]">
               当前跟随系统：{theme === 'dark' ? '深色' : '浅色'}
             </div>
-          )}
+          ) : null}
         </div>
       )}
     </div>
@@ -109,14 +186,17 @@ function Navbar() {
   const location = useLocation();
   const { theme, mode, setMode } = useThemeStore();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const isDark = theme === 'dark';
+
   let userInfo = {};
   try {
     userInfo = JSON.parse(sessionStorage.getItem('userInfo') || '{}');
   } catch {
     userInfo = {};
   }
+
   const isAdmin = userInfo?.role === 'admin';
+  const currentUserName = userInfo?.name || userInfo?.nickname || userInfo?.email || '学习者';
+  const navItems = isAdmin ? [...NAV_ITEMS, ADMIN_ITEM] : NAV_ITEMS;
 
   if (location.pathname === '/login' || location.pathname === '/register') {
     return null;
@@ -128,106 +208,72 @@ function Navbar() {
     navigate('/login');
   };
 
-  const navLinkClass = (path) => {
-    const isActive =
-      path === '/study-plan'
-        ? location.pathname === '/study-plan' || location.pathname === '/upload-file'
-        : path === '/quiz'
-        ? location.pathname === '/quiz' || location.pathname === '/quiz-result'
-        : path === '/admin'
-        ? location.pathname.startsWith('/admin')
-        : location.pathname === path;
-
-    return `inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
-      isActive
-        ? isDark
-          ? 'border-cyan-400 text-white'
-          : 'border-primary text-gray-900'
-        : isDark
-        ? 'border-transparent text-white/60 hover:text-white hover:border-white/30'
-        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-    }`;
+  const renderNavItem = (item, isMobile = false) => {
+    const active = matchesNavItem(location.pathname, item);
+    return (
+      <Link
+        key={item.key}
+        to={item.path}
+        aria-current={active ? 'page' : undefined}
+        className={navLinkClass(active, isMobile)}
+        onClick={isMobile ? () => setMobileMenuOpen(false) : undefined}
+      >
+        {item.icon ? (
+          <IconFontSymbol name={item.icon} className="h-4 w-4 flex-shrink-0" />
+        ) : null}
+        <span>{item.label}</span>
+      </Link>
+    );
   };
 
   return (
-    <nav
-      className={`border-b sticky top-0 z-50 ${
-        isDark ? 'bg-[#0f121b] border-white/10 text-white' : 'bg-white border-slate-100 text-gray-900 shadow-lg'
-      }`}
-    >
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8">
-        <div className="flex justify-between h-14 sm:h-16 items-center">
-          <div className="flex items-center flex-1">
-            {/* Logo */}
-            <Link to="/dashboard" className="flex items-center">
-              <div className="flex-shrink-0">
-                <h1 className={`text-xl sm:text-2xl font-bold ${isDark ? 'text-white' : 'text-primary'}`}>智学伴</h1>
-              </div>
+    <nav className="sticky top-0 z-50 border-b border-[color:var(--academy-border)] bg-[var(--academy-surface)] text-[var(--academy-text)] shadow-[0_16px_40px_rgba(44,35,29,0.08)]">
+      <div className="mx-auto max-w-7xl px-3 sm:px-4 lg:px-8">
+        <div className="flex h-16 items-center justify-between gap-4">
+          <div className="flex min-w-0 flex-1 items-center gap-4">
+            <Link to="/dashboard" className="shrink-0">
+              <BrandMark />
             </Link>
 
-            {/* 桌面导航链接 */}
-            <div className="hidden md:ml-6 md:flex md:space-x-4 lg:space-x-8">
-              <Link to="/dashboard" className={navLinkClass('/dashboard')}>
-                首页
-              </Link>
-              <Link to="/agent" className={navLinkClass('/agent')}>
-                智学助手
-              </Link>
-              <Link to="/study-plan" className={navLinkClass('/study-plan')}>
-                学习计划
-              </Link>
-              <Link to="/quiz" className={navLinkClass('/quiz')}>
-                AI测评
-              </Link>
-              <Link to="/learning-map" className={navLinkClass('/learning-map')}>
-                知识图谱
-              </Link>
-              {isAdmin && (
-                <Link to="/admin/dashboard" className={navLinkClass('/admin')}>
-                  管理后台
-                </Link>
-              )}
+            <div className="hidden min-w-0 flex-1 items-center justify-center gap-2 overflow-x-auto md:flex lg:gap-3">
+              {NAV_ITEMS.map((item) => renderNavItem(item))}
+              {isAdmin ? renderNavItem(ADMIN_ITEM) : null}
             </div>
           </div>
 
-          {/* 桌面端用户信息与按钮 */}
-          <div className="hidden sm:flex items-center space-x-2 lg:space-x-4">
-            <ThemeDropdown isDark={isDark} mode={mode} setMode={setMode} theme={theme} />
-            <div className="text-right hidden lg:block">
-              <p className={`text-xs sm:text-sm font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                {userInfo?.name || userInfo?.nickname || userInfo?.email || '学习者'}
-              </p>
-              {userInfo?.email && (
-                <p className={`text-xs ${isDark ? 'text-white/60' : 'text-gray-500'}`}>{userInfo.email}</p>
-              )}
+          <div className="hidden items-center gap-2 sm:flex lg:gap-4">
+            <ThemeDropdown mode={mode} setMode={setMode} theme={theme} />
+            <div className="hidden text-right lg:block">
+              <p className="text-sm font-medium text-[var(--academy-text)]">{currentUserName}</p>
+              {userInfo?.email ? (
+                <p className="text-xs text-[var(--academy-text-muted)]">{userInfo.email}</p>
+              ) : null}
             </div>
             <button
+              type="button"
               onClick={handleLogout}
-              className={`inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 border text-xs sm:text-sm font-medium rounded-md focus:outline-none focus:ring-2 ${
-                isDark
-                  ? 'text-white bg-red-600 hover:bg-red-700 border-red-500 focus:ring-red-400'
-                  : 'text-white bg-red-600 hover:bg-red-700 border-red-600 focus:ring-red-500'
-              }`}
+              className="inline-flex items-center rounded-full border border-[color:var(--academy-border)] bg-[var(--academy-accent)] px-4 py-2 text-sm font-medium text-[var(--academy-surface)] transition-colors hover:bg-[var(--academy-accent-soft)]"
             >
-              退出
+              退出登录
             </button>
           </div>
 
-          {/* 移动端菜单按钮 */}
-          <div className="flex sm:hidden items-center space-x-2">
-            <ThemeDropdown isDark={isDark} mode={mode} setMode={setMode} theme={theme} />
+          <div className="flex items-center gap-2 sm:hidden">
+            <ThemeDropdown mode={mode} setMode={setMode} theme={theme} />
             <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className={`p-2 rounded-lg ${
-                isDark ? 'text-white hover:bg-white/10' : 'text-gray-700 hover:bg-gray-100'
-              }`}
+              type="button"
+              onClick={() => setMobileMenuOpen((value) => !value)}
+              className="rounded-full border border-[color:var(--academy-border)] bg-[var(--academy-surface)] p-2 text-[var(--academy-text)] transition-colors hover:bg-[var(--academy-surface-soft)]"
+              aria-label={mobileMenuOpen ? '关闭导航菜单' : '打开导航菜单'}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-nav-menu"
             >
               {mobileMenuOpen ? (
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               ) : (
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               )}
@@ -235,99 +281,35 @@ function Navbar() {
           </div>
         </div>
 
-        {/* 移动端菜单 */}
-        {mobileMenuOpen && (
-          <div className={`sm:hidden border-t ${
-            isDark ? 'border-white/10 bg-[#0f121b]' : 'border-slate-200 bg-white'
-          }`}>
-            <div className="px-2 pt-2 pb-3 space-y-1">
-              <Link
-                to="/dashboard"
-                onClick={() => setMobileMenuOpen(false)}
-                className={`block px-3 py-2 rounded-lg text-base font-medium ${
-                  location.pathname === '/dashboard'
-                    ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
-                    : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                首页
-              </Link>
-              <Link
-                to="/agent"
-                onClick={() => setMobileMenuOpen(false)}
-                className={`block px-3 py-2 rounded-lg text-base font-medium ${
-                  location.pathname === '/agent'
-                    ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
-                    : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                智学助手
-              </Link>
-              <Link
-                to="/study-plan"
-                onClick={() => setMobileMenuOpen(false)}
-                className={`block px-3 py-2 rounded-lg text-base font-medium ${
-                  location.pathname === '/study-plan' || location.pathname === '/upload-file'
-                    ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
-                    : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                学习计划
-              </Link>
-              <Link
-                to="/quiz"
-                onClick={() => setMobileMenuOpen(false)}
-                className={`block px-3 py-2 rounded-lg text-base font-medium ${
-                  location.pathname === '/quiz' || location.pathname === '/quiz-result'
-                    ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
-                    : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                AI测评
-              </Link>
-              <Link
-                to="/learning-map"
-                onClick={() => setMobileMenuOpen(false)}
-                className={`block px-3 py-2 rounded-lg text-base font-medium ${
-                  location.pathname === '/learning-map'
-                    ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
-                    : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                知识图谱
-              </Link>
-              {isAdmin && (
-                <Link
-                  to="/admin/dashboard"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`block px-3 py-2 rounded-lg text-base font-medium ${
-                    location.pathname.startsWith('/admin')
-                      ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
-                      : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  管理后台
-                </Link>
-              )}
-              <div className="pt-2 border-t border-white/10">
-                <div className="px-3 py-2">
-                  <p className={`text-sm font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                    {userInfo?.name || userInfo?.nickname || userInfo?.email || '学习者'}
-                  </p>
-                  {userInfo?.email && (
-                    <p className={`text-xs ${isDark ? 'text-white/60' : 'text-gray-500'}`}>{userInfo.email}</p>
-                  )}
+        {mobileMenuOpen ? (
+          <div
+            id="mobile-nav-menu"
+            className="border-t border-[color:var(--academy-border)] py-3 sm:hidden"
+          >
+            <div className="space-y-1">
+              {navItems.map((item) => renderNavItem(item, true))}
+
+              <div className="mt-2 border-t border-[color:var(--academy-border)] pt-3">
+                <div className="px-3 pb-2">
+                  <p className="text-sm font-medium text-[var(--academy-text)]">{currentUserName}</p>
+                  {userInfo?.email ? (
+                    <p className="text-xs text-[var(--academy-text-muted)]">{userInfo.email}</p>
+                  ) : null}
                 </div>
                 <button
-                  onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
-                  className="w-full mt-2 px-3 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700"
+                  type="button"
+                  onClick={() => {
+                    handleLogout();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full rounded-xl bg-[var(--academy-accent)] px-3 py-2.5 text-sm font-medium text-[var(--academy-surface)] transition-colors hover:bg-[var(--academy-accent-soft)]"
                 >
                   退出登录
                 </button>
               </div>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </nav>
   );
