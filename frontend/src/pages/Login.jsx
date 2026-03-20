@@ -50,15 +50,22 @@ function Login() {
   };
 
   return (
-    <div className={`min-h-screen flex items-center justify-center py-12 px-4 ${
-      isDark
-        ? 'bg-slate-900'
-        : 'bg-gray-50'
-    }`}>
-      <div className={`max-w-md w-full space-y-8 p-8 rounded-lg shadow-lg ${
-        isDark
-          ? 'bg-slate-800 border border-slate-700'
-          : 'bg-white border border-gray-200'
+    <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
+      {/* 背景图片 */}
+      <div 
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{
+          backgroundImage: 'url(/images/backgrounds/login-bg.jpg)',
+        }}
+      />
+      {/* 背景遮罩层 */}
+      <div className={`absolute inset-0 ${isDark ? 'bg-black/50' : 'bg-black/30'}`} />
+      
+      {/* 表单容器 */}
+      <div className={`relative max-w-md w-full space-y-8 p-8 rounded-2xl shadow-2xl backdrop-blur-sm ${
+        isDark 
+          ? 'bg-slate-800/80 border border-slate-700/50' 
+          : 'bg-white/90 border border-white/20'
       }`}>
         <div>
           <h2 className={`text-center text-3xl font-extrabold ${
