@@ -2,16 +2,30 @@ import { useEffect, useState } from 'react';
 import { ensureIconfontLoaded } from './iconfontLoader.js';
 
 export default function IconFontSymbol({ name, className = '', fallback = null, title }) {
-  const [ready, setReady] = useState(false);
+  const [status, setStatus] = useState('loading');
 
   useEffect(() => {
-    ensureIconfontLoaded(import.meta.env.VITE_ICONFONT_URL).then(setReady);
-  }, []);
+    let cancelled = false;
 
-  if (!ready) return fallback;
+    ensureIconfontLoaded(import.meta.env.VITE_ICONFONT_URL).then((loaded) => {
+      if (cancelled) return;
+      if (!loaded) {
+        setStatus('unavailable');
+        return;
+      }
+
+      setStatus(document.getElementById(name) ? 'ready' : 'missing');
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [name]);
+
+  if (status !== 'ready') return fallback;
 
   return (
-    <svg aria-hidden="true" role={title ? 'img' : undefined} className={className}>
+    <svg aria-hidden={title ? undefined : true} role={title ? 'img' : undefined} className={className}>
       {title ? <title>{title}</title> : null}
       <use href={`#${name}`} />
     </svg>
