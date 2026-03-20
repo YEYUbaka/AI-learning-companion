@@ -6,8 +6,17 @@ export default function BrandMark({ className = '' }) {
     <div
       className={`academy-brand-mark flex items-center gap-3 rounded-[22px] border border-[color:var(--academy-border)] bg-[var(--academy-surface)] px-3 py-2 shadow-[0_14px_32px_rgba(44,35,29,0.08)] ${className}`}
     >
-      <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--academy-brand)] text-[var(--academy-surface)]">
-        <IconFontSymbol name={HOMEPAGE_ICON_NAMES.brand} className="h-5 w-5" />
+      <span
+        className="academy-brand-icon flex h-10 w-10 items-center justify-center rounded-2xl border border-[color:var(--academy-border)] bg-[var(--academy-brand)] text-[var(--academy-surface)]"
+        aria-hidden="true"
+      >
+        <IconFontSymbol
+          name={HOMEPAGE_ICON_NAMES.brand}
+          className="h-5 w-5"
+          fallback={
+            <span className="inline-flex h-3.5 w-3.5 rounded-full bg-[var(--academy-accent-soft)]" aria-hidden="true" />
+          }
+        />
       </span>
       <span className="min-w-0 leading-tight">
         <span className="block text-[0.92rem] font-semibold tracking-[0.22em] text-[var(--academy-brand)]">

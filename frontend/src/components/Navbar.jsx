@@ -1,5 +1,5 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useThemeStore } from '../store/themeStore';
 import IconFontSymbol from './icons/IconFontSymbol.jsx';
 import { HOMEPAGE_ICON_NAMES } from './icons/homepageIconNames.js';
@@ -13,7 +13,7 @@ const THEME_OPTIONS = [
 
 const NAV_ITEMS = [
   { key: 'home', label: '首页', path: '/dashboard', icon: HOMEPAGE_ICON_NAMES.home },
-  { key: 'agent', label: '智学助手', path: '/agent', icon: HOMEPAGE_ICON_NAMES.agent },
+  { key: 'agent', label: '学习助手', path: '/agent', icon: HOMEPAGE_ICON_NAMES.agent },
   {
     key: 'plan',
     label: '学习计划',
@@ -23,7 +23,7 @@ const NAV_ITEMS = [
   },
   {
     key: 'quiz',
-    label: 'AI 测评',
+    label: '专项测评',
     path: '/quiz',
     icon: HOMEPAGE_ICON_NAMES.quiz,
     activePaths: ['/quiz', '/quiz-result'],
@@ -91,6 +91,26 @@ function CheckIcon() {
   );
 }
 
+function NavIcon({ name }) {
+  return (
+    <span
+      className="academy-nav-icon inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-[color:var(--academy-border)] bg-[var(--academy-surface-soft)] text-[var(--academy-brand)]"
+      aria-hidden="true"
+    >
+      <IconFontSymbol
+        name={name}
+        className="h-4 w-4"
+        fallback={
+          <span
+            className="inline-flex h-2.5 w-2.5 rounded-full bg-[var(--academy-accent)]"
+            aria-hidden="true"
+          />
+        }
+      />
+    </span>
+  );
+}
+
 function matchesNavItem(pathname, item) {
   if (item.activePrefix) return pathname.startsWith(item.activePrefix);
   if (item.activePaths) return item.activePaths.includes(pathname);
@@ -140,7 +160,7 @@ function ThemeDropdown({ mode, setMode, theme }) {
         <CurrentIcon />
       </button>
 
-      {open && (
+      {open ? (
         <div className="absolute right-0 top-full z-[60] mt-2 w-56 overflow-hidden rounded-2xl border border-[color:var(--academy-border)] bg-[var(--academy-surface)] shadow-[0_20px_50px_rgba(44,35,29,0.14)]">
           {THEME_OPTIONS.map(({ key, label, sub, Icon }) => (
             <button
@@ -176,7 +196,7 @@ function ThemeDropdown({ mode, setMode, theme }) {
             </div>
           ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -218,9 +238,7 @@ function Navbar() {
         className={navLinkClass(active, isMobile)}
         onClick={isMobile ? () => setMobileMenuOpen(false) : undefined}
       >
-        {item.icon ? (
-          <IconFontSymbol name={item.icon} className="h-4 w-4 flex-shrink-0" />
-        ) : null}
+        {item.icon ? <NavIcon name={item.icon} /> : null}
         <span>{item.label}</span>
       </Link>
     );
@@ -282,10 +300,7 @@ function Navbar() {
         </div>
 
         {mobileMenuOpen ? (
-          <div
-            id="mobile-nav-menu"
-            className="border-t border-[color:var(--academy-border)] py-3 sm:hidden"
-          >
+          <div id="mobile-nav-menu" className="border-t border-[color:var(--academy-border)] py-3 sm:hidden">
             <div className="space-y-1">
               {navItems.map((item) => renderNavItem(item, true))}
 
