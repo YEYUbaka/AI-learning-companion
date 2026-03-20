@@ -5,4 +5,8 @@ export const HOMEPAGE_ICON_NAMES = {
   plan: 'icon-homepage-plan',
   quiz: 'icon-homepage-quiz',
   map: 'icon-homepage-map',
+  score: 'icon-homepage-score',
+  completion: 'icon-homepage-progress',
+  tests: 'icon-homepage-tests',
+  upload: 'icon-homepage-upload',
 };
