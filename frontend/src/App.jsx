@@ -39,8 +39,8 @@ const AppContent = () => {
 
   return (
     <div
-      className={`min-h-screen transition-colors duration-300 ${
-        isDark ? 'bg-[#05060a] text-white' : 'bg-gray-50 text-gray-900'
+      className={`academy-shell min-h-screen transition-colors duration-300 ${
+        isDark ? 'academy-shell-dark' : 'academy-shell-light'
       }`}
     >
       {!hideNavbar && <Navbar />}

@@ -7,6 +7,16 @@
   --color-text: #0f172a;
   --color-card: rgba(255, 255, 255, 0.95);
   --color-border: rgba(15, 23, 42, 0.1);
+  --academy-bg: #f4ebdd;
+  --academy-surface: #fbf6ee;
+  --academy-surface-soft: #f1e6d5;
+  --academy-brand: #1f4536;
+  --academy-brand-deep: #163429;
+  --academy-accent: #7a5638;
+  --academy-accent-soft: #b48763;
+  --academy-text: #2d241d;
+  --academy-text-muted: #675b4f;
+  --academy-border: rgba(45, 36, 29, 0.10);
 }
 
 :root[data-theme='dark'] {
@@ -14,6 +24,16 @@
   --color-text: #f8fafc;
   --color-card: rgba(255, 255, 255, 0.05);
   --color-border: rgba(255, 255, 255, 0.15);
+  --academy-bg: #13231d;
+  --academy-surface: #1b2f27;
+  --academy-surface-soft: #22382e;
+  --academy-brand: #294439;
+  --academy-brand-deep: #0f1c17;
+  --academy-accent: #b48763;
+  --academy-accent-soft: #d6b38e;
+  --academy-text: #e9ddc8;
+  --academy-text-muted: #c3b39a;
+  --academy-border: rgba(233, 221, 200, 0.12);
 }
 
 body {
@@ -94,5 +114,19 @@ code {
 
 .scrollbar-light::-webkit-scrollbar-thumb:hover {
   background: rgba(148, 163, 184, 0.6);
+}
+
+.academy-shell {
+  background:
+    radial-gradient(circle at top left, rgba(31, 69, 54, 0.10), transparent 30%),
+    linear-gradient(180deg, var(--academy-bg), color-mix(in srgb, var(--academy-bg) 84%, white));
+  color: var(--academy-text);
+}
+
+.academy-card {
+  background: var(--academy-surface);
+  border-color: var(--academy-border);
+  color: var(--academy-text);
+  box-shadow: 0 18px 48px rgba(44, 35, 29, 0.08);
 }
 
