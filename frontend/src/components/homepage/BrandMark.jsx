@@ -14,7 +14,11 @@ export default function BrandMark({ className = '' }) {
           name={HOMEPAGE_ICON_NAMES.brand}
           className="h-5 w-5"
           fallback={
-            <span className="inline-flex h-3.5 w-3.5 rounded-full bg-[var(--academy-accent-soft)]" aria-hidden="true" />
+            <span
+              data-testid="brand-icon-fallback"
+              className="inline-flex h-3.5 w-3.5 rounded-full bg-[var(--academy-accent-soft)]"
+              aria-hidden="true"
+            />
           }
         />
       </span>
@@ -22,9 +26,7 @@ export default function BrandMark({ className = '' }) {
         <span className="block text-[0.92rem] font-semibold tracking-[0.22em] text-[var(--academy-brand)]">
           智学伴
         </span>
-        <span className="block text-xs text-[var(--academy-text-muted)]">
-          学院风学习平台
-        </span>
+        <span className="block text-xs text-[var(--academy-text-muted)]">Learning Companion</span>
       </span>
     </div>
   );

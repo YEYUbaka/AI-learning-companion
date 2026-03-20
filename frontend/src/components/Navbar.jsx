@@ -94,6 +94,7 @@ function CheckIcon() {
 function NavIcon({ name }) {
   return (
     <span
+      data-testid="nav-icon"
       className="academy-nav-icon inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-[color:var(--academy-border)] bg-[var(--academy-surface-soft)] text-[var(--academy-brand)]"
       aria-hidden="true"
     >
@@ -102,6 +103,7 @@ function NavIcon({ name }) {
         className="h-4 w-4"
         fallback={
           <span
+            data-testid="nav-icon-fallback"
             className="inline-flex h-2.5 w-2.5 rounded-full bg-[var(--academy-accent)]"
             aria-hidden="true"
           />
@@ -254,8 +256,7 @@ function Navbar() {
             </Link>
 
             <div className="hidden min-w-0 flex-1 items-center justify-center gap-2 overflow-x-auto md:flex lg:gap-3">
-              {NAV_ITEMS.map((item) => renderNavItem(item))}
-              {isAdmin ? renderNavItem(ADMIN_ITEM) : null}
+              {navItems.map((item) => renderNavItem(item))}
             </div>
           </div>
 
