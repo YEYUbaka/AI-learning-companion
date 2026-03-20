@@ -11,7 +11,7 @@ const STAT_ITEMS = [
 
 function StatIcon({ name }) {
   return (
-    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[color:var(--academy-border)] bg-[var(--academy-surface-soft)] text-[var(--academy-brand)]">
+    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[color:var(--academy-border)] bg-[var(--academy-surface-soft)] text-[var(--academy-text)]">
       <IconFontSymbol
         name={name}
         className="h-5 w-5"
@@ -30,7 +30,7 @@ export default function StatsSummaryGrid({ data }) {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm text-[var(--academy-text-muted)]">{item.label}</p>
-                <p className="mt-4 text-3xl font-semibold text-[var(--academy-brand)]">
+                <p className="mt-4 text-3xl font-semibold text-[var(--academy-text)]">
                   {data[item.key]}
                   <span className="ml-1 text-sm font-normal text-[var(--academy-text-muted)]">
                     {item.suffix}

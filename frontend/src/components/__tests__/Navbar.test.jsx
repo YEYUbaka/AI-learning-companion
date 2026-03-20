@@ -1,7 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, test, vi } from 'vitest';
 import Navbar from '../Navbar.jsx';
+import { renderWithRouter } from '../../test/renderWithRouter.jsx';
 
 const { ensureIconfontLoaded } = vi.hoisted(() => ({
   ensureIconfontLoaded: vi.fn(),
@@ -26,11 +26,7 @@ beforeEach(() => {
 });
 
 test('renders academy brand chrome, fallback icon affordances, and the active route edge case', async () => {
-  const { container } = render(
-    <MemoryRouter initialEntries={['/upload-file']}>
-      <Navbar />
-    </MemoryRouter>
-  );
+  const { container } = renderWithRouter(<Navbar />, { route: '/upload-file' });
 
   expect(screen.getByRole('link', { name: /智学伴/i })).toBeInTheDocument();
   expect(screen.getByText('Learning Companion')).toBeInTheDocument();

@@ -38,7 +38,7 @@ const TOOL_ITEMS = [
 
 function ToolIcon({ name }) {
   return (
-    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[color:var(--academy-border)] bg-[var(--academy-surface-soft)] text-[var(--academy-brand)]">
+    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[color:var(--academy-border)] bg-[var(--academy-surface-soft)] text-[var(--academy-text)]">
       <IconFontSymbol
         name={name}
         className="h-5 w-5"
@@ -56,7 +56,7 @@ export default function QuickToolsGrid() {
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--academy-accent)]">
             研习工具
           </p>
-          <h2 className="mt-2 font-serif text-2xl text-[var(--academy-brand)]">常用入口</h2>
+          <h2 className="mt-2 font-serif text-2xl text-[var(--academy-text)]">常用入口</h2>
         </div>
       </div>
 
@@ -66,7 +66,7 @@ export default function QuickToolsGrid() {
             <AcademyCard className="h-full p-5 transition-transform duration-200 group-hover:-translate-y-1">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="text-base font-semibold text-[var(--academy-brand)]">{item.title}</h3>
+                  <h3 className="text-base font-semibold text-[var(--academy-text)]">{item.title}</h3>
                   <p className="mt-2 text-sm leading-6 text-[var(--academy-text-muted)]">
                     {item.description}
                   </p>

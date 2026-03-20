@@ -95,7 +95,7 @@ function NavIcon({ name }) {
   return (
     <span
       data-testid="nav-icon"
-      className="academy-nav-icon inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-[color:var(--academy-border)] bg-[var(--academy-surface-soft)] text-[var(--academy-brand)]"
+      className="academy-nav-icon inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-[color:var(--academy-border)] bg-[var(--academy-surface-soft)] text-[var(--academy-text)]"
       aria-hidden="true"
     >
       <IconFontSymbol
@@ -123,14 +123,14 @@ function navLinkClass(isActive, isMobile = false) {
   if (isMobile) {
     return `flex items-center gap-3 rounded-xl px-3 py-2.5 text-base font-medium transition-colors ${
       isActive
-        ? 'bg-[var(--academy-surface-soft)] text-[var(--academy-brand)]'
+        ? 'bg-[var(--academy-surface-soft)] text-[var(--academy-text)]'
         : 'text-[var(--academy-text-muted)] hover:bg-[var(--academy-surface-soft)] hover:text-[var(--academy-text)]'
     }`;
   }
 
   return `inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap ${
     isActive
-      ? 'border-[color:var(--academy-accent)] bg-[var(--academy-surface-soft)] text-[var(--academy-brand)] shadow-sm'
+      ? 'border-[color:var(--academy-accent)] bg-[var(--academy-surface-soft)] text-[var(--academy-text)] shadow-sm'
       : 'border-transparent text-[var(--academy-text-muted)] hover:border-[color:var(--academy-border)] hover:bg-[var(--academy-surface-soft)] hover:text-[var(--academy-text)]'
   }`;
 }
@@ -174,7 +174,7 @@ function ThemeDropdown({ mode, setMode, theme }) {
               }}
               className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
                 mode === key
-                  ? 'bg-[var(--academy-surface-soft)] text-[var(--academy-brand)]'
+                  ? 'bg-[var(--academy-surface-soft)] text-[var(--academy-text)]'
                   : 'text-[var(--academy-text)] hover:bg-[var(--academy-surface-soft)]'
               }`}
             >

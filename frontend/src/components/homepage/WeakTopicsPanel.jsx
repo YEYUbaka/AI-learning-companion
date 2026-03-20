@@ -8,7 +8,7 @@ export default function WeakTopicsPanel({ weakTopics }) {
       <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--academy-accent)]">
         重点关注
       </p>
-      <h2 className="mt-2 font-serif text-2xl text-[var(--academy-brand)]">需要加强的方面</h2>
+      <h2 className="mt-2 font-serif text-2xl text-[var(--academy-text)]">需要加强的方面</h2>
       <div className="mt-5 space-y-3">
         {weakTopics.map((topic) => (
           <div

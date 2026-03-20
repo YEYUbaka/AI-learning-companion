@@ -3,6 +3,7 @@ import api from '../api/apiClient';
 import AcademyCard from '../components/homepage/AcademyCard.jsx';
 import AcademyPageShell from '../components/homepage/AcademyPageShell.jsx';
 import DashboardOverview from '../components/homepage/DashboardOverview.jsx';
+import { useThemeStore } from '../store/themeStore';
 
 function useCountUp(target, duration = 900) {
   const [count, setCount] = useState(0);
@@ -133,6 +134,8 @@ function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const { theme } = useThemeStore();
+  const isDark = theme === 'dark';
   const storedUser = getStoredUserInfo();
   const userId = storedUser?.id;
 
@@ -211,6 +214,7 @@ function Dashboard() {
 
   return (
     <DashboardOverview
+      isDark={isDark}
       data={overviewData}
       onDownloadReport={handleDownloadReport}
     />

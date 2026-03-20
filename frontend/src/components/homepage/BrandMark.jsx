@@ -7,7 +7,7 @@ export default function BrandMark({ className = '' }) {
       className={`academy-brand-mark flex items-center gap-3 rounded-[22px] border border-[color:var(--academy-border)] bg-[var(--academy-surface)] px-3 py-2 shadow-[0_14px_32px_rgba(44,35,29,0.08)] ${className}`}
     >
       <span
-        className="academy-brand-icon flex h-10 w-10 items-center justify-center rounded-2xl border border-[color:var(--academy-border)] bg-[var(--academy-brand)] text-[var(--academy-surface)]"
+        className="academy-brand-icon flex h-10 w-10 items-center justify-center rounded-2xl border border-[color:var(--academy-border)] bg-[var(--academy-surface-soft)] text-[var(--academy-text)]"
         aria-hidden="true"
       >
         <IconFontSymbol
@@ -23,7 +23,7 @@ export default function BrandMark({ className = '' }) {
         />
       </span>
       <span className="min-w-0 leading-tight">
-        <span className="block text-[0.92rem] font-semibold tracking-[0.22em] text-[var(--academy-brand)]">
+        <span className="block text-[0.92rem] font-semibold tracking-[0.22em] text-[var(--academy-text)]">
           智学伴
         </span>
         <span className="block text-xs text-[var(--academy-text-muted)]">Learning Companion</span>

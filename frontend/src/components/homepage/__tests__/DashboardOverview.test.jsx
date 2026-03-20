@@ -14,6 +14,12 @@ vi.mock('../../icons/iconfontLoader.js', () => ({
   ensureIconfontLoaded,
 }));
 
+vi.mock('../ProgressCharts.jsx', () => ({
+  default: function ProgressCharts() {
+    return <div data-testid="progress-charts" />;
+  },
+}));
+
 vi.mock('../../../api/apiClient.js', () => ({
   default: {
     get: apiGet,
