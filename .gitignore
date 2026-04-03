@@ -134,6 +134,7 @@ docs/*.pdf
 
 # docs 子目录排除（保留 docs/README.md）
 docs/competition/
+docs/参赛总文件夹/
 docs/RAG/temp/
 docs/RAG/年级知识点/
 docs/RAG/小学数学各版本知识点/
