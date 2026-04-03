@@ -130,6 +130,15 @@ docs/*.docx
 docs/*.pptx
 docs/*.bat
 docs/*_query
+docs/*.pdf
+
+# docs 子目录排除（保留 docs/README.md）
+docs/competition/
+docs/RAG/temp/
+docs/RAG/年级知识点/
+docs/RAG/小学数学各版本知识点/
+docs/RAG/小学英语各版本知识点/
+docs/RAG/收录规范.md
 
 # 额外的技术文档（只保留根目录 README.md）
 frontend/README.md
