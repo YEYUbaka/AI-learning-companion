@@ -94,7 +94,7 @@ if [ -d "$APP_DIR" ]; then
     git pull origin $BRANCH
 else
     mkdir -p "$APP_DIR"
-    git clone -b $BRANCH $REPO_URL "$APP_DIR"
+    git clone --depth 1 -b $BRANCH $REPO_URL "$APP_DIR"
 fi
 
 cd "$APP_DIR"
