@@ -1,27 +1,14 @@
 import axios from 'axios';
 
 // 自动检测后端API地址
-// 如果前端运行在开发环境，使用 localhost
-// 如果前端运行在生产环境，使用当前域名（去掉端口，使用8000端口）
 const getBaseURL = () => {
-  // 开发环境：使用 localhost
+  // 开发环境：使用 localhost:8000
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return 'http://127.0.0.1:8000';
   }
   
-  // 生产环境：使用当前域名，后端端口8000
-  // 如果前端在 5173 端口，后端在 8000 端口
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  
-  // 检查是否是IP地址
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
-    // IP地址：直接使用IP:8000
-    return `${protocol}//${hostname}:8000`;
-  } else {
-    // 域名：使用域名:8000（或根据实际情况调整）
-    return `${protocol}//${hostname}:8000`;
-  }
+  // 生产环境：使用相对路径，通过 Nginx 代理转发
+  return '';
 };
 
 // 创建 Axios 实例，配置基础 URL
