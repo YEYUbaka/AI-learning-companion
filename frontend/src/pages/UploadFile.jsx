@@ -221,7 +221,12 @@ function UploadFile() {
         {/* 上传结果 */}
         {uploadResult && (
           <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-            <p className="text-green-800 font-medium">✅ 文件上传成功！</p>
+            <p className="text-green-800 font-medium flex items-center gap-2">
+              <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              文件上传成功
+            </p>
             <p className="text-sm text-green-700 mt-1">
               文本长度: {uploadResult.text_length} 字符
             </p>

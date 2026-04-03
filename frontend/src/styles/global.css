@@ -1,19 +1,60 @@
+/* 导入动画系统 */
+@import './animations.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --color-bg: #f4f6fb;
+  /* 背景色 */
+  --color-bg: #f8fafc;
+  --color-bg-secondary: #f1f5f9;
   --color-text: #0f172a;
+  --color-text-secondary: #475569;
   --color-card: rgba(255, 255, 255, 0.95);
-  --color-border: rgba(15, 23, 42, 0.1);
+  --color-border: rgba(15, 23, 42, 0.08);
+  
+  /* 主色调 */
+  --color-primary: #2563eb;
+  --color-primary-light: #3b82f6;
+  --color-primary-dark: #1d4ed8;
+  
+  /* 辅助色 */
+  --color-secondary: #8b5cf6;
+  --color-accent-cyan: #06b6d4;
+  --color-accent-emerald: #10b981;
+  --color-accent-amber: #f59e0b;
+  
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.1);
+  --shadow-glow: 0 0 20px rgba(37, 99, 235, 0.12);
+  
+  /* 动画时长 */
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 400ms;
+  
+  /* 缓动函数 */
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
 :root[data-theme='dark'] {
-  --color-bg: #05060a;
+  --color-bg: #0f172a;
+  --color-bg-secondary: #1e293b;
   --color-text: #f8fafc;
-  --color-card: rgba(255, 255, 255, 0.05);
-  --color-border: rgba(255, 255, 255, 0.15);
+  --color-text-secondary: #94a3b8;
+  --color-card: rgba(30, 41, 59, 0.8);
+  --color-border: rgba(255, 255, 255, 0.08);
+  
+  /* 深色模式阴影 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.35);
 }
 
 body {
@@ -90,6 +131,10 @@ code {
   background: rgba(148, 163, 184, 0.4);
   border-radius: 4px;
   transition: background 0.2s ease;
+}
+
+.scrollbar-light::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
 }
 
 .scrollbar-light::-webkit-scrollbar-thumb:hover {

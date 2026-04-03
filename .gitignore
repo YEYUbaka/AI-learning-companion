@@ -108,32 +108,9 @@ documents/参赛文件夹/*.mp4
 
 # 项目特定
 backend/test_*.pdf
-backend/test_*.py
 
 # RAG 知识库索引（运行时生成）
 knowledge_base/_index/
-backend/*.md
-backend/快速*.py
-backend/测试*.py
-backend/诊断*.py
-backend/调试*.py
-backend/清理*.py
-backend/重置*.py
-backend/检查*.py
-backend/迁移*.py
-backend/验证*.md
-backend/问题*.md
-backend/修复*.md
-backend/上下文*.md
-backend/故障*.md
-backend/数据库*.md
-backend/日志*.md
-backend/登录*.md
-backend/环境*.md
-backend/配置*.md
-backend/项目*.txt
-backend/智学伴*.docx
-backend/智学伴*.pptx
 
 # 参赛相关文档（不需要上传）
 documents/
@@ -143,7 +120,16 @@ GitHub上传完整指南.md
 GITHUB_UPLOAD_CHECKLIST.md
 项目整理说明.md
 上传到GitHub的步骤.md
-创建数据库.sql
+
+# docs 目录中的临时文档和脚本（不提交到 GitHub）
+docs/*.md
+docs/*.sql
+docs/*.py
+docs/*.txt
+docs/*.docx
+docs/*.pptx
+docs/*.bat
+docs/*_query
 
 # 额外的技术文档（只保留根目录 README.md）
 frontend/README.md

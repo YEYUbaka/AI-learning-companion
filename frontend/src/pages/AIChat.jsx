@@ -160,7 +160,7 @@ const normalizeMathContent = (text = '') => {
 // 直接使用 apiClient.js 中已配置的 baseURL，确保一致性
 const getApiBase = () => {
   const baseURL = api.defaults.baseURL;
-  console.log('🔍 getApiBase - 使用 apiClient 的 baseURL:', baseURL);
+  // console.log('🔍 getApiBase - 使用 apiClient 的 baseURL:', baseURL);
   return baseURL;
 };
 
@@ -682,13 +682,13 @@ function AIChat() {
   useEffect(() => {
     // 每次调用时重新获取，确保获取到最新的地址
     const apiBase = getApiBase();
-    console.log('AI Chat - 环境信息:', {
-      hostname: window.location.hostname,
-      protocol: window.location.protocol,
-      port: window.location.port,
-      fullURL: window.location.href,
-      apiBase: apiBase
-    });
+    // console.log('AI Chat - 环境信息:', {
+    //   hostname: window.location.hostname,
+    //   protocol: window.location.protocol,
+    //   port: window.location.port,
+    //   fullURL: window.location.href,
+    //   apiBase: apiBase
+    // });
     fetch(`${apiBase}/api/v1/ai/providers`)
       .then(res => {
         if (!res.ok) {
@@ -697,7 +697,7 @@ function AIChat() {
         return res.json();
       })
       .then(data => {
-        console.log('Loaded providers:', data);
+        // console.log('Loaded providers:', data);
         const providersList = data.providers || ['deepseek', 'wenxin', 'xinghuo', 'chatglm', 'moonshot'];
         setProviders(providersList);
         setCurrentProvider(data.current || 'deepseek');
@@ -892,19 +892,19 @@ function AIChat() {
         content: msg.content.trim(),
       }));
 
-    console.log('📝 构建的对话历史:', {
-      原始消息数: sessionForHistory.messages?.length || 0,
-      过滤后消息数: recentHistory.length,
-      历史内容: recentHistory.map(
-        (m, idx) => `[${idx + 1}] ${m.role}: ${m.content.substring(0, 50)}...`
-      ),
-    });
+    // console.log('📝 构建的对话历史:', {
+    //   原始消息数: sessionForHistory.messages?.length || 0,
+    //   过滤后消息数: recentHistory.length,
+    //   历史内容: recentHistory.map(
+    //     (m, idx) => `[${idx + 1}] ${m.role}: ${m.content.substring(0, 50)}...`
+    //   ),
+    // });
     
     // 详细打印历史消息（用于调试）
     if (recentHistory.length > 0) {
-      console.log('📋 历史消息详情:', recentHistory);
+      // console.log('📋 历史消息详情:', recentHistory);
     } else {
-      console.warn('⚠️ 警告：没有历史消息，AI将无法记住之前的对话！');
+      // console.warn('⚠️ 警告：没有历史消息，AI将无法记住之前的对话！');
     }
     
     updateSessionMessages(activeSessionId, (msgs) => [
@@ -922,27 +922,27 @@ function AIChat() {
         provider: selectedProvider,  // 发送选中的模型
         history: recentHistory  // 发送对话历史用于上下文记忆
       };
-      console.log('📤 发送请求:', {
-        模型: selectedProvider,
-        当前问题: currentPrompt,
-        历史消息数: recentHistory.length,
-        完整请求体: requestBody
-      });
-      console.log('AI Chat - 环境信息:', {
-        hostname: window.location.hostname,
-        protocol: window.location.protocol,
-        port: window.location.port,
-        fullURL: window.location.href,
-        apiBase: apiBase
-      });
+      // console.log('📤 发送请求:', {
+      //   模型: selectedProvider,
+      //   当前问题: currentPrompt,
+      //   历史消息数: recentHistory.length,
+      //   完整请求体: requestBody
+      // });
+      // console.log('AI Chat - 环境信息:', {
+      //   hostname: window.location.hostname,
+      //   protocol: window.location.protocol,
+      //   port: window.location.port,
+      //   fullURL: window.location.href,
+      //   apiBase: apiBase
+      // });
       
       const requestUrl = `${apiBase}/api/v1/ai/ask/stream`;
-      console.log('请求URL:', requestUrl);
-      console.log('请求配置:', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
+      // console.log('请求URL:', requestUrl);
+      // console.log('请求配置:', {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify(requestBody),
+      // });
       
       const response = await fetch(requestUrl, {
         method: 'POST',
@@ -950,11 +950,11 @@ function AIChat() {
         body: JSON.stringify(requestBody),
       });
 
-      console.log('收到响应:', {
-        status: response.status,
-        statusText: response.statusText,
-        headers: Object.fromEntries(response.headers.entries()),
-      });
+      // console.log('收到响应:', {
+      //   status: response.status,
+      //   statusText: response.statusText,
+      //   headers: Object.fromEntries(response.headers.entries()),
+      // });
 
       if (!response.ok) {
         const errorText = await response.text();

@@ -5,15 +5,18 @@ import { useThemeStore } from '../store/themeStore';
 import PaperGenerator from '../components/PaperGenerator';
 
 const PAPER_STORAGE_KEY = 'zhixueban_custom_paper';
+const ANSWER_STORAGE_KEY = 'zhixueban_quiz_progress';
 
 function Quiz() {
   const [mode, setMode] = useState('regular'); // 'regular' 或 'custom'
   const [topic, setTopic] = useState('');
   const [numQuestions, setNumQuestions] = useState(5);
+  const [choicePercent, setChoicePercent] = useState(60); // 选择题百分比
   const [questionTypeDistribution, setQuestionTypeDistribution] = useState({
     choice: 3,
     fill: 2
   });
+  const [startTime, setStartTime] = useState(null); // 答题开始时间
   
   // 题型选项（常规测评模式支持的类型）
   const regularQuestionTypes = [
@@ -33,6 +36,18 @@ function Quiz() {
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
 
+  // 计算答题进度
+  const answeredCount = useMemo(() => {
+    return answers.filter((ans, idx) => {
+      const q = questions[idx];
+      if (!q) return false;
+      if (q.type === 'fill' && ans?.trim()) return true;
+      if (q.type === 'choice' && ans) return true;
+      if (q.type === 'judge' && ans) return true;
+      return false;
+    }).length;
+  }, [answers, questions]);
+
   const palette = useMemo(
     () =>
       isDark
@@ -44,6 +59,8 @@ function Quiz() {
               'flex-1 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-slate-400 text-white',
             gradientButton:
               'bg-blue-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition',
+            secondaryButton:
+              'bg-slate-700 text-slate-300 px-4 py-2 rounded-lg hover:bg-slate-600 transition text-sm',
             alert: 'p-4 rounded-xl bg-red-900/20 border border-red-500/40 text-red-200',
             questionCard: 'bg-slate-800 border border-slate-700 rounded-xl',
             choice:
@@ -61,6 +78,8 @@ function Quiz() {
               'flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent',
             gradientButton:
               'bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition',
+            secondaryButton:
+              'bg-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-300 transition text-sm',
             alert: 'mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800',
             questionCard: 'bg-white border border-gray-200 rounded-xl',
             choice:
@@ -115,6 +134,7 @@ function Quiz() {
       if (response.data.success) {
         setQuestions(response.data.questions);
         setAnswers(new Array(response.data.questions.length).fill(''));
+        setStartTime(Date.now());
         setError('');
         setStatusMessage('测验生成完成，可以开始答题。');
         setTimeout(() => setStatusMessage(''), 4000);
@@ -135,30 +155,26 @@ function Quiz() {
   const handleNumQuestionsChange = (value) => {
     const newValue = parseInt(value) || 5;
     setNumQuestions(newValue);
-    
-    // 自动调整题型分布
-    const currentTotal = Object.values(questionTypeDistribution).reduce((sum, count) => sum + count, 0);
-    if (currentTotal > 0) {
-      // 按比例调整
-      const ratio = newValue / currentTotal;
-      setQuestionTypeDistribution({
-        choice: Math.max(1, Math.round((questionTypeDistribution.choice || 0) * ratio)),
-        fill: Math.max(0, newValue - Math.max(1, Math.round((questionTypeDistribution.choice || 0) * ratio)))
-      });
-    } else {
-      // 默认分布：60%选择题，40%填空题
-      setQuestionTypeDistribution({
-        choice: Math.max(1, Math.round(newValue * 0.6)),
-        fill: newValue - Math.max(1, Math.round(newValue * 0.6))
-      });
-    }
-  };
-  
-  const handleTypeDistributionChange = (type, value) => {
-    const newValue = parseInt(value) || 0;
+
+    // 根据百分比自动计算题型分布
+    const choiceCount = Math.round(newValue * choicePercent / 100);
+    const fillCount = newValue - choiceCount;
     setQuestionTypeDistribution({
-      ...questionTypeDistribution,
-      [type]: Math.max(0, newValue)
+      choice: choiceCount,
+      fill: fillCount
+    });
+  };
+
+  const handleChoicePercentChange = (value) => {
+    const percent = parseInt(value) || 60;
+    setChoicePercent(percent);
+
+    // 自动计算题型分布
+    const choiceCount = Math.round(numQuestions * percent / 100);
+    const fillCount = numQuestions - choiceCount;
+    setQuestionTypeDistribution({
+      choice: choiceCount,
+      fill: fillCount
     });
   };
 
@@ -166,6 +182,14 @@ function Quiz() {
     const newAnswers = [...answers];
     newAnswers[index] = value;
     setAnswers(newAnswers);
+
+    // 自动保存答题进度
+    sessionStorage.setItem(ANSWER_STORAGE_KEY, JSON.stringify({
+      topic,
+      questions,
+      answers: newAnswers,
+      startTime
+    }));
   };
 
   const handleSubmit = async () => {
@@ -222,8 +246,11 @@ function Quiz() {
     setError('');
     setPaperData(null);
     setNumQuestions(5);
+    setChoicePercent(60);
     setQuestionTypeDistribution({ choice: 3, fill: 2 });
     setShowAdvancedConfig(false);
+    setStartTime(null);
+    sessionStorage.removeItem(ANSWER_STORAGE_KEY);
   };
   
   const handlePaperGenerated = (data) => {
@@ -277,6 +304,24 @@ function Quiz() {
       } catch (error) {
         console.warn('加载缓存试卷失败:', error);
         sessionStorage.removeItem(PAPER_STORAGE_KEY);
+      }
+    }
+
+    // 载入答题进度
+    const savedProgress = sessionStorage.getItem(ANSWER_STORAGE_KEY);
+    if (savedProgress && !cached) {
+      try {
+        const { topic: savedTopic, questions: savedQuestions, answers: savedAnswers, startTime: savedStartTime } = JSON.parse(savedProgress);
+        if (savedQuestions && savedAnswers) {
+          setTopic(savedTopic);
+          setQuestions(savedQuestions);
+          setAnswers(savedAnswers);
+          setStartTime(savedStartTime);
+          setMode('regular');
+        }
+      } catch (error) {
+        // warn silenced
+        sessionStorage.removeItem(ANSWER_STORAGE_KEY);
       }
     }
   }, []);
@@ -365,75 +410,44 @@ function Quiz() {
             </div>
             
             {/* 基础配置 */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white/80' : 'text-gray-700'}`}>
-                  题目数量
-                </label>
-                <input
-                  type="number"
-                  value={numQuestions}
-                  onChange={(e) => handleNumQuestionsChange(e.target.value)}
-                  min="1"
-                  max="50"
-                  className={palette.input}
-                />
-              </div>
-              <div className="flex items-end">
-                <button
-                  onClick={() => setShowAdvancedConfig(!showAdvancedConfig)}
-                  className={`text-sm ${isDark ? 'text-cyan-400 hover:text-cyan-300' : 'text-blue-600 hover:text-blue-700'}`}
-                >
-                  {showAdvancedConfig ? '收起' : '展开'}高级配置
-                </button>
+            <div>
+              <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white/80' : 'text-gray-700'}`}>
+                题目数量：{numQuestions} 道
+              </label>
+              <input
+                type="range"
+                value={numQuestions}
+                onChange={(e) => handleNumQuestionsChange(e.target.value)}
+                min="3"
+                max="30"
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>3</span>
+                <span>30</span>
               </div>
             </div>
-            
-            {/* 高级配置 - 题型分布 */}
-            {showAdvancedConfig && (
-              <div className={`${isDark ? 'bg-[#0f172a]' : 'bg-gray-50'} p-4 rounded-xl border ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
-                <label className={`block text-sm font-medium mb-3 ${isDark ? 'text-white/80' : 'text-gray-700'}`}>
-                  题型分布（总和必须等于题目数量）
-                </label>
-                <div className="grid grid-cols-3 gap-4">
-                  {regularQuestionTypes.map((type) => (
-                    <div key={type.key}>
-                      <label className={`block text-xs mb-1 ${palette.textMuted}`}>{type.label}</label>
-                      <input
-                        type="number"
-                        value={questionTypeDistribution[type.key] || 0}
-                        onChange={(e) => handleTypeDistributionChange(type.key, e.target.value)}
-                        min="0"
-                        max={numQuestions}
-                        className={palette.input}
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-3">
-                  <p className={`text-xs ${palette.textMuted}`}>
-                    当前分布：
-                    {regularQuestionTypes.map((type, idx) => (
-                      <span key={type.key}>
-                        {type.label} {questionTypeDistribution[type.key] || 0} 道
-                        {idx < regularQuestionTypes.length - 1 && '，'}
-                      </span>
-                    ))}
-                    {Object.values(questionTypeDistribution).reduce((sum, count) => sum + count, 0) !== numQuestions && (
-                      <span className={`ml-2 ${isDark ? 'text-yellow-400' : 'text-yellow-600'}`}>
-                        （总和：{Object.values(questionTypeDistribution).reduce((sum, count) => sum + count, 0)}，需要：{numQuestions}）
-                      </span>
-                    )}
-                  </p>
-                </div>
+
+            {/* 题型配置 */}
+            <div>
+              <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white/80' : 'text-gray-700'}`}>
+                选择题占比：{choicePercent}%（{questionTypeDistribution.choice} 道选择题 + {questionTypeDistribution.fill} 道填空题）
+              </label>
+              <input
+                type="range"
+                value={choicePercent}
+                onChange={(e) => handleChoicePercentChange(e.target.value)}
+                min="0"
+                max="100"
+                step="10"
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>0%</span>
+                <span>50%</span>
+                <span>100%</span>
               </div>
-            )}
-            
-            {!showAdvancedConfig && (
-              <p className={`text-xs ${palette.textMuted}`}>
-                将生成 {numQuestions} 道测验题（默认：{Math.round(numQuestions * 0.6)} 道选择题 + {numQuestions - Math.round(numQuestions * 0.6)} 道填空题）
-              </p>
-            )}
+            </div>
           </div>
         )}
 
@@ -465,9 +479,13 @@ function Quiz() {
                 <h2 className="text-xl font-semibold">
                   {paperData ? paperData.title : `测验主题：${topic}`}
                 </h2>
-                {paperData && (
+                {paperData ? (
                   <p className={`text-sm ${palette.textMuted} mt-1`}>
                     {paperData.total_questions}道题 · 总分{paperData.total_score}分
+                  </p>
+                ) : (
+                  <p className={`text-sm ${palette.textMuted} mt-1`}>
+                    答题进度：{answeredCount}/{questions.length}
                   </p>
                 )}
               </div>
@@ -498,14 +516,14 @@ function Quiz() {
                 )}
                 <button
                   onClick={handleReset}
-                  className={`text-sm ${palette.textMuted} hover:opacity-80`}
+                  className={palette.secondaryButton}
                 >
                   {paperData ? '返回' : '重新生成'}
                 </button>
               </div>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-6">
               {questions.map((q, i) => (
                 <div
                   key={i}
@@ -590,13 +608,17 @@ function Quiz() {
 
             {/* 提交按钮 - 只在常规测评模式显示 */}
             {!paperData || mode === 'regular' ? (
-              <div className="mt-6 flex justify-end">
+              <div className="mt-8 flex justify-end">
                 <button
                   onClick={handleSubmit}
-                  disabled={submitting}
-                  className="bg-green-600 text-white px-8 py-3 rounded-xl shadow-lg hover:bg-green-700 disabled:opacity-50"
+                  disabled={submitting || answeredCount < questions.length}
+                  className={`px-8 py-3 rounded-xl shadow-lg font-medium transition ${
+                    submitting || answeredCount < questions.length
+                      ? 'bg-gray-400 cursor-not-allowed text-white'
+                      : 'bg-green-600 hover:bg-green-700 text-white'
+                  }`}
                 >
-                  {submitting ? '提交中...' : '提交测验'}
+                  {submitting ? '提交中...' : `提交测验 (${answeredCount}/${questions.length})`}
                 </button>
               </div>
             ) : null}

@@ -27,6 +27,11 @@ class LearningMapGenerateRequest(BaseModel):
         return values
 
 
+class ResourceSchema(BaseModel):
+    title: str
+    url: str
+
+
 class LearningNodeSchema(BaseModel):
     id: int
     title: str
@@ -34,7 +39,7 @@ class LearningNodeSchema(BaseModel):
     level: Optional[str]
     mastery: Optional[str]
     example: Optional[str]
-    resources: Optional[List[str]]
+    resources: Optional[List[ResourceSchema]]
 
     class Config:
         orm_mode = True

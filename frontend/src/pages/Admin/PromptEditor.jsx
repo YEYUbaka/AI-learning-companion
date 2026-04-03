@@ -83,7 +83,7 @@ const PromptEditor = () => {
       setLoading(true);
       const response = await api.get('/api/v1/admin/prompts');
       setPrompts(response.data || []);
-      console.log('获取到的Prompt列表:', response.data);
+      // console.log('获取到的Prompt列表:', response.data);
     } catch (error) {
       console.error('获取Prompt列表失败:', error);
       setError(error.response?.data?.detail || error.message || '获取Prompt列表失败');

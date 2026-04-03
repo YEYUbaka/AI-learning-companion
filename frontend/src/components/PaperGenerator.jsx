@@ -122,8 +122,8 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         
         if (response.data.success && response.data.recommendation) {
           const recommendation = response.data.recommendation;
-          console.log('首次加载推荐数据:', recommendation);
-          console.log('题型分布:', recommendation.question_type_distribution);
+          // console.log('首次加载推荐数据:', recommendation);
+          // console.log('题型分布:', recommendation.question_type_distribution);
           
           setConfig(prev => {
             // 优先使用推荐中的题型分布，如果不存在或为空，才使用旧的
@@ -138,7 +138,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
               completeQuestionTypeDist[type] = questionTypeDist[type] || 0;
             });
             
-            console.log('处理后的题型分布:', completeQuestionTypeDist);
+            // console.log('处理后的题型分布:', completeQuestionTypeDist);
             
             return {
               ...prev,
@@ -152,7 +152,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         }
       } catch (err) {
         // 静默失败，不影响使用
-        console.warn('首次加载AI推荐失败，使用默认值:', err);
+        // console.warn('首次加载AI推荐失败，使用默认值:', err);
       }
     };
     
@@ -177,7 +177,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         : {
             card: 'bg-white border border-gray-200 rounded-xl shadow-sm',
             input: 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500',
-            button: 'px-6 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:shadow-lg transition',
+            button: 'px-6 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 hover:shadow-lg transition',
             buttonSecondary: 'px-6 py-2 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition',
             label: 'text-gray-700 text-sm font-medium',
             textMuted: 'text-gray-500 text-xs'
@@ -443,12 +443,12 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         config.title || null // 传递试卷标题
       );
       
-      console.log('学段改变时AI推荐响应:', response);
+      // console.log('学段改变时AI推荐响应:', response);
       
       if (response?.data?.success && response?.data?.recommendation) {
         const recommendation = response.data.recommendation;
-        console.log('学段改变时推荐数据:', recommendation);
-        console.log('题型分布:', recommendation.question_type_distribution);
+        // console.log('学段改变时推荐数据:', recommendation);
+        // console.log('题型分布:', recommendation.question_type_distribution);
         
         // 优先使用推荐中的题型分布，如果不存在或为空，才使用新的分布
         const questionTypeDist = recommendation.question_type_distribution && Object.keys(recommendation.question_type_distribution).length > 0
@@ -462,7 +462,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
           completeQuestionTypeDist[type] = questionTypeDist[type] || 0;
         });
         
-        console.log('处理后的题型分布:', completeQuestionTypeDist);
+        // console.log('处理后的题型分布:', completeQuestionTypeDist);
         
         setConfig(prev => ({
           ...prev,
@@ -475,19 +475,19 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         }));
         // 可选：显示推荐理由
         if (recommendation.reasoning) {
-          console.log('AI推荐理由:', recommendation.reasoning);
+          // console.log('AI推荐理由:', recommendation.reasoning);
         }
       } else {
-        console.warn('学段改变时AI推荐响应格式异常:', {
-          success: response?.data?.success,
-          hasRecommendation: !!response?.data?.recommendation,
-          fullResponse: response?.data
-        });
+        // console.warn('学段改变时AI推荐响应格式异常:', {
+        //   success: response?.data?.success,
+        //   hasRecommendation: !!response?.data?.recommendation,
+        //   fullResponse: response?.data
+        // });
       }
     } catch (err) {
       // AI推荐失败不影响使用，静默失败
-      console.warn('获取AI推荐失败，使用默认分布:', err);
-      console.warn('错误详情:', err.response?.data || err.message);
+      // console.warn('获取AI推荐失败，使用默认分布:', err);
+      // console.warn('错误详情:', err.response?.data || err.message);
     }
   };
   
@@ -847,13 +847,13 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
                     config.title || null // 传递试卷标题
                   );
                   
-                  console.log('AI推荐响应:', response);
-                  console.log('响应数据:', response?.data);
+                  // console.log('AI推荐响应:', response);
+                  // console.log('响应数据:', response?.data);
                   
                   if (response?.data?.success && response?.data?.recommendation) {
                     const recommendation = response.data.recommendation;
-                    console.log('推荐数据:', recommendation);
-                    console.log('题型分布:', recommendation.question_type_distribution);
+                    // console.log('推荐数据:', recommendation);
+                    // console.log('题型分布:', recommendation.question_type_distribution);
                     
                     // 确保所有题型字段都存在
                     const questionTypeDist = recommendation.question_type_distribution || {};
@@ -877,11 +877,11 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
                       alert(`AI推荐理由：${recommendation.reasoning}`);
                     }
                   } else {
-                    console.warn('AI推荐响应格式异常:', {
-                      success: response?.data?.success,
-                      hasRecommendation: !!response?.data?.recommendation,
-                      fullResponse: response?.data
-                    });
+                    // console.warn('AI推荐响应格式异常:', {
+                    //   success: response?.data?.success,
+                    //   hasRecommendation: !!response?.data?.recommendation,
+                    //   fullResponse: response?.data
+                    // });
                     // 如果AI推荐失败，使用默认分布
                     const newDistribution = getDefaultDistribution(config.grade_level, config.total_questions);
                     setConfig({
@@ -958,20 +958,20 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
               onClick={() => {
                 const currentSum = Object.values(config.question_type_distribution).reduce((sum, count) => sum + count, 0);
                 if (currentSum !== config.total_questions) {
-                  const diff = config.total_questions - currentSum;
                   const newDistribution = { ...config.question_type_distribution };
-                  
-                  // 找到最大的题型，调整它
-                  const maxType = Object.entries(newDistribution).reduce((a, b) => 
-                    (newDistribution[a[0]] || 0) > (newDistribution[b[0]] || 0) ? a : b
-                  )[0];
-                  
-                  newDistribution[maxType] = (newDistribution[maxType] || 0) + diff;
-                  
-                  setConfig({
-                    ...config,
-                    question_type_distribution: newDistribution
-                  });
+
+                  // 找到第一个非零的题型，调整它
+                  const nonZeroTypes = Object.entries(newDistribution).filter(([_, count]) => count > 0);
+                  if (nonZeroTypes.length > 0) {
+                    const diff = config.total_questions - currentSum;
+                    const targetType = nonZeroTypes[0][0];
+                    newDistribution[targetType] = Math.max(0, (newDistribution[targetType] || 0) + diff);
+
+                    setConfig({
+                      ...config,
+                      question_type_distribution: newDistribution
+                    });
+                  }
                 }
               }}
               className={`text-xs px-3 py-1 rounded-lg ${isDark ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`}

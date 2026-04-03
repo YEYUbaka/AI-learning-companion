@@ -27,7 +27,10 @@ LEARNING_MAP_PROMPT = """
       "level": "foundation|intermediate|advanced",
       "mastery": "strong|medium|weak",
       "example": "典型例题或场景",
-      "resources": ["推荐资源1", "推荐资源2"]
+      "resources": [
+        {{"title": "资源名称", "url": "https://example.com"}},
+        {{"title": "资源名称2", "url": "https://example.com/2"}}
+      ]
     }}
   ],
   "edges": [
@@ -37,8 +40,8 @@ LEARNING_MAP_PROMPT = """
 ```
 
 额外要求：
-1. 至少生成 6 个节点与 8 条边。
-2. `resources` 必须是字符串数组（即使只有 1 条也使用数组形式）。
+1. 至少生成 8 个节点与 12 条边，构建完整的知识体系。
+2. `resources` 必须是对象数组，每个对象包含 title 和 url 字段，url 必须是真实可访问的学习资源链接（如百度百科、Khan Academy、Coursera、B站教程等）。
 3. 不得输出 JSON 之外的任何文字（包括问候、注释、Markdown 标题、再次解释等）。
 4. 输出缺失字段或存在语法错误时必须立即重新生成，直到 JSON 合法。
 

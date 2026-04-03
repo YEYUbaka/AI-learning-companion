@@ -383,19 +383,36 @@ class PaperExporter:
             # 添加题目
             questions = paper_data.get("questions", [])
             for i, q in enumerate(questions, 1):
+                # 获取题型标签
+                q_type = q.get('type', '')
+                type_label = ''
+                if q_type == 'choice':
+                    type_label = '单选题'
+                elif q_type == 'multiple_choice':
+                    type_label = '多选题'
+                elif q_type == 'fill':
+                    type_label = '填空题'
+                elif q_type == 'judge':
+                    type_label = '判断题'
+                elif q_type == 'essay':
+                    type_label = '简答题'
+                elif q_type == 'calculation':
+                    type_label = '计算题'
+
                 # 题目编号和内容
                 question_text = f"<b>{i}. {q.get('question', '')}</b>"
-                if q.get('type') == 'choice':
-                    question_text += f" <i>（{q.get('points', 5)}分）</i>"
+                if type_label:
+                    question_text += f" <i>（{type_label}）</i>"
+                question_text += f" <i>（{q.get('points', 5)}分）</i>"
                 story.append(Paragraph(question_text, normal_style))
                 story.append(Spacer(1, 0.3*cm))
-                
-                # 选择题选项
-                if q.get('type') == 'choice' and q.get('options'):
+
+                # 显示选项（单选题和多选题）
+                if q_type in ['choice', 'multiple_choice'] and q.get('options'):
                     options = q.get('options', [])
                     for opt in options:
                         story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;{opt}", normal_style))
-                
+
                 story.append(Spacer(1, 0.5*cm))
             
             # 如果包含答案，添加答案页
@@ -474,10 +491,26 @@ class PaperExporter:
             # 添加题目
             questions = paper_data.get("questions", [])
             for i, q in enumerate(questions, 1):
+                # 获取题型标签
+                q_type = q.get('type', '')
+                type_label = ''
+                if q_type == 'choice':
+                    type_label = '单选题'
+                elif q_type == 'multiple_choice':
+                    type_label = '多选题'
+                elif q_type == 'fill':
+                    type_label = '填空题'
+                elif q_type == 'judge':
+                    type_label = '判断题'
+                elif q_type == 'essay':
+                    type_label = '简答题'
+                elif q_type == 'calculation':
+                    type_label = '计算题'
+
                 # 题目
                 question_para = doc.add_paragraph()
                 question_para.add_run(f"{i}. ").bold = True
-                
+
                 # 处理题目文本，支持LaTeX公式
                 question_text = q.get('question', '') or ''
                 text_parts = PaperExporter._convert_latex_to_word_math(str(question_text))
@@ -505,12 +538,14 @@ class PaperExporter:
                         run.italic = True
                     else:
                         question_para.add_run(part_text)
-                
-                if q.get('type') == 'choice':
-                    question_para.add_run(f"（{q.get('points', 5)}分）").italic = True
-                
-                # 选择题选项
-                if q.get('type') == 'choice' and q.get('options'):
+
+                # 添加题型和分数标注
+                if type_label:
+                    question_para.add_run(f"（{type_label}）").italic = True
+                question_para.add_run(f"（{q.get('points', 5)}分）").italic = True
+
+                # 显示选项（单选题和多选题）
+                if q_type in ['choice', 'multiple_choice'] and q.get('options'):
                     for opt in q.get('options', []):
                         opt_para = doc.add_paragraph(style='List Bullet')
                         # 处理选项文本，支持LaTeX公式

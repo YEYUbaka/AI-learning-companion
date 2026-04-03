@@ -1,6 +1,7 @@
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import { useThemeStore } from '../store/themeStore';
+import { Motion } from './ui/Motion';
 
 const SunIcon = () => (
   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -167,25 +168,25 @@ function Navbar() {
 
             {/* 桌面导航链接 */}
             <div className="hidden md:ml-6 md:flex md:space-x-4 lg:space-x-8">
-              <Link to="/dashboard" className={navLinkClass('/dashboard')}>
+              <button onClick={() => location.pathname !== '/dashboard' && navigate('/dashboard')} className={navLinkClass('/dashboard')}>
                 首页
-              </Link>
-              <Link to="/agent" className={navLinkClass('/agent')}>
+              </button>
+              <button onClick={() => location.pathname !== '/agent' && navigate('/agent')} className={navLinkClass('/agent')}>
                 智学助手
-              </Link>
-              <Link to="/study-plan" className={navLinkClass('/study-plan')}>
+              </button>
+              <button onClick={() => !['/study-plan', '/upload-file'].includes(location.pathname) && navigate('/study-plan')} className={navLinkClass('/study-plan')}>
                 学习计划
-              </Link>
-              <Link to="/quiz" className={navLinkClass('/quiz')}>
+              </button>
+              <button onClick={() => !['/quiz', '/quiz-result'].includes(location.pathname) && navigate('/quiz')} className={navLinkClass('/quiz')}>
                 AI测评
-              </Link>
-              <Link to="/learning-map" className={navLinkClass('/learning-map')}>
+              </button>
+              <button onClick={() => location.pathname !== '/learning-map' && navigate('/learning-map')} className={navLinkClass('/learning-map')}>
                 知识图谱
-              </Link>
+              </button>
               {isAdmin && (
-                <Link to="/admin/dashboard" className={navLinkClass('/admin')}>
+                <button onClick={() => !location.pathname.startsWith('/admin') && navigate('/admin/dashboard')} className={navLinkClass('/admin')}>
                   管理后台
-                </Link>
+                </button>
               )}
             </div>
           </div>
