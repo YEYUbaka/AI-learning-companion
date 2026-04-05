@@ -244,7 +244,7 @@ const AgentChat = () => {
                   >
                     <option value="react">ReAct（推理+行动）</option>
                     <option value="cot">Chain of Thought（逐步思考）</option>
-                    <option value="function_calling">Function Calling（原生工具调用）</option>
+                    {/* Function Calling 模式后端已预留，未来计划实现 */}
                   </select>
                 </div>
 
