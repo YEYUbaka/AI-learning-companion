@@ -54,9 +54,10 @@ const agentApi = {
     const token = sessionStorage.getItem('token');
     const hostname = window.location.hostname;
     const protocol = window.location.protocol;
+    // 开发环境使用 localhost:8000，生产环境使用相对路径通过 Nginx 代理
     const baseURL = (hostname === 'localhost' || hostname === '127.0.0.1')
       ? 'http://127.0.0.1:8000'
-      : `${protocol}//${hostname}:8000`;
+      : '';
 
     // 构建 URL（包含认证 token）
     const url = `${baseURL}/api/agent/task/stream`;

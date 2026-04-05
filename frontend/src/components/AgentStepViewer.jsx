@@ -192,12 +192,12 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
                       .map((imgPath, i) => (
                         <a
                           key={i}
-                          href={`http://localhost:8000/knowledge_images/${imgPath}`}
+                          href={`/api/knowledge_images/${imgPath}`}
                           target="_blank"
                           rel="noopener noreferrer"
                         >
                           <img
-                            src={`http://localhost:8000/knowledge_images/${imgPath}`}
+                            src={`/api/knowledge_images/${imgPath}`}
                             alt={`知识库图片 ${i + 1}`}
                             className="h-20 w-auto rounded border object-cover"
                             onError={e => { e.currentTarget.style.display = 'none'; }}
