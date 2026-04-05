@@ -930,9 +930,35 @@ D. 选项 D
                         temperature=0.3
                     )
                 except Exception as e:
-                    logger.warning(f"Function Calling 失败，降级到 ReAct: {e}")
-                    # 降级到 ReAct 模式
-                    return await self.execute_react(goal)
+                    logger.warning(f"Function Calling 不支持，降级到直接调用: {e}")
+                    # 降级到直接调用（不使用 ReAct）
+                    from utils.model_registry import registry as reg
+                    direct_response = reg.call_with_fallback(
+                        messages=messages,
+                        temperature=0.3,
+                        max_tokens=2000
+                    )
+                    final_answer = direct_response.get("text", "")
+                    
+                    AgentRepository.add_step(
+                        self.db,
+                        session_id=self.session_id,
+                        step_number=step_number,
+                        step_type="final_answer",
+                        content=final_answer
+                    )
+
+                    AgentRepository.update_session_status(
+                        self.db,
+                        session_id=self.session_id,
+                        status="completed"
+                    )
+
+                    return {
+                        "success": True,
+                        "answer": final_answer,
+                        "iterations": self.current_iteration
+                    }
 
                 # 检查是否有工具调用
                 tool_calls = response.get("tool_calls")
