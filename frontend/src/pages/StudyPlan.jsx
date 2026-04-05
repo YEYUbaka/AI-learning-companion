@@ -156,10 +156,11 @@ function StudyPlan() {
 
   if (!plan && !showCreateForm) return null;
 
-  const totalDays = plan?.plan?.length || 0;
+  const planData = plan?.plan || [];
+  const totalDays = planData.length;
   const completed = completedDays.size;
   const progress = totalDays > 0 ? Math.round((completed / totalDays) * 100) : 0;
-  const currentTask = plan ? getCurrentTask() : null;
+  const currentTask = planData.length > 0 ? getCurrentTask() : null;
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-gray-50'}`}>
@@ -311,7 +312,7 @@ function StudyPlan() {
             学习路径
           </h2>
           <div className="space-y-3">
-            {plan.plan.map((item) => {
+            {planData.map((item) => {
               const isCompleted = completedDays.has(item.day);
               const isExpanded = expandedDays.has(item.day);
               const isCurrent = currentTask && currentTask.day === item.day;
