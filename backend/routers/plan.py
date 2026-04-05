@@ -17,10 +17,11 @@ router = APIRouter(prefix="/api/v1/ai/plan", tags=["学习计划"])
 class GeneratePlanRequest(BaseModel):
     """生成学习计划请求"""
     user_id: int
-    goals: Optional[str] = ""  # 学习目标改为可选
+    goals: Optional[str] = ""
     file_text: Optional[str] = None
     file_name: Optional[str] = None
     provider: Optional[str] = None
+    duration_days: Optional[int] = 30
 
 
 class PlanResponse(BaseModel):
@@ -54,7 +55,8 @@ async def generate_plan(
             user_id=request.user_id,
             goals=request.goals,
             file_text=request.file_text,
-            provider=request.provider
+            provider=request.provider,
+            duration_days=request.duration_days
         )
         
         # 将计划转换为JSON字符串存储

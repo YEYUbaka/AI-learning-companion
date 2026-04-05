@@ -33,7 +33,7 @@ SYSTEM_PROMPT = """你是智学伴，一个AI个性化学习与测评助手，�
 ]"""
 
 
-def generate_study_plan(user_id: int, goals: str = "", file_text: Optional[str] = None, provider: Optional[str] = None) -> List[Dict]:
+def generate_study_plan(user_id: int, goals: str = "", file_text: Optional[str] = None, provider: Optional[str] = None, duration_days: Optional[int] = 30) -> List[Dict]:
     """
     生成学习计划
     
@@ -49,7 +49,7 @@ def generate_study_plan(user_id: int, goals: str = "", file_text: Optional[str] 
     # 构建用户提示
     if goals and goals.strip():
         # 如果提供了学习目标
-        user_prompt = f"请根据以下学习目标生成学习计划：\n\n学习目标：{goals.strip()}\n\n"
+        user_prompt = f"请根据以下学习目标生成学习计划：\n\n学习目标：{goals.strip()}\n计划天数：{duration_days}天\n\n"
     else:
         # 如果没有提供学习目标，根据文件内容生成
         user_prompt = "请根据提供的教材内容生成学习计划。\n\n"

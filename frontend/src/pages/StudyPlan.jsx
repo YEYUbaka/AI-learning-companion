@@ -198,13 +198,16 @@ function StudyPlan() {
                   value={formDays}
                   onChange={(e) => setFormDays(Number(e.target.value))}
                   min={1}
-                  max={90}
+                  max={60}
                   className={`w-full px-4 py-2.5 rounded-lg border transition-all focus:outline-none focus:ring-2 ${
                     isDark
                       ? 'bg-slate-700/50 border-slate-600 text-white focus:border-blue-500 focus:ring-blue-500/20'
                       : 'bg-white border-gray-200 text-gray-900 focus:border-blue-500 focus:ring-blue-500/20'
                   }`}
                 />
+                <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
+                  建议 7-30 天，最长不超过 60 天
+                </p>
               </div>
               {error && (
                 <div className="text-red-500 text-sm">{error}</div>
