@@ -148,8 +148,28 @@ class AgentService:
                 async for event in executor.execute_react_stream(goal):
                     yield event
             elif mode == "cot":
-                # CoT 模式暂时使用非流式，后续可优化
+                # CoT 模式：先推送思考开始事件，再执行
+                yield {
+                    "type": "iteration_start",
+                    "iteration": 1,
+                    "max_iterations": 1,
+                    "message": "开始逐步思考..."
+                }
                 result = await executor.execute_cot(goal)
+                
+                # 推送思考内容
+                if result.get("success") and result.get("full_response"):
+                    yield {
+                        "type": "thought",
+                        "content": result.get("full_response", ""),
+                        "step_number": 1
+                    }
+                    yield {
+                        "type": "final_answer",
+                        "content": result.get("answer", ""),
+                        "step_number": 2
+                    }
+                
                 yield {
                     "type": "completed" if result.get("success") else "failed",
                     "result": result

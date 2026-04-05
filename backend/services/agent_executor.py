@@ -770,11 +770,22 @@ D. 选项 D
             response = registry.call_with_fallback(
                 messages=messages,
                 temperature=0.5,
-                max_tokens=2000
+                max_tokens=4000
             )
 
             ai_response = response.get("text", "")
             logger.info(f"CoT AI 响应: {ai_response[:200]}...")
+
+            if not ai_response or not ai_response.strip():
+                AgentRepository.update_session_status(
+                    self.db,
+                    session_id=self.session_id,
+                    status="failed"
+                )
+                return {
+                    "success": False,
+                    "error": "AI 模型返回空响应，请检查模型配置"
+                }
 
             # 解析思考步骤
             steps = self._parse_cot_response(ai_response)
@@ -809,7 +820,8 @@ D. 选项 D
             return {
                 "success": True,
                 "answer": final_answer,
-                "steps": len(steps)
+                "steps": len(steps),
+                "full_response": ai_response
             }
 
         except Exception as e:
@@ -821,7 +833,7 @@ D. 选项 D
             )
             return {
                 "success": False,
-                "error": str(e)
+                "error": "CoT 推理失败，请检查 AI 模型配置或稍后重试"
             }
 
     def _build_cot_prompt(self) -> str:
