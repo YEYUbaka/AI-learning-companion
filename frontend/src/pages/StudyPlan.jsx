@@ -154,12 +154,12 @@ function StudyPlan() {
     );
   }
 
-  if (!plan || !plan.plan) return null;
+  if (!plan && !showCreateForm) return null;
 
-  const totalDays = plan.plan.length;
+  const totalDays = plan?.plan?.length || 0;
   const completed = completedDays.size;
   const progress = totalDays > 0 ? Math.round((completed / totalDays) * 100) : 0;
-  const currentTask = getCurrentTask();
+  const currentTask = plan ? getCurrentTask() : null;
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-gray-50'}`}>
