@@ -111,6 +111,14 @@ const AppContent = () => {
         />
         {/* 管理后台路由 */}
         <Route
+          path="/admin"
+          element={
+            <AdminProtectedRoute>
+              <Navigate to="/admin/dashboard" replace />
+            </AdminProtectedRoute>
+          }
+        />
+        <Route
           path="/admin/dashboard"
           element={
             <AdminProtectedRoute>
