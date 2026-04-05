@@ -1015,7 +1015,7 @@ D. 选项 D
             )
             return {
                 "success": False,
-                "error": str(e)
+                "error": "Function Calling 执行失败，请检查 AI 模型配置或稍后重试"
             }
 
     def _build_function_definitions(self) -> List[Dict]:

@@ -175,8 +175,23 @@ class AgentService:
                     "result": result
                 }
             elif mode == "function_calling":
-                # Function Calling 模式暂时使用非流式，后续可优化
+                # Function Calling 模式：先推送开始事件，再执行
+                yield {
+                    "type": "iteration_start",
+                    "iteration": 1,
+                    "max_iterations": 1,
+                    "message": "开始调用工具..."
+                }
                 result = await executor.execute_function_calling(goal)
+                
+                # 推送最终答案
+                if result.get("success") and result.get("answer"):
+                    yield {
+                        "type": "final_answer",
+                        "content": result.get("answer", ""),
+                        "step_number": 1
+                    }
+                
                 yield {
                     "type": "completed" if result.get("success") else "failed",
                     "result": result
