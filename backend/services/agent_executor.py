@@ -525,7 +525,7 @@ D. 选项 D
             logger.error(f"工具 {tool_name} 执行失败: {error_msg}")
             return {
                 "success": False,
-                "error": error_msg
+                "error": f"{tool_name} 执行失败，请稍后重试"
             }
 
     async def execute_react_stream(self, goal: str) -> AsyncGenerator[Dict[str, Any], None]:

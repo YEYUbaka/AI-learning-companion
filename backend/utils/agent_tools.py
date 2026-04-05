@@ -312,7 +312,7 @@ class StudyPlanGeneratorTool(BaseTool):
             logger.error(f"学习计划生成失败: {str(e)}")
             return {
                 "success": False,
-                "error": str(e)
+                "error": "学习计划生成失败，请检查 AI 模型配置是否正确，或稍后重试"
             }
 
 
@@ -370,7 +370,7 @@ class WebSearchTool(BaseTool):
 
                 # 格式化搜索结果（使用 Markdown 链接格式）
                 formatted_results = "\n\n".join([
-                    f"**{i+1}. [{r['title']}]({r['url']})**\n\n{r['snippet']}\n\n🔗 [点击访问原文]({r['url']})"
+                    f"**{i+1}. [{r['title']}]({r['url']})**\n\n{r['snippet']}\n\n[点击访问原文]({r['url']})"
                     for i, r in enumerate(results)
                 ])
 
@@ -390,11 +390,20 @@ class WebSearchTool(BaseTool):
                     "text": f"搜索关键词：{query}\n\n提示：网络搜索功能需要安装 duckduckgo-search 库。\n请运行: pip install duckduckgo-search",
                     "count": 0
                 }
+            except Exception as search_err:
+                # 搜索服务本身出错（网络问题、API 限制等）
+                logger.warning(f"网络搜索服务异常: {str(search_err)}")
+                return {
+                    "success": True,
+                    "query": query,
+                    "text": f"关于「{query}」的搜索暂时无法完成（网络服务暂时不可用），但我可以根据已有知识为你提供一些参考信息。",
+                    "count": 0
+                }
         except Exception as e:
             logger.error(f"网络搜索失败: {str(e)}")
             return {
                 "success": False,
-                "error": str(e)
+                "error": "搜索服务暂时不可用，请稍后重试"
             }
 
 
