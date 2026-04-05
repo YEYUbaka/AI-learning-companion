@@ -11,6 +11,10 @@ function StudyPlan() {
   const [error, setError] = useState('');
   const [completedDays, setCompletedDays] = useState(new Set());
   const [expandedDays, setExpandedDays] = useState(new Set());
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [formGoal, setFormGoal] = useState('');
+  const [formDays, setFormDays] = useState(30);
+  const [generating, setGenerating] = useState(false);
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
 
@@ -33,12 +37,37 @@ function StudyPlan() {
         setPlan(response.data[0]);
         loadCompletedDays(response.data[0].id);
       } else {
-        setError('暂无学习计划');
+        setShowCreateForm(true);
       }
     } catch (err) {
       setError(err.response?.data?.detail || '加载失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreatePlan = async (e) => {
+    e.preventDefault();
+    if (!formGoal.trim()) {
+      setError('请输入学习目标');
+      return;
+    }
+    setGenerating(true);
+    setError('');
+    try {
+      const userId = getUserId();
+      const response = await api.post('/api/v1/ai/plan/generate', {
+        user_id: userId,
+        goals: formGoal.trim(),
+        duration_days: formDays
+      }, { timeout: 120000 });
+      setPlan(response.data);
+      setShowCreateForm(false);
+      setFormGoal('');
+    } catch (err) {
+      setError(err.response?.data?.detail || '生成失败，请检查 AI 模型配置');
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -113,6 +142,12 @@ function StudyPlan() {
             <p className={`mb-6 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
               请先创建学习计划
             </p>
+            <button
+              onClick={() => { setError(''); setShowCreateForm(true); }}
+              className="px-6 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors font-medium"
+            >
+              创建学习计划
+            </button>
           </div>
         </div>
       </div>
@@ -129,41 +164,114 @@ function StudyPlan() {
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-gray-50'}`}>
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        {/* 创建表单 */}
+        {showCreateForm && (
+          <div className={`${cardBase} p-6`}>
+            <h2 className={`text-xl font-bold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              创建学习计划
+            </h2>
+            <form onSubmit={handleCreatePlan} className="space-y-4">
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
+                  学习目标
+                </label>
+                <input
+                  type="text"
+                  value={formGoal}
+                  onChange={(e) => setFormGoal(e.target.value)}
+                  placeholder="例如：三天掌握 Python 基础"
+                  className={`w-full px-4 py-2.5 rounded-lg border transition-all focus:outline-none focus:ring-2 ${
+                    isDark
+                      ? 'bg-slate-700/50 border-slate-600 text-white placeholder-slate-400 focus:border-blue-500 focus:ring-blue-500/20'
+                      : 'bg-white border-gray-200 text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:ring-blue-500/20'
+                  }`}
+                  required
+                />
+              </div>
+              <div>
+                <label className={`block text-sm font-medium mb-1 ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
+                  计划天数
+                </label>
+                <input
+                  type="number"
+                  value={formDays}
+                  onChange={(e) => setFormDays(Number(e.target.value))}
+                  min={1}
+                  max={90}
+                  className={`w-full px-4 py-2.5 rounded-lg border transition-all focus:outline-none focus:ring-2 ${
+                    isDark
+                      ? 'bg-slate-700/50 border-slate-600 text-white focus:border-blue-500 focus:ring-blue-500/20'
+                      : 'bg-white border-gray-200 text-gray-900 focus:border-blue-500 focus:ring-blue-500/20'
+                  }`}
+                />
+              </div>
+              {error && (
+                <div className="text-red-500 text-sm">{error}</div>
+              )}
+              <div className="flex gap-3">
+                <button
+                  type="submit"
+                  disabled={generating}
+                  className="px-6 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
+                >
+                  {generating ? '生成中...' : '生成计划'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowCreateForm(false); setError(''); }}
+                  className={`px-6 py-2 rounded-lg transition-colors font-medium ${
+                    isDark
+                      ? 'bg-slate-700 text-white hover:bg-slate-600'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  取消
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
         {/* 计划概览 */}
-        <div className={`${cardBase} p-6`}>
-          <div className="flex items-center justify-between mb-4">
-            <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              {plan.goal || '学习计划'}
-            </h1>
-            <span className={`text-3xl font-bold ${progress === 100 ? 'text-green-600' : 'text-blue-600'}`}>
-              {progress}%
-            </span>
-          </div>
+        {plan && (
+          <div className={`${cardBase} p-6`}>
+            <div className="flex items-center justify-between mb-4">
+              <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                {plan.goal || '学习计划'}
+              </h1>
+              <button
+                onClick={() => setShowCreateForm(true)}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors font-medium text-sm"
+              >
+                新建计划
+              </button>
+            </div>
 
-          {/* 进度条 */}
-          <div className={`h-3 rounded-full mb-4 ${isDark ? 'bg-slate-700' : 'bg-gray-200'}`}>
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${progress === 100 ? 'bg-green-600' : 'bg-blue-600'}`}
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+            {/* 进度条 */}
+            <div className={`h-3 rounded-full mb-4 ${isDark ? 'bg-slate-700' : 'bg-gray-200'}`}>
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${progress === 100 ? 'bg-green-600' : 'bg-blue-600'}`}
+                style={{ width: `${progress}%` }}
+              />
+            </div>
 
-          {/* 统计数据 */}
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>总天数</div>
-              <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{totalDays}</div>
-            </div>
-            <div>
-              <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>已完成</div>
-              <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{completed}</div>
-            </div>
-            <div>
-              <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>剩余</div>
-              <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{totalDays - completed}</div>
+            {/* 统计数据 */}
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>总天数</div>
+                <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{totalDays}</div>
+              </div>
+              <div>
+                <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>已完成</div>
+                <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{completed}</div>
+              </div>
+              <div>
+                <div className={`text-sm ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>剩余</div>
+                <div className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{totalDays - completed}</div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* 当前任务 */}
         {currentTask && (
