@@ -17,6 +17,24 @@ export function getUserId() {
   return getUserInfo()?.id || null;
 }
 
+export function getUserRole() {
+  return getUserInfo()?.role || null;
+}
+
+export function isAdmin() {
+  return getUserRole() === 'admin';
+}
+
 export function getToken() {
   return sessionStorage.getItem('token');
+}
+
+export function setAuthSession(token, userInfo) {
+  sessionStorage.setItem('token', token);
+  sessionStorage.setItem('userInfo', JSON.stringify(userInfo));
+}
+
+export function clearAuthSession() {
+  sessionStorage.removeItem('token');
+  sessionStorage.removeItem('userInfo');
 }

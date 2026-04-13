@@ -19,6 +19,16 @@ class SchemaMigrationService:
     """运行时轻量级 schema 校验/迁移"""
 
     @staticmethod
+    def ensure_user_auth_schema() -> None:
+        """确保 users 表具备认证相关字段"""
+        try:
+            SchemaMigrationService._ensure_column("users", "token_version", "INTEGER NOT NULL DEFAULT 0")
+            with engine.begin() as conn:
+                conn.execute(text("UPDATE users SET token_version = 0 WHERE token_version IS NULL"))
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error("用户认证 schema 自动迁移失败: %s", exc, exc_info=True)
+
+    @staticmethod
     def ensure_learning_map_history_schema() -> None:
         """
         确保学习图谱相关表结构满足最新版需求：
@@ -30,6 +40,14 @@ class SchemaMigrationService:
             SchemaMigrationService._ensure_sessions_table()
             SchemaMigrationService._ensure_column("learning_nodes", "session_id")
             SchemaMigrationService._ensure_column("learning_edges", "session_id")
+            SchemaMigrationService._ensure_column("learning_map_sessions", "map_mode", "VARCHAR(32)")
+            SchemaMigrationService._ensure_column("learning_nodes", "node_type", "VARCHAR(64)")
+            SchemaMigrationService._ensure_column("learning_nodes", "primary_parent", "VARCHAR(255)")
+            SchemaMigrationService._ensure_column("learning_nodes", "source_excerpt", "TEXT")
+            SchemaMigrationService._ensure_column("learning_nodes", "source_ref", "VARCHAR(255)")
+            SchemaMigrationService._ensure_column("learning_nodes", "confidence", "FLOAT")
+            SchemaMigrationService._ensure_column("learning_edges", "relation_type", "VARCHAR(255)")
+            SchemaMigrationService._ensure_column("learning_edges", "confidence", "FLOAT")
             SchemaMigrationService._backfill_legacy_sessions()
         except Exception as exc:  # pylint: disable=broad-except
             logger.error("学习图谱 schema 自动迁移失败: %s", exc, exc_info=True)
@@ -45,7 +63,7 @@ class SchemaMigrationService:
         logger.info("learning_map_sessions 表创建完成")
 
     @staticmethod
-    def _ensure_column(table_name: str, column_name: str) -> None:
+    def _ensure_column(table_name: str, column_name: str, ddl_type: str = "INTEGER") -> None:
         try:
             inspector = inspect(engine)
             columns = {col["name"] for col in inspector.get_columns(table_name)}
@@ -57,7 +75,7 @@ class SchemaMigrationService:
             return
 
         logger.info("为表 %s 自动新增列 %s ...", table_name, column_name)
-        ddl = text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} INTEGER")
+        ddl = text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl_type}")
         with engine.begin() as conn:
             conn.execute(ddl)
         logger.info("表 %s 列 %s 创建完成", table_name, column_name)

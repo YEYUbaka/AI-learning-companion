@@ -1,0 +1,33 @@
+#!/bin/sh
+
+set -eu
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  exit 0
+fi
+
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+if [ -z "$branch" ]; then
+  exit 0
+fi
+
+remote_name="$(git remote 2>/dev/null | head -n 1 || true)"
+if [ -z "$remote_name" ]; then
+  exit 0
+fi
+
+ahead_count=0
+
+if upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"; then
+  ahead_count="$(git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)"
+elif git show-ref --verify --quiet "refs/remotes/${remote_name}/${branch}"; then
+  ahead_count="$(git rev-list --count "refs/remotes/${remote_name}/${branch}..HEAD" 2>/dev/null || echo 0)"
+elif git show-ref --verify --quiet "refs/remotes/${remote_name}/HEAD"; then
+  ahead_count="$(git rev-list --count "refs/remotes/${remote_name}/HEAD..HEAD" 2>/dev/null || echo 0)"
+fi
+
+if [ "${ahead_count}" -gt 0 ]; then
+  printf '%s\n' '[WARNING] 检测到当前分支存在未推送提交，建议尽快执行：git push origin HEAD'
+fi
+
+exit 0

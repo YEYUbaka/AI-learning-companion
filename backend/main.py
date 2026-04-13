@@ -88,9 +88,10 @@ async def startup_event():
         # 运行轻量级 schema 迁移，确保知识图谱历史表结构完整
         try:
             from services.schema_migration_service import SchemaMigrationService
+            SchemaMigrationService.ensure_user_auth_schema()
             SchemaMigrationService.ensure_learning_map_history_schema()
         except Exception as migration_exc:  # pylint: disable=broad-except
-            logger.error("自动迁移知识图谱 schema 失败: %s", migration_exc, exc_info=True)
+            logger.error("自动迁移运行时 schema 失败: %s", migration_exc, exc_info=True)
 
         # 初始化模型注册表
         from database import SessionLocal
@@ -119,7 +120,7 @@ async def startup_event():
         try:
             user_count = UserRepository.count(db)
             if user_count == 0:
-                logger.info("[INFO] 系统中暂无用户，第一个注册的用户将自动成为管理员")
+                logger.warning("[WARNING] 系统中暂无用户，请在初始化后显式配置管理员账号")
         finally:
             db.close()
 

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { clearAuthSession } from '../utils/auth';
 
 // 自动检测后端API地址
 const getBaseURL = () => {
@@ -44,8 +45,7 @@ api.interceptors.response.use(
     if (error.response) {
       // 如果是401未授权错误，清除token并跳转到登录页
       if (error.response.status === 401) {
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('userInfo');
+        clearAuthSession();
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';
         }
@@ -109,6 +109,12 @@ export const getQuizDetail = async (quizId) => {
 // 智能组卷相关API
 export const generatePaper = async (config) => {
   return api.post('/api/v1/quiz/paper/generate', config, {
+    timeout: 240000,
+  });
+};
+
+export const regeneratePaperQuestions = async (paperId, payload) => {
+  return api.post(`/api/v1/quiz/paper/${paperId}/regenerate`, payload, {
     timeout: 240000,
   });
 };
@@ -187,6 +193,19 @@ export const getUsers = async (skip = 0, limit = 100) => {
 
 export const updateUserRole = async (userId, role) => {
   return api.put(`/api/v1/admin/users/${userId}/role?role=${role}`);
+};
+
+export const adminResetUserPassword = async (userId, newPassword) => {
+  return api.put(`/api/v1/admin/users/${userId}/password`, {
+    new_password: newPassword,
+  });
+};
+
+export const changePassword = async (currentPassword, newPassword) => {
+  return api.post('/api/v1/auth/change-password', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
 };
 
 export const getAPILogs = async (params = {}) => {
@@ -295,6 +314,12 @@ export const getLearningMapHistory = async (userId, limit = 20) => {
 
 export const deleteLearningMapSession = async (userId, sessionId) => {
   return api.delete(`/api/v1/learning-map/${userId}/sessions/${sessionId}`);
+};
+
+export const exportLearningMapXMind = async (sessionId) => {
+  return api.get(`/api/v1/learning-map/${sessionId}/export?format=xmind`, {
+    responseType: 'blob',
+  });
 };
 
 export default api;

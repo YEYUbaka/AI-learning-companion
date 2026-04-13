@@ -163,6 +163,11 @@ class UserListResponse(BaseModel):
     total: int
 
 
+class UserPasswordResetRequest(BaseModel):
+    """管理员重置用户密码请求模型"""
+    new_password: str = Field(..., min_length=6, max_length=50, description="新密码")
+
+
 # API调用日志
 class APICallLogResponse(BaseModel):
     """API调用日志响应模型"""

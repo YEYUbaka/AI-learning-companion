@@ -1,105 +1,45 @@
-# 智学伴 AI个性化学习平台
+# 智学伴 AI 学习平台
 
-一个基于 AI 大模型的智能个性化学习平台，支持学习计划生成、智能组卷、知识图谱构建、AI 问答等功能。
+智学伴是一个面向学习场景的全栈应用，当前版本包含登录注册、智能助手、学习计划、文件上传、AI 测评、知识图谱和管理后台。
 
-## 核心功能
+## 当前入口
 
-- **智能学习计划生成** - 基于上传教材和用户目标，AI 自动生成个性化学习计划
-- **智能组卷系统** - 支持自定义难度、题型分布，AI 自动生成试卷
-- **知识图谱可视化** - 自动提取知识点并构建知识图谱，支持交互式探索
-- **AI 智能问答（Agent）** - 多工具支持，可搜索、生成学习计划、构建知识图谱
-  - ReAct 模式：完整的思考→行动→观察循环
-  - Chain of Thought 模式：纯推理模式，逐步展示思考过程
-  - Function Calling 模式：后端已预留完整框架，未来计划实现原生工具调用支持
-- **RAG 知识库** - 基于 ChromaDB 的语义检索，支持知识文档导入、索引、检索
-- **学习数据分析** - 测验成绩统计、错题分析、学习进度跟踪
-- **报告导出** - 支持 PDF/Word 格式的学习报告导出
+- 前端登录页：`http://127.0.0.1:5173/login`
+- 后端文档：`http://127.0.0.1:8000/docs`
+- 健康检查：`http://127.0.0.1:8000/health`
+
+当前前端真实路由以 `frontend/src/App.jsx` 为准：
+
+- 访客与认证：`/login`、`/register`
+- 普通用户：`/dashboard`、`/agent`、`/study-plan`、`/upload-file`、`/quiz`、`/quiz-result`、`/learning-map`、`/change-password`
+- 管理后台：`/admin/dashboard`、`/admin/models`、`/admin/prompts`、`/admin/config`、`/admin/users`、`/admin/api-logs`、`/admin/knowledge`
 
 ## 技术栈
 
+- 后端：FastAPI、SQLAlchemy、MySQL、Pydantic、JWT
+- 前端：React 18、Vite、React Router、TailwindCSS、Zustand
+- 可选能力：RAG 依赖见 `backend/requirements-rag.txt`
+
+## 环境要求
+
+- Python 3.10+
+- Node.js 18+
+- MySQL 8.0+
+
+## 快速启动
+
 ### 后端
-- **FastAPI** - 现代、快速的 Web 框架
-- **SQLAlchemy** - ORM 数据库操作
-- **MySQL** - 企业级数据库（唯一支持，通过 pymysql 驱动）
-- **Pydantic** - 数据验证和设置管理
-- **JWT** - 用户认证和授权
-- **ReportLab** - PDF 报告生成
-- **PyMuPDF / python-docx / python-pptx** - 文档解析
-- **ddgs** - 网络搜索（Agent 功能）
+
+```bash
+cd backend
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
 
 ### 前端
-- **React 18** - UI 框架
-- **Vite** - 构建工具
-- **React Router** - 路由管理
-- **TailwindCSS** - 样式框架
-- **Zustand** - 状态管理
-- **Recharts** - 数据可视化
-- **react-force-graph** - 知识图谱可视化
-- **react-markdown** - Markdown 渲染
-
-### AI 集成
-- 支持多模型提供商（DeepSeek、文心一言、星火、ChatGLM、Moonshot 等）
-- 统一的 AI 服务接口
-- 模型配置管理和自动切换
-- Prompt 模板管理（数据库存储，支持版本控制）
-
-### RAG 知识库（可选）
-- **ChromaDB** - 向量数据库
-- **sentence-transformers** - 语义嵌入模型
-- 安装方式：`pip install -r requirements-rag.txt`
-- 不安装时后端正常运行，RAG 功能自动禁用
-
-## 快速开始
-
-### 环境要求
-
-- **Python**: 3.10+
-- **Node.js**: 18+
-- **MySQL**: 8.0+
-
-### 1. 克隆项目
-
-```bash
-git clone https://github.com/YEYUbaka/AI-learning-companion.git
-cd Web
-```
-
-### 2. 后端配置
-
-```bash
-# 进入后端目录
-cd backend
-
-# 创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境
-# Windows:
-venv\Scripts\activate
-# Linux/Mac:
-source venv/bin/activate
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 可选：安装 RAG 依赖（知识库语义检索功能）
-# pip install -r requirements-rag.txt
-
-# 复制环境变量模板
-cp .env.example .env
-# 编辑 .env，填入 MySQL 连接信息和 AI API 密钥
-```
-
-### 3. 数据库初始化
-
-```sql
--- 在 MySQL 中创建数据库
-CREATE DATABASE zhixueban CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
-
-启动后端时会自动创建表结构（`Base.metadata.create_all`）。
-
-### 4. 前端配置
 
 ```bash
 cd frontend
@@ -107,121 +47,119 @@ npm install
 npm run dev
 ```
 
-### 5. 启动后端服务
+### Windows 一键启动
+
+```powershell
+scripts\start\5-一键启动前后端.bat
+```
+
+## 认证与密码策略
+
+### 最小合法规则
+
+- 长度 `6-50`
+- 不允许空格
+- 注册、自助改密、管理员代改都只按这套规则拦截
+
+### 强度提示
+
+- 弱：满足最小合法规则，但长度较短或字符种类较少
+- 中：`8+` 且至少两类字符组合
+- 强：`8+` 且同时包含大写、小写、数字、特殊字符
+
+### 重要行为
+
+- 前端只把认证信息存入 `sessionStorage`
+- 后端管理员鉴权只认数据库 `role == 'admin'`
+- 前端管理员放行只认 `sessionStorage.userInfo.role === 'admin'`
+- 自助改密接口：`POST /api/v1/auth/change-password`
+- 管理员代改接口：`PUT /api/v1/admin/users/{user_id}/password`
+- 用户改密、管理员代改、全量重置都会递增 `users.token_version`，旧 JWT 会立即失效
+
+## 全量密码重置
+
+由于数据库只保存 `hashed_password`，无法可靠识别“哪些账号曾经使用弱密码”，当前方案为按需全量重置所有用户密码。
+
+### 使用方式
 
 ```bash
-# 在 backend 目录下
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+cd backend
+python scripts/reset_all_user_passwords.py --password "YourStrongPass!9"
 ```
 
-### 6. 访问应用
+也可以通过环境变量提供：
 
-- **前端**: http://localhost:5173
-- **后端 API 文档**: http://localhost:8000/docs
-- **健康检查**: http://localhost:8000/health
-
-## 项目结构
-
-```
-Web/
-├── backend/                 # 后端服务
-│   ├── main.py             # FastAPI 应用入口
-│   ├── database.py         # 数据库配置
-│   ├── core/               # 核心模块
-│   │   ├── config.py       # 配置管理
-│   │   ├── security.py     # 安全相关（JWT、加密）
-│   │   └── logger.py       # 日志管理
-│   ├── models/             # 数据模型
-│   ├── routers/            # API 路由
-│   ├── services/           # 业务逻辑层
-│   ├── repositories/       # 数据访问层
-│   ├── schemas/            # Pydantic 模型
-│   ├── utils/              # 工具函数
-│   ├── seed_data/          # 种子数据
-│   ├── tests/              # 单元测试
-│   ├── requirements.txt    # Python 核心依赖
-│   ├── requirements-rag.txt # RAG 可选依赖
-│   └── .env.example        # 环境变量模板
-├── frontend/               # 前端应用
-│   ├── src/
-│   │   ├── pages/          # 页面组件
-│   │   ├── components/     # 通用组件
-│   │   ├── api/            # API 客户端
-│   │   ├── store/          # 状态管理
-│   │   └── utils/          # 工具函数
-│   ├── package.json        # Node.js 依赖
-│   └── vite.config.js      # Vite 配置
-├── knowledge_base/          # 知识库文档（corpus/ 目录）
-├── .gitignore
-└── README.md
+```bash
+set BULK_RESET_DEFAULT_PASSWORD=YourStrongPass!9
+python scripts/reset_all_user_passwords.py
 ```
 
-## 配置说明
+### 约束
 
-### 环境变量
+- 统一默认密码不会写入仓库
+- 统一默认密码必须达到“强”级别
+- 执行后所有旧登录态立即失效
 
-详细配置请参考 `backend/.env.example` 文件。主要配置项：
+## Git 提醒 Hook
 
-- `DATABASE_URL`: MySQL 连接字符串（必填）
-- `SECRET_KEY`: JWT 密钥（生产环境必须修改）
-- `ENCRYPTION_KEY`: API 密钥加密密钥（生产环境必须修改）
-- `AUTO_SYNC_SEED_DATA`: 是否自动同步种子数据（true/false）
-- `VITE_ALLOWED_HOSTS`: Vite 允许的域名（逗号分隔，用于远程访问）
+仓库内置了提交后提醒 hook。它不会自动 push，只会在存在未推送提交时提示执行 `git push origin HEAD`。
 
-### AI 模型配置
+### 安装
 
-1. 在管理后台（`/admin`）配置 AI 模型
-2. 添加 API 密钥（会自动加密存储）
-3. 设置模型优先级和超时时间
-4. 系统会自动选择可用的模型
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup\install-git-hooks.ps1
+```
 
-## 使用指南
+### 启用效果
 
-### 用户功能
-
-1. **注册/登录** - 创建账户并登录系统
-2. **上传教材** - 上传 PDF/DOCX/PPTX 格式的学习材料
-3. **生成学习计划** - 基于教材和目标生成个性化学习计划
-4. **智能组卷** - 配置试卷参数，AI 自动生成试卷
-5. **知识图谱** - 查看知识点关系图谱
-6. **AI 助手** - 与 Agent 对话，支持搜索、学习计划、知识图谱等工具
-
-### 管理员功能
-
-1. **模型管理** - 配置和管理 AI 模型
-2. **Prompt 管理** - 编辑和管理 Prompt 模板
-3. **API 日志** - 查看 API 调用记录和统计
-4. **用户管理** - 管理用户账户
-5. **知识库管理** - 管理 RAG 知识文档
+- 每次 `git commit` 后检查当前分支是否有未推送提交
+- 有则输出 `[WARNING]` 提示
+- 不依赖 `gh`
+- 不自动执行远端推送
 
 ## 测试
 
+### 后端
+
 ```bash
-# 后端测试
 cd backend
 pytest
 ```
 
-## 部署注意事项
+### 前端构建检查
 
-1. **修改默认密钥** - 必须修改 `.env` 中的 `SECRET_KEY` 和 `ENCRYPTION_KEY`
-2. **配置 CORS** - 修改 `CORS_ORIGINS` 为实际域名
-3. **数据库迁移** - 生产环境推荐使用 Alembic 进行数据库版本管理
-4. **HTTPS** - 配置反向代理（Nginx）启用 HTTPS
-5. **日志管理** - 配置日志轮转和监控
+```bash
+cd frontend
+npm run build
+```
 
-## 贡献
+### 手工测试
 
-欢迎提交 Issue 和 Pull Request！
+完整手工测试用例见：
 
-## 许可证
+- `docs/手动测试用例.md`
+- `docs/测试账号.md`
 
-MIT License
+## 目录说明
 
-## 团队
+```text
+backend/
+  main.py
+  routers/
+  services/
+  repositories/
+  models/
+  schemas/
+  scripts/
+frontend/
+  src/
+docs/
+scripts/
+```
 
-全国大学生计算机设计大赛智学伴参赛团队
+## 说明
 
----
-
-**注意**: 生产环境部署请务必修改所有默认密钥和配置。
+- `backend/.env` 不入库，请基于 `backend/.env.example` 创建
+- 种子数据位于 `backend/seed_data/`
+- 上传文件位于 `backend/uploads/`
+- 报告文件位于 `backend/reports/`

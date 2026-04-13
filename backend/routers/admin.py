@@ -15,11 +15,12 @@ from schemas.admin import (
     ModelTestRequest, ModelTestResponse,
     SystemConfigResponse, SystemConfigUpdate,
     DashboardStats, ChartDataResponse,
-    UserResponse, UserListResponse,
+    UserPasswordResetRequest, UserResponse, UserListResponse,
     APICallLogResponse, APICallLogListResponse
 )
 from services.prompt_service import PromptService
 from services.admin_service import AdminService
+from services.auth_service import AuthService
 from repositories.model_config_repo import ModelConfigRepository
 from repositories.user_repo import UserRepository
 from repositories.api_call_repo import APICallRepository
@@ -309,6 +310,28 @@ async def update_user_role(
         raise HTTPException(status_code=400, detail="角色必须是 admin 或 user")
     
     user = UserRepository.update_role(db, user_id, role)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return user
+
+
+@router.put("/users/{user_id}/password", response_model=UserResponse)
+async def reset_user_password(
+    user_id: int,
+    payload: UserPasswordResetRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """管理员重置用户密码"""
+    try:
+        result = AuthService.admin_reset_password(db, user_id=user_id, new_password=payload.new_password)
+    except ValueError as error:
+        detail = str(error)
+        if detail == "用户不存在":
+            raise HTTPException(status_code=404, detail=detail) from error
+        raise HTTPException(status_code=400, detail=detail) from error
+
+    user = UserRepository.get_by_id(db, result["id"])
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     return user

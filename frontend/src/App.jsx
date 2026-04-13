@@ -8,6 +8,7 @@ import StudyPlan from './pages/StudyPlan';
 import Quiz from './pages/Quiz';
 import QuizResult from './pages/QuizResult';
 import LearningMap from './pages/LearningMap';
+import ChangePassword from './pages/ChangePassword';
 import AdminDashboard from './pages/Admin/Dashboard';
 import ModelManagement from './pages/Admin/ModelManagement';
 import PromptEditor from './pages/Admin/PromptEditor';
@@ -106,6 +107,14 @@ const AppContent = () => {
           element={
             <ProtectedRoute>
               <LearningMap />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/change-password"
+          element={
+            <ProtectedRoute>
+              <ChangePassword />
             </ProtectedRoute>
           }
         />

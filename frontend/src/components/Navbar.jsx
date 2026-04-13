@@ -2,6 +2,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import { useThemeStore } from '../store/themeStore';
 import { Motion } from './ui/Motion';
+import { clearAuthSession } from '../utils/auth';
 
 const SunIcon = () => (
   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,8 +125,7 @@ function Navbar() {
   }
 
   const handleLogout = () => {
-    sessionStorage.removeItem('token');
-    sessionStorage.removeItem('userInfo');
+    clearAuthSession();
     navigate('/login');
   };
 
@@ -202,6 +202,16 @@ function Navbar() {
                 <p className={`text-xs ${isDark ? 'text-white/60' : 'text-gray-500'}`}>{userInfo.email}</p>
               )}
             </div>
+            <button
+              onClick={() => navigate('/change-password')}
+              className={`inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 border text-xs sm:text-sm font-medium rounded-md focus:outline-none focus:ring-2 ${
+                isDark
+                  ? 'text-white bg-white/5 hover:bg-white/10 border-white/15 focus:ring-white/20'
+                  : 'text-slate-700 bg-slate-100 hover:bg-slate-200 border-slate-200 focus:ring-slate-200'
+              }`}
+            >
+              修改密码
+            </button>
             <button
               onClick={handleLogout}
               className={`inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 border text-xs sm:text-sm font-medium rounded-md focus:outline-none focus:ring-2 ${
@@ -310,6 +320,17 @@ function Navbar() {
                   管理后台
                 </Link>
               )}
+              <Link
+                to="/change-password"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`block px-3 py-2 rounded-lg text-base font-medium ${
+                  location.pathname === '/change-password'
+                    ? isDark ? 'bg-white/10 text-white' : 'bg-blue-50 text-primary'
+                    : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                淇敼瀵嗙爜
+              </Link>
               <div className="pt-2 border-t border-white/10">
                 <div className="px-3 py-2">
                   <p className={`text-sm font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
