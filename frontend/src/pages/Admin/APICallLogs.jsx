@@ -7,6 +7,7 @@ import { useEffect, useState, useMemo } from 'react';
 import AdminLayout from '../../components/AdminLayout';
 import { getAPILogs } from '../../api/apiClient';
 import { useThemeStore } from '../../store/themeStore';
+import logger from '../../utils/logger';
 
 const APICallLogs = () => {
   const [logs, setLogs] = useState([]);
@@ -76,7 +77,7 @@ const APICallLogs = () => {
       setLogs(response.data.logs);
       setTotal(response.data.total);
     } catch (error) {
-      console.error('获取API调用日志失败:', error);
+      logger.error('获取API调用日志失败', error);
     } finally {
       setLoading(false);
     }
@@ -223,13 +224,27 @@ const APICallLogs = () => {
                         </td>
                         <td className="px-4 py-3 text-sm">
                           <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${
+                            className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 ${
                               log.success
                                 ? palette.success
                                 : palette.error
                             }`}
                           >
-                            {log.success ? '✓ 成功' : '✗ 失败'}
+                            {log.success ? (
+                              <>
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                </svg>
+                                成功
+                              </>
+                            ) : (
+                              <>
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                                失败
+                              </>
+                            )}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm">
@@ -291,4 +306,3 @@ const APICallLogs = () => {
 };
 
 export default APICallLogs;
-

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { uploadFile as uploadStudyFile, generatePlan as requestPlan } from '../api/apiClient';
 import { useThemeStore } from '../store/themeStore';
+import { getUserId } from '../utils/auth';
 
 function UploadFile() {
   const [file, setFile] = useState(null);
@@ -47,21 +48,6 @@ function UploadFile() {
           },
     [isDark]
   );
-
-  // 获取用户ID
-  const getUserId = () => {
-    // 优先从sessionStorage获取，如果没有则从localStorage（向后兼容）
-    const userInfo = sessionStorage.getItem('userInfo') || localStorage.getItem('userInfo');
-    if (userInfo) {
-      try {
-        const user = JSON.parse(userInfo);
-        return user.id;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  };
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];

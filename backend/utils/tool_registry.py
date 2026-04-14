@@ -6,10 +6,15 @@ from utils.agent_tools import (
     BaseTool,
     FileParserTool,
     QuizGeneratorTool,
-    LearningMapBuilderTool,
+    BuildLearningMapTool,
     StudyPlanGeneratorTool,
     WebSearchTool,
-    KnowledgeSearchTool
+    SearchKnowledgeTool,
+    SearchExampleQuestionsTool,
+    BuildPaperBlueprintTool,
+    GeneratePaperQuestionsTool,
+    ReviewPaperQualityTool,
+    ExportLearningMapXMindTool,
 )
 from core.logger import logger
 
@@ -31,10 +36,15 @@ class ToolRegistry:
         tools = [
             FileParserTool(),
             QuizGeneratorTool(),
-            LearningMapBuilderTool(),
+            BuildLearningMapTool(),
             StudyPlanGeneratorTool(),
             WebSearchTool(),
-            KnowledgeSearchTool()
+            SearchKnowledgeTool(),
+            SearchExampleQuestionsTool(),
+            BuildPaperBlueprintTool(),
+            GeneratePaperQuestionsTool(),
+            ReviewPaperQualityTool(),
+            ExportLearningMapXMindTool(),
         ]
 
         for tool in tools:
@@ -57,6 +67,11 @@ class ToolRegistry:
                 "name": tool.definition.name,
                 "description": tool.definition.description,
                 "category": tool.definition.category,
+                "intent_tags": tool.definition.intent_tags,
+                "preconditions": tool.definition.preconditions,
+                "output_schema": tool.definition.output_schema,
+                "quality_checks": tool.definition.quality_checks,
+                "fallback_policy": tool.definition.fallback_policy,
                 "parameters": [
                     {
                         "name": p.name,
@@ -84,6 +99,10 @@ class ToolRegistry:
                 f"  参数: {params_desc}"
             )
         return "\n\n".join(descriptions)
+
+    def get_structured_tools(self) -> List[BaseTool]:
+        """返回结构化工具列表"""
+        return list(self._tools.values())
 
     def has_tool(self, tool_name: str) -> bool:
         """检查工具是否存在"""

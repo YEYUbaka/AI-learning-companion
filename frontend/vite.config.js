@@ -9,6 +9,6 @@ export default defineConfig({
     port: 5173,
     allowedHosts: process.env.VITE_ALLOWED_HOSTS
       ? process.env.VITE_ALLOWED_HOSTS.split(',').map(h => h.trim())
-      : ['yeyubaka.f1.luyouxia.net']
+      : ['yeyubaka.f1.luyouxia.net', '37yy041dv797.vicp.fun']
   }
 })

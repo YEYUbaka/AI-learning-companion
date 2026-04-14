@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import AdminLayout from '../../components/AdminLayout';
 import api, { testModelCall } from '../../api/apiClient';
 import { useThemeStore } from '../../store/themeStore';
+import logger from '../../utils/logger';
 
 const ModelManagement = () => {
   const [models, setModels] = useState([]);
@@ -36,7 +37,7 @@ const ModelManagement = () => {
       const response = await api.get('/api/v1/admin/models');
       setModels(response.data);
     } catch (error) {
-      console.error('获取模型列表失败:', error);
+      logger.error('获取模型列表失败', error);
     } finally {
       setLoading(false);
     }

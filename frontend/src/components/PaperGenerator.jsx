@@ -6,6 +6,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import { listTemplates, createTemplate, getRecommendedTemplate, deleteTemplate, generatePaper as requestGeneratePaper } from '../api/apiClient';
 import { useThemeStore } from '../store/themeStore';
+import { getUserId } from '../utils/auth';
+import logger from '../utils/logger';
 
 function PaperGenerator({ onPaperGenerated, onCancel }) {
   // 根据学段和总题数计算合理的默认题型分布
@@ -62,7 +64,11 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
     knowledge_points: [],
     time_limit: 90,
     total_score: 100,
-    use_template: false
+    use_template: false,
+    mode: 'teacher',
+    source_policy: 'knowledge_first',
+    review_level: 'strict',
+    blueprint_only: false,
   });
   
   // 题型选项
@@ -94,8 +100,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
   useEffect(() => {
     const fetchTemplates = async () => {
       try {
-        const userInfo = JSON.parse(sessionStorage.getItem('userInfo') || localStorage.getItem('userInfo') || '{}');
-        const userId = userInfo.id;
+        const userId = getUserId();
         if (userId) {
           const response = await listTemplates(userId);
           if (response.data.success) {
@@ -103,7 +108,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
           }
         }
       } catch (err) {
-        console.error('获取模板列表失败:', err);
+        logger.error('获取模板列表失败', err);
       }
     };
     fetchTemplates();
@@ -203,8 +208,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
     setStatusMessage('AI 正在生成试卷，题量较大时通常需要 30 秒到 2-3 分钟，请勿关闭或离开此页面...');
     
     try {
-      const userInfo = JSON.parse(sessionStorage.getItem('userInfo') || localStorage.getItem('userInfo') || '{}');
-      const userId = userInfo.id;
+      const userId = getUserId();
       
       if (!userId) {
         setError('请先登录');
@@ -226,7 +230,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         setStatusMessage('');
       }
     } catch (err) {
-      console.error('生成试卷失败:', err);
+      logger.error('生成试卷失败', err);
       const errorMsg = err.response?.data?.detail || err.response?.data?.message || err.message || '生成试卷失败';
       setError(errorMsg);
       
@@ -263,8 +267,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
       setDeletingTemplateId(templateId);
       setError('');
       
-      const userInfo = JSON.parse(sessionStorage.getItem('userInfo') || localStorage.getItem('userInfo') || '{}');
-      const userId = userInfo.id;
+      const userId = getUserId();
 
       if (!userId) {
         setError('请先登录');
@@ -287,7 +290,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         setError(response.data.message || '删除模板失败');
       }
     } catch (err) {
-      console.error('删除模板失败:', err);
+      logger.error('删除模板失败', err);
       const errorDetail = err.response?.data?.detail;
       let errorMsg = '删除模板失败';
       
@@ -319,8 +322,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
     setError('');
     
     try {
-      const userInfo = JSON.parse(sessionStorage.getItem('userInfo') || localStorage.getItem('userInfo') || '{}');
-      const userId = userInfo.id;
+      const userId = getUserId();
       
       if (!userId) {
         setError('请先登录');
@@ -357,7 +359,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         setError(response.data.message || '保存模板失败');
       }
     } catch (err) {
-      console.error('保存模板失败:', err);
+      logger.error('保存模板失败', err);
       const errorDetail = err.response?.data?.detail;
       let errorMsg = '保存模板失败';
       
@@ -513,9 +515,12 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
       <h3 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
         智能组卷配置
       </h3>
-      <p className={`text-xs mb-3 ${isDark ? 'text-white/60' : 'text-gray-500'}`}>
-        ⚠️ 生成过程中请保持页面开启，题量大时可能需要几十秒到几分钟。
-      </p>
+      <div className={`flex items-start gap-2 text-xs mb-3 ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+        <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <span>生成过程中请保持页面开启，题量大时可能需要几十秒到几分钟。</span>
+      </div>
       
       {statusMessage && (
         <div
@@ -759,6 +764,59 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
             />
           </div>
         </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={palette.label}>组卷模式</label>
+            <select
+              value={config.mode}
+              onChange={(e) => setConfig({
+                ...config,
+                mode: e.target.value,
+                review_level: e.target.value === 'teacher' ? 'strict' : config.review_level,
+              })}
+              className={palette.input}
+            >
+              <option value="teacher">教师卷</option>
+              <option value="practice">练习卷</option>
+            </select>
+          </div>
+
+          <div>
+            <label className={palette.label}>来源策略</label>
+            <select
+              value={config.source_policy}
+              onChange={(e) => setConfig({ ...config, source_policy: e.target.value })}
+              className={palette.input}
+            >
+              <option value="knowledge_first">knowledge_first</option>
+              <option value="hybrid">hybrid</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={palette.label}>审核级别</label>
+            <select
+              value={config.review_level}
+              onChange={(e) => setConfig({ ...config, review_level: e.target.value })}
+              className={palette.input}
+            >
+              <option value="strict">strict</option>
+              <option value="normal">normal</option>
+            </select>
+          </div>
+
+          <label className={`flex items-center gap-3 mt-7 ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
+            <input
+              type="checkbox"
+              checked={config.blueprint_only}
+              onChange={(e) => setConfig({ ...config, blueprint_only: e.target.checked })}
+            />
+            <span className="text-sm">仅生成蓝图，不出题</span>
+          </label>
+        </div>
         
         {/* 难度分布 */}
         <div>
@@ -891,8 +949,8 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
                     setError('AI推荐响应格式异常，已使用默认分布');
                   }
                 } catch (err) {
-                  console.error('获取AI推荐失败:', err);
-                  console.error('错误详情:', err.response?.data || err.message);
+                  logger.error('获取AI推荐失败', err);
+                  logger.error('错误详情', err.response?.data || err.message);
                   // 使用默认分布
                   const newDistribution = getDefaultDistribution(config.grade_level, config.total_questions);
                   setConfig({

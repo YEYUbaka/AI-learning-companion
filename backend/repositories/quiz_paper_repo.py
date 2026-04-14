@@ -53,3 +53,26 @@ class QuizPaperRepository:
             return True
         return False
 
+    @staticmethod
+    def update_generated_content(
+        db: Session,
+        paper_id: int,
+        user_id: int,
+        *,
+        questions,
+        answer_key,
+        total_questions: Optional[int] = None,
+    ) -> Optional[QuizPaper]:
+        """鏇存柊璇曞嵎鐨勯鐩€佺瓟妗堝拰棰樼洰鏁伴噺"""
+        paper = QuizPaperRepository.get_by_id(db, paper_id, user_id)
+        if not paper:
+            return None
+
+        paper.questions = questions
+        paper.answer_key = answer_key
+        if total_questions is not None:
+            paper.total_questions = total_questions
+        db.commit()
+        db.refresh(paper)
+        return paper
+

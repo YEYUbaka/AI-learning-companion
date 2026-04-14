@@ -64,7 +64,24 @@
       "Bash(grep:*)",
       "Bash(del:*)",
       "Bash(Remove-Item:*)",
-      "Bash(cmd:*)"
+      "Bash(cmd:*)",
+      "Bash(find E:AI_projectsWebknowledge_basecorpus -type f -name *.md)",
+      "Bash(for dir:*)",
+      "Bash(do echo:*)",
+      "Read(//e/AI_projects/Web/AI_projectsWebknowledge_basecorpus/**)",
+      "Bash(for file:*)",
+      "Read(//e/AI_projects/Web/**)",
+      "Bash(start cmd:*)",
+      "Bash(exit 0)",
+      "Bash(start /B uvicorn main:app --host 0.0.0.0 --port 8000 --reload)",
+      "Bash(find E:AI_projectsWebfrontend -type f \\\\\\(-name *.jsx -o -name *.js \\\\\\))",
+      "WebSearch",
+      "Bash(\"E:\\\\AI_projects\\\\Web\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -c \"import uvicorn; print\\('uvicorn ok'\\)\")",
+      "Bash(\"E:\\\\AI_projects\\\\Web\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -c \"import urllib.request; print\\(urllib.request.urlopen\\('http://127.0.0.1:8000/health'\\).read\\(\\).decode\\(\\)\\)\")",
+      "Bash(\"E:\\\\AI_projects\\\\Web\\\\backend\\\\venv\\\\Scripts\\\\uvicorn.exe\" main:app --host 0.0.0.0 --port 8000)",
+      "Bash(Start-Sleep -Seconds 1)",
+      "Bash(Write-Host \"done\")",
+      "Bash(\"E:\\\\AI_projects\\\\Web\\\\backend\\\\venv\\\\Scripts\\\\uvicorn.exe\" main:app --host 0.0.0.0 --port 8000 --reload)"
     ]
   }
 }

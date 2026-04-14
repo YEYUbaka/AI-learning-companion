@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../../components/AdminLayout';
 import api from '../../api/apiClient';
 import { useThemeStore } from '../../store/themeStore';
+import logger from '../../utils/logger';
 
 const PromptEditor = () => {
   const [prompts, setPrompts] = useState([]);
@@ -85,7 +86,7 @@ const PromptEditor = () => {
       setPrompts(response.data || []);
       // console.log('获取到的Prompt列表:', response.data);
     } catch (error) {
-      console.error('获取Prompt列表失败:', error);
+      logger.error('获取Prompt列表失败', error);
       setError(error.response?.data?.detail || error.message || '获取Prompt列表失败');
     } finally {
       setLoading(false);
@@ -110,7 +111,7 @@ const PromptEditor = () => {
         setIsEditing(false);
       }
     } catch (error) {
-      console.error('获取版本列表失败:', error);
+      logger.error('获取版本列表失败', error);
     }
   };
 
@@ -325,8 +326,8 @@ const PromptEditor = () => {
                     >
                       <div className="flex justify-between items-center">
                         <div>
-                          <p className="font-medium">{name}</p>
-                          <p className="text-xs text-white/60">
+                          <p className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{name}</p>
+                          <p className={`text-xs ${isDark ? 'text-white/60' : 'text-gray-500'}`}>
                             版本 {latest.version} · {latest.enabled ? '启用' : '禁用'}
                           </p>
                         </div>
@@ -368,7 +369,7 @@ const PromptEditor = () => {
                       }`}
                     >
                       <div className="flex justify-between items-center mb-2">
-                        <span className="font-medium">版本 {version.version}</span>
+                        <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>版本 {version.version}</span>
                         <div className="space-x-2 text-xs">
                           {!version.enabled && (
                             <button
@@ -388,10 +389,10 @@ const PromptEditor = () => {
                           )}
                         </div>
                       </div>
-                      <p className="text-xs text-white/70 mb-2">
+                      <p className={`text-xs mb-2 ${isDark ? 'text-white/70' : 'text-gray-500'}`}>
                         {version.description || '无描述'}
                       </p>
-                      <p className="text-xs text-white/50">
+                      <p className={`text-xs ${isDark ? 'text-white/50' : 'text-gray-400'}`}>
                         {new Date(version.created_at).toLocaleString()}
                       </p>
                     </button>
@@ -414,7 +415,11 @@ const PromptEditor = () => {
               {selectedVersion && (
                 <button
                   onClick={() => setIsEditing((prev) => !prev)}
-                  className="text-sm px-3 py-1 rounded-lg bg-blue-500/10 text-blue-300 hover:bg-blue-500/20"
+                  className={`text-sm px-3 py-1 rounded-lg ${
+                    isDark
+                      ? 'bg-blue-500/10 text-blue-300 hover:bg-blue-500/20'
+                      : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                  }`}
                 >
                   {isEditing ? '取消编辑' : '编辑内容'}
                 </button>
@@ -496,7 +501,11 @@ const PromptEditor = () => {
                     </div>
                     <div>
                       <p className={`text-sm ${palette.subtitle}`}>内容</p>
-                      <pre className="mt-2 bg-black/20 border border-white/10 rounded-lg p-4 text-sm max-h-[24rem] overflow-auto font-mono whitespace-pre-wrap">
+                      <pre className={`mt-2 border rounded-lg p-4 text-sm max-h-[24rem] overflow-auto font-mono whitespace-pre-wrap ${
+                        isDark
+                          ? 'bg-black/20 border-white/10 text-white'
+                          : 'bg-gray-50 border-gray-200 text-gray-800'
+                      }`}>
                         {selectedVersion.content}
                       </pre>
                     </div>

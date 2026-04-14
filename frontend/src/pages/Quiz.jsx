@@ -1,8 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api, { generateQuiz as requestQuizGenerate, submitQuiz as requestQuizSubmit } from '../api/apiClient';
+import api, {
+  generateQuiz as requestQuizGenerate,
+  submitQuiz as requestQuizSubmit,
+  regeneratePaperQuestions as requestRegeneratePaperQuestions,
+} from '../api/apiClient';
 import { useThemeStore } from '../store/themeStore';
 import PaperGenerator from '../components/PaperGenerator';
+import { getUserId } from '../utils/auth';
+import logger from '../utils/logger';
 
 const PAPER_STORAGE_KEY = 'zhixueban_custom_paper';
 const ANSWER_STORAGE_KEY = 'zhixueban_quiz_progress';
@@ -28,6 +34,7 @@ function Quiz() {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [paperData, setPaperData] = useState(null); // 智能组卷生成的试卷数据
@@ -92,21 +99,6 @@ function Quiz() {
     [isDark]
   );
 
-  // 获取用户ID
-  const getUserId = () => {
-    // 优先从sessionStorage获取，如果没有则从localStorage（向后兼容）
-    const userInfo = sessionStorage.getItem('userInfo') || localStorage.getItem('userInfo');
-    if (userInfo) {
-      try {
-        const user = JSON.parse(userInfo);
-        return user.id;
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  };
-
   const handleGenerate = async () => {
     if (!topic.trim()) {
       setError('请输入测验主题');
@@ -143,7 +135,7 @@ function Quiz() {
         setStatusMessage('');
       }
     } catch (err) {
-      console.error('生成测验失败:', err);
+      logger.error('生成测验失败', err);
       const errorMsg = err.response?.data?.detail || err.response?.data?.message || err.message || '生成测验题目失败';
       setError(errorMsg);
       setStatusMessage('');
@@ -255,8 +247,9 @@ function Quiz() {
   
   const handlePaperGenerated = (data) => {
     setPaperData(data);
-    setQuestions(data.questions || []);
-    setAnswers(new Array(data.questions?.length || 0).fill(''));
+    const nextQuestions = data.questions || [];
+    setQuestions(nextQuestions);
+    setAnswers(new Array(nextQuestions.length).fill(''));
     // 智能组卷不进入答题模式，保持在custom模式用于预览和导出
     setMode('custom');
   };
@@ -265,8 +258,7 @@ function Quiz() {
     if (!paperData) return;
     
     try {
-      const userInfo = JSON.parse(sessionStorage.getItem('userInfo') || localStorage.getItem('userInfo') || '{}');
-      const userId = userInfo.id;
+      const userId = getUserId();
       
       const response = await api.get(
         `/api/v1/quiz/paper/${paperData.paper_id}/export?user_id=${userId}&format=${format}&include_answer=true`,
@@ -290,6 +282,55 @@ function Quiz() {
   };
 
   // 载入本地存储的智能组卷
+  const handleRegenerateFailedQuestions = async () => {
+    if (!paperData?.paper_id) return;
+
+    const failedQuestionIds = [
+      ...new Set(
+        (paperData.quality_report?.warnings || [])
+          .map((warning) => warning.question_id)
+          .filter(Boolean)
+      ),
+    ];
+
+    if (failedQuestionIds.length === 0) {
+      setStatusMessage('当前没有需要重生的不合格题目。');
+      setTimeout(() => setStatusMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setRegenerating(true);
+      setError('');
+      setStatusMessage('正在重生不合格题目，请稍候...');
+      const userId = getUserId();
+      const response = await requestRegeneratePaperQuestions(paperData.paper_id, {
+        user_id: userId,
+        question_ids: failedQuestionIds,
+      });
+
+      if (response.data.success) {
+        setPaperData(response.data);
+        setQuestions(response.data.questions || []);
+        setStatusMessage(
+          response.data.regenerated_question_ids?.length > 0
+            ? `已重生题目：${response.data.regenerated_question_ids.join('、')}`
+            : '未检测到可重生题目，已刷新审核结果。'
+        );
+        setTimeout(() => setStatusMessage(''), 5000);
+      } else {
+        setError(response.data.message || '重生不合格题目失败');
+        setStatusMessage('');
+      }
+    } catch (err) {
+      logger.error('重生不合格题目失败', err);
+      setError(err.response?.data?.detail || err.message || '重生不合格题目失败');
+      setStatusMessage('');
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
   useEffect(() => {
     const cached = sessionStorage.getItem(PAPER_STORAGE_KEY);
     if (cached) {
@@ -302,7 +343,7 @@ function Quiz() {
           setMode('custom');
         }
       } catch (error) {
-        console.warn('加载缓存试卷失败:', error);
+        logger.warn('加载缓存试卷失败', error);
         sessionStorage.removeItem(PAPER_STORAGE_KEY);
       }
     }
@@ -471,6 +512,72 @@ function Quiz() {
           </div>
         )}
 
+        {paperData && (paperData.blueprint || paperData.quality_report) && (
+          <div className={`${palette.questionCard} p-6 mb-6`}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {paperData.blueprint && (
+                <div>
+                  <h2 className="text-lg font-semibold mb-3">蓝图预览</h2>
+                  <div className={`space-y-2 text-sm ${palette.textMuted}`}>
+                    <p>模式：{paperData.blueprint.mode}</p>
+                    <p>来源策略：{paperData.blueprint.source_policy}</p>
+                    <p>审核级别：{paperData.blueprint.review_level}</p>
+                    <p>总题数：{paperData.blueprint.total_questions}</p>
+                    <p>总分：{paperData.blueprint.total_score}</p>
+                    <p>时长：{paperData.blueprint.time_limit} 分钟</p>
+                    <p>知识点：{(paperData.blueprint.knowledge_points || []).join('、') || '未指定'}</p>
+                  </div>
+                </div>
+              )}
+
+              {paperData.quality_report && (
+                <div>
+                  <h2 className="text-lg font-semibold mb-3">审核结果</h2>
+                  <div className={`space-y-2 text-sm ${palette.textMuted}`}>
+                    <p>质量状态：{paperData.quality_report.quality_status}</p>
+                    <p>质量分：{paperData.quality_report.score}</p>
+                    <p>重复率：{paperData.quality_report.duplicate_rate}</p>
+                    <p>覆盖知识点：{(paperData.quality_report.coverage_knowledge_points || []).join('、') || '暂无'}</p>
+                    {paperData.regenerated_question_ids?.length > 0 && (
+                      <p>已重生题目：{paperData.regenerated_question_ids.join('、')}</p>
+                    )}
+                  </div>
+                  {paperData.quality_report.warnings?.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {paperData.quality_report.warnings.slice(0, 6).map((warning, index) => (
+                        <div
+                          key={`${warning.code || index}-${index}`}
+                          className={`text-xs rounded-lg p-2 ${
+                            isDark ? 'bg-amber-900/20 text-amber-200 border border-amber-800' : 'bg-amber-50 text-amber-800 border border-amber-200'
+                          }`}
+                        >
+                          {warning.question_id ? `[${warning.question_id}] ` : ''}
+                          {warning.message}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {paperData.paper_id && paperData.quality_report?.warnings?.some((warning) => warning.question_id) && (
+                    <button
+                      onClick={handleRegenerateFailedQuestions}
+                      disabled={regenerating}
+                      className={`mt-4 px-4 py-2 rounded-lg text-sm transition ${
+                        regenerating
+                          ? 'bg-gray-400 text-white cursor-not-allowed'
+                          : isDark
+                          ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                          : 'bg-amber-500 hover:bg-amber-600 text-white'
+                      }`}
+                    >
+                      {regenerating ? '重生中...' : '重生不合格题目'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 题目列表 */}
         {questions.length > 0 && (
           <div className="mb-6">
@@ -530,7 +637,7 @@ function Quiz() {
                   className={`${palette.questionCard} p-6 shadow-md`}
                 >
                   <p className="font-semibold text-lg mb-4">
-                    {i + 1}. {q.question}
+                    {i + 1}. {q.question || q.stem}
                     <span className={`ml-2 text-sm ${palette.textMuted}`}>
                       ({q.type === 'choice' ? '选择题' : q.type === 'fill' ? '填空题' : q.type === 'judge' ? '判断题' : q.type === 'essay' ? '简答题' : '其他题型'})
                     </span>

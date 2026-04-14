@@ -5,6 +5,7 @@ import React, { useState, useEffect } from 'react';
 import { useThemeStore } from '../store/themeStore';
 import agentApi from '../api/agentApi';
 import AgentStepViewer from '../components/AgentStepViewer';
+import logger from '../utils/logger';
 
 const AgentChat = () => {
   const [goal, setGoal] = useState('');
@@ -28,7 +29,7 @@ const AgentChat = () => {
       const data = await agentApi.listTools();
       setTools(data.tools || []);
     } catch (err) {
-      console.error('加载工具列表失败:', err);
+      logger.error('加载工具列表失败', err);
     }
   };
 
@@ -37,7 +38,7 @@ const AgentChat = () => {
       const data = await agentApi.getUserSessions(10, 0);
       setSessions(data.sessions || []);
     } catch (err) {
-      console.error('加载会话列表失败:', err);
+      logger.error('加载会话列表失败', err);
     }
   };
 
@@ -83,6 +84,9 @@ const AgentChat = () => {
                     step_number: event.step_number,
                     step_type: 'goal',
                     content: event.content,
+                    extra_data: {
+                      trace_id: event.trace_id,
+                    },
                     created_at: new Date().toISOString()
                   }]
                 };
@@ -94,6 +98,11 @@ const AgentChat = () => {
                     step_number: event.step_number,
                     step_type: 'thought',
                     content: event.content,
+                    extra_data: {
+                      trace_id: event.trace_id,
+                      quality_status: event.quality_status,
+                      confidence: event.confidence,
+                    },
                     created_at: new Date().toISOString()
                   }]
                 };
@@ -105,6 +114,11 @@ const AgentChat = () => {
                     step_number: event.step_number,
                     step_type: 'action',
                     content: `${event.tool_name}: ${JSON.stringify(event.tool_input)}`,
+                    extra_data: {
+                      trace_id: event.trace_id,
+                      tool_name: event.tool_name,
+                      tool_input: event.tool_input,
+                    },
                     created_at: new Date().toISOString()
                   }],
                   tool_calls: [...newSession.tool_calls, {
@@ -129,6 +143,10 @@ const AgentChat = () => {
                     step_number: event.step_number,
                     step_type: 'observation',
                     content: JSON.stringify(event.result),
+                    extra_data: {
+                      trace_id: event.trace_id,
+                      ...event.result,
+                    },
                     created_at: new Date().toISOString()
                   }],
                   tool_calls: updatedToolCalls
@@ -142,6 +160,13 @@ const AgentChat = () => {
                     step_number: event.step_number,
                     step_type: 'final_answer',
                     content: event.content,
+                    extra_data: {
+                      trace_id: event.trace_id,
+                      quality_status: event.quality_status,
+                      confidence: event.confidence,
+                      evidence: event.evidence || [],
+                      fallback_used: event.fallback_used || false,
+                    },
                     created_at: new Date().toISOString()
                   }]
                 };

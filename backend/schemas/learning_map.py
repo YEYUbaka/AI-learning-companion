@@ -19,6 +19,7 @@ class LearningMapGenerateRequest(BaseModel):
     file_id: Optional[int] = None
     course_topic: Optional[str] = None
     provider: Optional[str] = None
+    map_mode: str = "document"
 
     @model_validator(mode="after")
     def validate_input(cls, values):
@@ -40,6 +41,11 @@ class LearningNodeSchema(BaseModel):
     mastery: Optional[str]
     example: Optional[str]
     resources: Optional[List[ResourceSchema]]
+    node_type: Optional[str]
+    primary_parent: Optional[str]
+    source_excerpt: Optional[str]
+    source_ref: Optional[str]
+    confidence: Optional[float]
 
     class Config:
         orm_mode = True
@@ -50,6 +56,8 @@ class LearningEdgeSchema(BaseModel):
     from_node_id: int
     to_node_id: int
     relation: str
+    relation_type: Optional[str]
+    confidence: Optional[float]
 
     class Config:
         orm_mode = True
@@ -66,6 +74,7 @@ class LearningMapGenerateResponse(BaseModel):
     node_count: int
     edge_count: int
     session_id: int
+    map_mode: str = "document"
     message: str = "知识图谱生成完成"
 
 
@@ -74,6 +83,7 @@ class LearningMapSessionSchema(BaseModel):
     topic: Optional[str]
     provider: Optional[str]
     file_id: Optional[int]
+    map_mode: Optional[str]
     source_preview: Optional[str]
     created_at: datetime
 

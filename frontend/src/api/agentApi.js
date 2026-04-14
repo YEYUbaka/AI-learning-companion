@@ -2,6 +2,7 @@
  * Agent API 客户端
  */
 import apiClient from './apiClient';
+import logger from '../utils/logger';
 
 const agentApi = {
   /**
@@ -109,7 +110,7 @@ const agentApi = {
                   const event = JSON.parse(data);
                   onMessage(event);
                 } catch (e) {
-                  console.error('解析 SSE 数据失败:', e, data);
+                  logger.error('解析 SSE 数据失败', e, data);
                 }
               }
             });

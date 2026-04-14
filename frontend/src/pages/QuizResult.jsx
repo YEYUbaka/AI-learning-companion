@@ -118,12 +118,18 @@ function QuizResult() {
                         {i + 1}. {exp.question || (question?.question || '')}
                       </span>
                       {exp.correct ? (
-                        <span className="bg-green-500 text-white px-3 py-1 rounded-full text-sm font-semibold">
-                          ✓ 正确
+                        <span className="bg-green-500 text-white px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-1">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                          正确
                         </span>
                       ) : (
-                        <span className="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-semibold">
-                          ✗ 错误
+                        <span className="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-1">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          错误
                         </span>
                       )}
                     </div>

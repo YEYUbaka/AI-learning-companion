@@ -50,12 +50,14 @@ class LearningMapRepository:
         provider: Optional[str],
         file_id: Optional[int],
         source_preview: Optional[str],
+        map_mode: str = "document",
     ) -> LearningMapSession:
         session = LearningMapSession(
             user_id=user_id,
             topic=topic,
             provider=provider,
             file_id=file_id,
+            map_mode=map_mode,
             source_preview=source_preview,
         )
         db.add(session)
@@ -70,7 +72,7 @@ class LearningMapRepository:
         return (
             db.query(LearningMapSession)
             .filter(LearningMapSession.user_id == user_id)
-            .order_by(desc(LearningMapSession.created_at))
+            .order_by(desc(LearningMapSession.id))
             .limit(limit)
             .all()
         )
@@ -93,7 +95,7 @@ class LearningMapRepository:
         return (
             db.query(LearningMapSession)
             .filter(LearningMapSession.user_id == user_id)
-            .order_by(desc(LearningMapSession.created_at))
+            .order_by(desc(LearningMapSession.id))
             .first()
         )
 
@@ -136,6 +138,11 @@ class LearningMapRepository:
                 mastery=node_data.get("mastery"),
                 example=node_data.get("example"),
                 resources=node_data.get("resources"),
+                node_type=node_data.get("node_type"),
+                primary_parent=node_data.get("primary_parent"),
+                source_excerpt=node_data.get("source_excerpt"),
+                source_ref=node_data.get("source_ref"),
+                confidence=node_data.get("confidence"),
             )
             db.add(node)
             nodes.append(node)
@@ -165,6 +172,8 @@ class LearningMapRepository:
                 from_node_id=src,
                 to_node_id=tgt,
                 relation=relation[:255],
+                relation_type=(edge.get("relation_type") or relation)[:255],
+                confidence=edge.get("confidence"),
             )
             db.add(record)
             edges.append(record)

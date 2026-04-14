@@ -268,7 +268,17 @@ class PaperGenerateRequest(BaseModel):
     knowledge_points: Optional[List[str]] = None
     time_limit: Optional[int] = None
     total_score: int = 100
+    mode: str = "teacher"
+    source_policy: str = "knowledge_first"
+    review_level: str = "normal"
+    blueprint_only: bool = False
     user_id: int  # 将user_id包含在请求模型中
+
+
+class PaperRegenerateRequest(BaseModel):
+    """局部重生试卷题目请求"""
+    user_id: int
+    question_ids: Optional[List[str]] = None
 
 
 @router.post("/paper/generate")
@@ -297,7 +307,11 @@ async def generate_paper(
             "question_type_distribution": request.question_type_distribution or {"choice": 15, "fill": 5},
             "knowledge_points": request.knowledge_points,
             "time_limit": request.time_limit,
-            "total_score": request.total_score
+            "total_score": request.total_score,
+            "mode": request.mode,
+            "source_policy": request.source_policy,
+            "review_level": request.review_level,
+            "blueprint_only": request.blueprint_only,
         }
         
         result = QuizPaperService.generate_custom_paper(db, request.user_id, config)
@@ -312,6 +326,33 @@ async def generate_paper(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"生成试卷失败: {str(e)}"
+        )
+
+
+@router.post("/paper/{paper_id}/regenerate")
+async def regenerate_paper_questions(
+    paper_id: int,
+    request: PaperRegenerateRequest,
+    db: Session = Depends(get_db)
+):
+    """只重生指定试卷中的不合格题目"""
+    try:
+        result = QuizPaperService.regenerate_paper_questions(
+            db=db,
+            paper_id=paper_id,
+            user_id=request.user_id,
+            question_ids=request.question_ids,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"重生试卷题目失败: {str(e)}"
         )
 
 

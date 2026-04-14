@@ -1,11 +1,13 @@
 """
-Agent 服务层 - 会话管理和任务编排
+Agent 服务层
 """
-from typing import Dict, Any, Optional, List, AsyncGenerator
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
 from sqlalchemy.orm import Session
+
+from core.logger import logger
 from repositories.agent_repo import AgentRepository
 from services.agent_executor import AgentExecutor
-from core.logger import logger
 
 
 class AgentService:
@@ -19,24 +21,19 @@ class AgentService:
         self,
         user_id: int,
         goal: str,
-        mode: str = "react"
+        mode: str = "react",
     ) -> Dict[str, Any]:
-        """创建并执行 Agent 任务"""
         try:
-            # 创建会话
             session = self.repo.create_session(
                 db=self.db,
                 user_id=user_id,
                 session_type=mode,
-                goal=goal
+                goal=goal,
             )
 
-            logger.info(f"创建 Agent 会话: {session.id}, 模式: {mode}")
+            logger.info("创建 Agent 会话: %s, 模式: %s", session.id, mode)
 
-            # 创建执行器
             executor = AgentExecutor(self.db, user_id, session.id)
-
-            # 根据模式执行
             if mode == "react":
                 result = await executor.execute_react(goal)
             elif mode == "cot":
@@ -46,23 +43,21 @@ class AgentService:
             else:
                 result = {
                     "success": False,
-                    "error": f"不支持的模式: {mode}"
+                    "error": f"不支持的模式: {mode}",
                 }
 
             return {
                 "session_id": session.id,
-                "result": result
+                "result": result,
             }
-
-        except Exception as e:
-            logger.error(f"执行 Agent 任务失败: {str(e)}")
+        except Exception as exc:
+            logger.error("执行 Agent 任务失败: %s", exc)
             return {
                 "success": False,
-                "error": str(e)
+                "error": str(exc),
             }
 
     def get_session_history(self, session_id: int) -> Optional[Dict[str, Any]]:
-        """获取会话历史"""
         try:
             session = self.repo.get_session(self.db, session_id)
             if not session:
@@ -76,14 +71,25 @@ class AgentService:
                 "goal": session.goal,
                 "status": session.status,
                 "session_type": session.session_type,
-                "created_at": session.created_at.isoformat() if session.created_at else None,
-                "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+                "created_at": (
+                    session.created_at.isoformat() if session.created_at else None
+                ),
+                "completed_at": (
+                    session.completed_at.isoformat()
+                    if session.completed_at
+                    else None
+                ),
                 "steps": [
                     {
                         "step_number": step.step_number,
                         "step_type": step.step_type,
                         "content": step.content,
-                        "created_at": step.created_at.isoformat() if step.created_at else None
+                        "extra_data": step.extra_data or {},
+                        "created_at": (
+                            step.created_at.isoformat()
+                            if step.created_at
+                            else None
+                        ),
                     }
                     for step in steps
                 ],
@@ -94,39 +100,41 @@ class AgentService:
                         "execution_time_ms": call.execution_time_ms,
                         "input_params": call.input_params,
                         "output_result": call.output_result,
-                        "error_message": call.error_message
+                        "error_message": call.error_message,
                     }
                     for call in tool_calls
-                ]
+                ],
             }
-
-        except Exception as e:
-            logger.error(f"获取会话历史失败: {str(e)}")
+        except Exception as exc:
+            logger.error("获取会话历史失败: %s", exc)
             return None
 
     def get_user_sessions(
         self,
         user_id: int,
         limit: int = 20,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
-        """获取用户的会话列表"""
         try:
-            sessions = self.repo.get_user_sessions(self.db, user_id, limit, offset)
-
+            sessions = self.repo.get_user_sessions(
+                self.db, user_id, limit, offset
+            )
             return [
                 {
                     "session_id": session.id,
                     "goal": session.goal,
                     "status": session.status,
                     "session_type": session.session_type,
-                    "created_at": session.created_at.isoformat() if session.created_at else None
+                    "created_at": (
+                        session.created_at.isoformat()
+                        if session.created_at
+                        else None
+                    ),
                 }
                 for session in sessions
             ]
-
-        except Exception as e:
-            logger.error(f"获取用户会话列表失败: {str(e)}")
+        except Exception as exc:
+            logger.error("获取用户会话列表失败: %s", exc)
             return []
 
     async def execute_task_stream(
@@ -134,77 +142,72 @@ class AgentService:
         user_id: int,
         session_id: int,
         goal: str,
-        mode: str = "react"
+        mode: str = "react",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """流式执行 Agent 任务"""
         try:
-            logger.info(f"开始流式执行任务: session_id={session_id}, mode={mode}")
+            logger.info(
+                "开始流式执行任务: session_id=%s, mode=%s",
+                session_id,
+                mode,
+            )
 
-            # 创建执行器
             executor = AgentExecutor(self.db, user_id, session_id)
-
-            # 根据模式执行（流式）
             if mode == "react":
                 async for event in executor.execute_react_stream(goal):
                     yield event
-            elif mode == "cot":
-                # CoT 模式：先推送思考开始事件，再执行
+                return
+
+            if mode == "cot":
                 yield {
                     "type": "iteration_start",
                     "iteration": 1,
                     "max_iterations": 1,
-                    "message": "开始逐步思考..."
+                    "message": "开始逐步思考...",
                 }
                 result = await executor.execute_cot(goal)
-                
-                # 推送思考内容
-                if result.get("success") and result.get("full_response"):
-                    yield {
-                        "type": "thought",
-                        "content": result.get("full_response", ""),
-                        "step_number": 1
-                    }
-                    yield {
-                        "type": "final_answer",
-                        "content": result.get("answer", ""),
-                        "step_number": 2
-                    }
-                
-                yield {
-                    "type": "completed" if result.get("success") else "failed",
-                    "result": result
-                }
-            elif mode == "function_calling":
-                # Function Calling 模式：先推送开始事件，再执行
-                yield {
-                    "type": "iteration_start",
-                    "iteration": 1,
-                    "max_iterations": 1,
-                    "message": "开始调用工具..."
-                }
-                result = await executor.execute_function_calling(goal)
-                
-                # 推送最终答案
                 if result.get("success") and result.get("answer"):
                     yield {
                         "type": "final_answer",
                         "content": result.get("answer", ""),
-                        "step_number": 1
+                        "step_number": 1,
                     }
-                
                 yield {
-                    "type": "completed" if result.get("success") else "failed",
-                    "result": result
+                    "type": "completed"
+                    if result.get("success")
+                    else "failed",
+                    "result": result,
                 }
-            else:
-                yield {
-                    "type": "error",
-                    "error": f"不支持的模式: {mode}"
-                }
+                return
 
-        except Exception as e:
-            logger.error(f"流式执行任务失败: {str(e)}")
+            if mode == "function_calling":
+                yield {
+                    "type": "iteration_start",
+                    "iteration": 1,
+                    "max_iterations": 1,
+                    "message": "开始调用工具...",
+                }
+                result = await executor.execute_function_calling(goal)
+                if result.get("success") and result.get("answer"):
+                    yield {
+                        "type": "final_answer",
+                        "content": result.get("answer", ""),
+                        "step_number": 1,
+                    }
+                yield {
+                    "type": "completed"
+                    if result.get("success")
+                    else "failed",
+                    "result": result,
+                }
+                return
+
             yield {
                 "type": "error",
-                "error": str(e)
+                "error": f"不支持的模式: {mode}",
+            }
+        except Exception as exc:
+            logger.error("流式执行任务失败: %s", exc)
+            yield {
+                "type": "error",
+                "error": str(exc),
             }

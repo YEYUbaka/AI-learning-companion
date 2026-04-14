@@ -9,6 +9,7 @@ from sqlalchemy import (
     Text,
     ForeignKey,
     DateTime,
+    Float,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -39,6 +40,7 @@ class LearningMapSession(Base):
     topic = Column(String(255), nullable=True)
     provider = Column(String(64), nullable=True)
     file_id = Column(Integer, ForeignKey("learning_map_files.id"), nullable=True)
+    map_mode = Column(String(32), nullable=False, default="document")
     source_preview = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -70,6 +72,11 @@ class LearningNode(Base):
     mastery = Column(String(32), nullable=True, default="unknown")
     example = Column(Text, nullable=True)
     resources = Column(Text, nullable=True)
+    node_type = Column(String(64), nullable=True, default="concept")
+    primary_parent = Column(String(255), nullable=True)
+    source_excerpt = Column(Text, nullable=True)
+    source_ref = Column(String(255), nullable=True)
+    confidence = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     session = relationship("LearningMapSession", back_populates="nodes")
@@ -103,6 +110,8 @@ class LearningEdge(Base):
     from_node_id = Column(Integer, ForeignKey("learning_nodes.id"), nullable=False)
     to_node_id = Column(Integer, ForeignKey("learning_nodes.id"), nullable=False)
     relation = Column(String(255), nullable=False, default="depends_on")
+    relation_type = Column(String(255), nullable=False, default="depends_on")
+    confidence = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     session = relationship("LearningMapSession", back_populates="edges")

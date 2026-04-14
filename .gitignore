@@ -132,20 +132,19 @@ docs/*.bat
 docs/*_query
 docs/*.pdf
 
-# docs 子目录排除（保留 docs/README.md）
-docs/competition/
-docs/参赛总文件夹/
-docs/RAG/temp/
-docs/RAG/年级知识点/
-docs/RAG/小学数学各版本知识点/
-docs/RAG/小学英语各版本知识点/
-docs/RAG/收录规范.md
+# docs 目录整体排除（本地参考资料，不上传 GitHub）
+docs/
 
 # 额外的技术文档（只保留根目录 README.md）
 frontend/README.md
 backend/README.md
-docs/architecture.md
 backend/seed_data/PROMPT_DESIGN_GUIDE.md
+
+# 根目录临时文件
+temp-*.txt
+*.conf
+.playwright-cli/
+AGENTS.md
 
 # 其他
 .cursor/

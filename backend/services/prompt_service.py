@@ -1,123 +1,114 @@
 """
-Prompt服务
-作者：智学伴开发团队
-目的：Prompt业务逻辑层，支持版本管理和缓存
+Prompt 服务
 """
-from typing import Optional, List
+import time
+from typing import List, Optional
+
 from sqlalchemy.orm import Session
-from repositories.prompt_repo import PromptRepository
-from models.prompt import Prompt
-from schemas.admin import PromptCreate, PromptUpdate
+
 from core.logger import logger
+from models.prompt import Prompt
+from repositories.prompt_repo import PromptRepository
+from schemas.admin import PromptCreate, PromptUpdate
 
 
 class PromptService:
-    """Prompt业务逻辑类"""
-    
-    # 简单内存缓存（生产环境应使用Redis）
+    """Prompt 业务逻辑"""
+
     _cache: dict = {}
-    _cache_ttl: int = 300  # 5分钟
-    
+    _cache_ttl: int = 300
+
     @staticmethod
     def get_active_prompt(db: Session, name: str) -> Optional[str]:
-        """获取启用的Prompt内容（带缓存）"""
         cache_key = f"prompt:{name}"
-        
-        # 检查缓存
-        if cache_key in PromptService._cache:
-            cached = PromptService._cache[cache_key]
-            import time
-            if time.time() - cached["timestamp"] < PromptService._cache_ttl:
-                return cached["content"]
-        
-        # 从数据库获取
+        cached = PromptService._cache.get(cache_key)
+        if cached and time.time() - cached["timestamp"] < PromptService._cache_ttl:
+            return cached["content"]
+
         prompt = PromptRepository.get_active_by_name(db, name)
-        if prompt:
-            content = prompt.content
-            # 更新缓存
-            import time
-            PromptService._cache[cache_key] = {
-                "content": content,
-                "timestamp": time.time()
-            }
-            return content
-        
-        return None
-    
+        if not prompt:
+            return None
+
+        PromptService._cache[cache_key] = {
+            "content": prompt.content,
+            "timestamp": time.time(),
+        }
+        return prompt.content
+
+    @staticmethod
+    def get_system_prompt(
+        db: Session, name: str = "system_prompt"
+    ) -> Optional[str]:
+        return PromptService.get_active_prompt(db, name)
+
     @staticmethod
     def invalidate_cache(name: Optional[str] = None):
-        """清除缓存"""
         if name:
-            cache_key = f"prompt:{name}"
-            PromptService._cache.pop(cache_key, None)
+            PromptService._cache.pop(f"prompt:{name}", None)
         else:
             PromptService._cache.clear()
-        logger.info(f"已清除Prompt缓存: {name or 'all'}")
-    
+        logger.info("已清理 Prompt 缓存: %s", name or "all")
+
     @staticmethod
     def create_prompt(db: Session, data: PromptCreate) -> Prompt:
-        """创建Prompt"""
         prompt = PromptRepository.create(
             db=db,
             name=data.name,
             content=data.content,
             description=data.description,
             enabled=data.enabled,
-            author=data.author
+            author=data.author,
         )
-        # 清除缓存
         PromptService.invalidate_cache(data.name)
-        logger.info(f"创建Prompt: {data.name}, 版本: {prompt.version}")
+        logger.info("创建 Prompt: %s, 版本: %s", data.name, prompt.version)
         return prompt
-    
+
     @staticmethod
-    def update_prompt(db: Session, prompt_id: int, data: PromptUpdate) -> Optional[Prompt]:
-        """更新Prompt"""
+    def update_prompt(
+        db: Session, prompt_id: int, data: PromptUpdate
+    ) -> Optional[Prompt]:
         prompt = PromptRepository.update(
             db=db,
             prompt_id=prompt_id,
             content=data.content,
             description=data.description,
-            enabled=data.enabled
+            enabled=data.enabled,
         )
         if prompt:
             PromptService.invalidate_cache(prompt.name)
-            logger.info(f"更新Prompt: {prompt.name}, ID: {prompt_id}")
+            logger.info("更新 Prompt: %s, ID: %s", prompt.name, prompt_id)
         return prompt
-    
+
     @staticmethod
     def get_prompt(db: Session, prompt_id: int) -> Optional[Prompt]:
-        """获取Prompt"""
         return PromptRepository.get_by_id(db, prompt_id)
-    
+
     @staticmethod
     def get_prompts_by_name(db: Session, name: str) -> List[Prompt]:
-        """获取指定名称的所有版本"""
         return PromptRepository.get_by_name(db, name)
-    
+
     @staticmethod
-    def get_all_prompts(db: Session, skip: int = 0, limit: int = 100) -> List[Prompt]:
-        """获取所有Prompt"""
+    def get_all_prompts(
+        db: Session, skip: int = 0, limit: int = 100
+    ) -> List[Prompt]:
         return PromptRepository.get_all(db, skip, limit)
-    
+
     @staticmethod
     def delete_prompt(db: Session, prompt_id: int) -> bool:
-        """删除Prompt"""
         prompt = PromptRepository.get_by_id(db, prompt_id)
-        if prompt:
-            result = PromptRepository.delete(db, prompt_id)
-            if result:
-                PromptService.invalidate_cache(prompt.name)
-                logger.info(f"删除Prompt: {prompt.name}, ID: {prompt_id}")
-            return result
-        return False
-    
+        if not prompt:
+            return False
+
+        result = PromptRepository.delete(db, prompt_id)
+        if result:
+            PromptService.invalidate_cache(prompt.name)
+            logger.info("删除 Prompt: %s, ID: %s", prompt.name, prompt_id)
+        return result
+
     @staticmethod
     def enable_version(db: Session, name: str, version: int) -> Optional[Prompt]:
-        """启用指定版本"""
         prompt = PromptRepository.enable_version(db, name, version)
         if prompt:
             PromptService.invalidate_cache(name)
-            logger.info(f"启用Prompt版本: {name}, 版本: {version}")
+            logger.info("启用 Prompt 版本: %s, 版本: %s", name, version)
         return prompt
-

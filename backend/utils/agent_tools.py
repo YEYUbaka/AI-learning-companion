@@ -1,21 +1,25 @@
 """
-Agent 工具系统 - 工具基类和具体实现
+Agent 工具系统
 """
+import json
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
-from pydantic import BaseModel, Field
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-import time
-from utils.file_parser import parse_file
-from services.quiz_service import QuizService
-from services.learning_map_service import LearningMapService
+
 from core.logger import logger
+from services.learning_map_service import LearningMapService
+from services.quiz_paper_service import QuizPaperService
+from utils.file_parser import parse_file
 
 
 class ToolParameter(BaseModel):
     """工具参数定义"""
+
     name: str
-    type: str  # string, integer, boolean, array, object
+    type: str
     description: str
     required: bool = True
     default: Optional[Any] = None
@@ -23,478 +27,572 @@ class ToolParameter(BaseModel):
 
 class ToolDefinition(BaseModel):
     """工具定义"""
+
     name: str
     description: str
-    category: str  # file, quiz, map, plan, export
+    category: str
     parameters: List[ToolParameter]
+    intent_tags: List[str] = []
+    preconditions: List[str] = []
+    output_schema: Dict[str, Any] = {}
+    quality_checks: List[str] = []
+    fallback_policy: str = "graceful_degradation"
 
 
 class BaseTool(ABC):
     """工具基类"""
 
     def __init__(self):
-        self.name = self.__class__.__name__.replace("Tool", "").lower()
         self.definition = self.get_definition()
 
     @abstractmethod
     def get_definition(self) -> ToolDefinition:
         """获取工具定义"""
-        pass
 
     @abstractmethod
     async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
         """执行工具"""
-        pass
 
     def validate_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """校验参数"""
         validated = {}
-        for param in self.definition.parameters:
-            if param.required and param.name not in params:
-                raise ValueError(f"缺少必需参数: {param.name}")
-
-            value = params.get(param.name, param.default)
+        for parameter in self.definition.parameters:
+            if parameter.required and parameter.name not in params:
+                raise ValueError(f"缺少必需参数: {parameter.name}")
+            value = params.get(parameter.name, parameter.default)
             if value is not None:
-                validated[param.name] = value
-
+                validated[parameter.name] = value
         return validated
+
+    def build_result(
+        self,
+        *,
+        success: bool,
+        payload: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+        quality_status: str = "verified",
+        confidence: float = 0.8,
+        evidence: Optional[List[Dict[str, Any]]] = None,
+        fallback_used: bool = False,
+    ) -> Dict[str, Any]:
+        return {
+            "success": success,
+            "quality_status": quality_status,
+            "confidence": confidence,
+            "evidence": evidence or [],
+            "fallback_used": fallback_used,
+            **(payload or {}),
+            **({"error": error} if error else {}),
+        }
+
+    def to_openai_tool(self) -> Dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.definition.name,
+                "description": self.definition.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        parameter.name: {
+                            "type": parameter.type,
+                            "description": parameter.description,
+                        }
+                        for parameter in self.definition.parameters
+                    },
+                    "required": [
+                        parameter.name
+                        for parameter in self.definition.parameters
+                        if parameter.required
+                    ],
+                },
+            },
+        }
 
 
 class FileParserTool(BaseTool):
-    """文件解析工具"""
-
     def get_definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="parse_file",
-            description="解析上传的文档文件（PDF/DOCX/PPTX/TXT），提取文本内容",
+            description="解析上传的文件文本，用于后续知识抽取。",
             category="file",
             parameters=[
-                ToolParameter(
-                    name="file_path",
-                    type="string",
-                    description="文件路径（相对于上传目录）",
-                    required=True
-                ),
-                ToolParameter(
-                    name="max_length",
-                    type="integer",
-                    description="最大字符数（默认 12000）",
-                    required=False,
-                    default=12000
-                )
-            ]
+                ToolParameter(name="file_path", type="string", description="文件路径"),
+                ToolParameter(name="max_length", type="integer", description="最大长度", required=False, default=4000),
+            ],
+            intent_tags=["file", "parse", "document"],
+            preconditions=["需要提供已上传的文件路径"],
+            output_schema={"type": "object", "properties": {"text": {"type": "string"}}},
+            quality_checks=["文本不能为空"],
+            fallback_policy="return_partial_text",
         )
 
     async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
-        """执行文件解析"""
         try:
             params = self.validate_params(kwargs)
-            file_path = params["file_path"]
-            max_length = params.get("max_length", 12000)
-              # 调用现有的文件解析函数
-            text = parse_file(file_path)
+            text, length = parse_file(params["file_path"])
+            max_length = params.get("max_length", 4000)
+            trimmed = text[:max_length]
+            return self.build_result(
+                success=True,
+                payload={"text": trimmed, "length": min(length, max_length), "file_path": params["file_path"]},
+                evidence=[{"type": "file", "summary": Path(params["file_path"]).name}],
+                confidence=0.95,
+            )
+        except Exception as exc:
+            logger.error("文件解析失败: %s", exc)
+            return self.build_result(success=False, error=str(exc), quality_status="failed", confidence=0.2)
 
-            # 截断过长文本
-            if len(text) > max_length:
-                text = text[:max_length] + "\n...(内容已截断)"
 
-            return {
-                "success": True,
-                "text": text,
-                "length": len(text),
-                "file_path": file_path
+class SearchKnowledgeTool(BaseTool):
+    def get_definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="search_knowledge",
+            description="检索本地知识库中的知识点、公式、概念、考点与证据材料。",
+            category="search",
+            parameters=[
+                ToolParameter(name="query", type="string", description="检索问题或关键词"),
+                ToolParameter(name="limit", type="integer", description="最大返回条数", required=False, default=5),
+                ToolParameter(name="grade_level", type="string", description="学段过滤", required=False, default=None),
+                ToolParameter(name="subject", type="string", description="学科过滤", required=False, default=None),
+            ],
+            intent_tags=["knowledge_search", "concept", "formula", "exam_point"],
+            preconditions=["当用户询问概念、知识点、公式、考点时优先使用"],
+            output_schema={"type": "object", "properties": {"results": {"type": "array"}}},
+            quality_checks=["优先命中知识库证据", "返回来源摘要"],
+            fallback_policy="return_empty_with_warning",
+        )
+
+    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+        params = self.validate_params(kwargs)
+        try:
+            from services.rag_service import RAGService
+
+            results = RAGService.search(
+                query=params["query"],
+                n_results=params.get("limit", 5),
+                grade_level=params.get("grade_level"),
+                subject=params.get("subject"),
+            )
+            if not results:
+                return self.build_result(
+                    success=True,
+                    payload={"query": params["query"], "results": [], "text": "知识库暂无匹配证据。"},
+                    quality_status="warning",
+                    confidence=0.35,
+                    fallback_used=True,
+                )
+            serialized = []
+            evidence = []
+            for item in results:
+                serialized_item = {
+                    "title": item.title,
+                    "subject": item.subject,
+                    "grade_level": item.grade_level,
+                    "section_title": item.section_title,
+                    "text_preview": item.text[:200],
+                    "image_paths": item.image_paths,
+                }
+                serialized.append(serialized_item)
+                evidence.append(
+                    {
+                        "type": "knowledge_chunk",
+                        "summary": f"{item.title} - {item.section_title or '知识片段'}",
+                        "excerpt": item.text[:120],
+                    }
+                )
+            return self.build_result(
+                success=True,
+                payload={
+                    "query": params["query"],
+                    "results": serialized,
+                    "count": len(serialized),
+                    "text": "\n\n".join(item["text_preview"] for item in serialized),
+                },
+                evidence=evidence,
+                confidence=0.88,
+            )
+        except Exception as exc:
+            logger.warning("知识库检索降级: %s", exc)
+            return self.build_result(
+                success=True,
+                payload={"query": params["query"], "results": [], "text": "RAG 未启用，当前无法提供知识库证据。"},
+                quality_status="warning",
+                confidence=0.25,
+                fallback_used=True,
+                evidence=[],
+            )
+
+
+class SearchExampleQuestionsTool(BaseTool):
+    def get_definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="search_example_questions",
+            description="检索例题、真题、典型题型素材，优先为组卷和讲题提供证据。",
+            category="search",
+            parameters=[
+                ToolParameter(name="query", type="string", description="知识点或题型描述"),
+                ToolParameter(name="limit", type="integer", description="最大返回条数", required=False, default=3),
+                ToolParameter(name="grade_level", type="string", description="学段过滤", required=False, default=None),
+                ToolParameter(name="subject", type="string", description="学科过滤", required=False, default=None),
+            ],
+            intent_tags=["example_questions", "true_questions", "paper_generation"],
+            preconditions=["当用户要求例题、真题或组卷时优先使用"],
+            output_schema={"type": "object", "properties": {"examples": {"type": "array"}}},
+            quality_checks=["优先返回含题目风格的证据"],
+            fallback_policy="return_empty_with_warning",
+        )
+
+    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+        params = self.validate_params(kwargs)
+        knowledge_result = await SearchKnowledgeTool().execute(
+            db=db,
+            user_id=user_id,
+            query=f"{params['query']} 例题 真题",
+            limit=params.get("limit", 3),
+            grade_level=params.get("grade_level"),
+            subject=params.get("subject"),
+        )
+        results = knowledge_result.get("results", [])
+        examples = []
+        for item in results:
+            examples.append(
+                {
+                    "title": item.get("title"),
+                    "summary": item.get("text_preview"),
+                    "section_title": item.get("section_title"),
+                }
+            )
+        return self.build_result(
+            success=True,
+            payload={
+                "query": params["query"],
+                "examples": examples,
+                "count": len(examples),
+                "text": "\n\n".join(example["summary"] or "" for example in examples),
+            },
+            quality_status=knowledge_result.get("quality_status", "verified"),
+            confidence=knowledge_result.get("confidence", 0.7),
+            evidence=knowledge_result.get("evidence", []),
+            fallback_used=knowledge_result.get("fallback_used", False),
+        )
+
+
+class BuildPaperBlueprintTool(BaseTool):
+    def get_definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="build_paper_blueprint",
+            description="生成试卷蓝图，明确题型分布、知识点覆盖、难度与时长。",
+            category="paper",
+            parameters=[
+                ToolParameter(name="title", type="string", description="试卷标题", required=False, default="智能组卷"),
+                ToolParameter(name="subject", type="string", description="学科", required=False, default=None),
+                ToolParameter(name="grade_level", type="string", description="学段", required=False, default=None),
+                ToolParameter(name="total_questions", type="integer", description="总题数", required=False, default=6),
+                ToolParameter(name="knowledge_points", type="array", description="知识点列表", required=False, default=[]),
+                ToolParameter(name="mode", type="string", description="teacher 或 practice", required=False, default="teacher"),
+                ToolParameter(name="source_policy", type="string", description="knowledge_first 或 hybrid", required=False, default="knowledge_first"),
+                ToolParameter(name="review_level", type="string", description="strict 或 normal", required=False, default="normal"),
+                ToolParameter(name="difficulty_distribution", type="object", description="难度分布", required=False, default={}),
+                ToolParameter(name="question_type_distribution", type="object", description="题型分布", required=False, default={}),
+                ToolParameter(name="time_limit", type="integer", description="时长", required=False, default=60),
+                ToolParameter(name="total_score", type="integer", description="总分", required=False, default=100),
+            ],
+            intent_tags=["paper_generation", "blueprint"],
+            preconditions=["生成试卷前先出蓝图"],
+            output_schema={"type": "object", "properties": {"blueprint": {"type": "object"}}},
+            quality_checks=["题量分布与知识点覆盖完整"],
+            fallback_policy="deterministic_blueprint",
+        )
+
+    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+        params = self.validate_params(kwargs)
+        blueprint = QuizPaperService.build_blueprint(params)
+        return self.build_result(
+            success=True,
+            payload={"blueprint": blueprint},
+            evidence=[{"type": "blueprint", "summary": f"{blueprint['total_questions']} 道题，模式 {blueprint['mode']}"}],
+            confidence=0.94,
+        )
+
+
+class GeneratePaperQuestionsTool(BaseTool):
+    def get_definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="generate_paper_questions",
+            description="根据试卷蓝图分批生成题目。",
+            category="paper",
+            parameters=[
+                ToolParameter(name="blueprint", type="object", description="试卷蓝图"),
+                ToolParameter(name="config", type="object", description="补充配置", required=False, default={}),
+            ],
+            intent_tags=["paper_generation", "question_generation"],
+            preconditions=["必须先有试卷蓝图"],
+            output_schema={"type": "object", "properties": {"questions": {"type": "array"}}},
+            quality_checks=["每题必须绑定知识点、难度、答案、解析"],
+            fallback_policy="template_questions",
+        )
+
+    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+        params = self.validate_params(kwargs)
+        blueprint = params["blueprint"]
+        config = params.get("config") or blueprint
+        questions = QuizPaperService.generate_questions_from_blueprint(db, config, blueprint)
+        evidence = [
+            {
+                "type": "generated_question",
+                "summary": question.get("stem", "")[:80],
             }
-        except Exception as e:
-            logger.error(f"文件解析失败: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            for question in questions[:3]
+        ]
+        return self.build_result(
+            success=True,
+            payload={"questions": questions, "count": len(questions)},
+            evidence=evidence,
+            confidence=0.78,
+            fallback_used=any(question.get("source_type") == "ai_generated" for question in questions),
+        )
 
 
-class QuizGeneratorTool(BaseTool):
-    """智能组卷工具"""
+class ReviewPaperQualityTool(BaseTool):
+    def get_definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="review_paper_quality",
+            description="审核试卷质量，输出重复率、覆盖知识点与问题告警。",
+            category="paper",
+            parameters=[
+                ToolParameter(name="blueprint", type="object", description="试卷蓝图"),
+                ToolParameter(name="questions", type="array", description="试卷题目"),
+                ToolParameter(name="review_level", type="string", description="审核级别", required=False, default="normal"),
+            ],
+            intent_tags=["paper_review", "quality_review"],
+            preconditions=["必须在题目生成之后执行"],
+            output_schema={"type": "object", "properties": {"quality_report": {"type": "object"}}},
+            quality_checks=["重复率", "答案完整性", "难度分布", "题干清晰度"],
+            fallback_policy="rule_based_review",
+        )
+
+    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+        params = self.validate_params(kwargs)
+        report = QuizPaperService.review_generated_paper(
+            blueprint=params["blueprint"],
+            questions=params["questions"],
+            review_level=params.get("review_level", "normal"),
+        )
+        return self.build_result(
+            success=True,
+            payload={"quality_report": report},
+            quality_status=report["quality_status"],
+            confidence=0.9,
+            evidence=[{"type": "quality_report", "summary": f"审核分 {report['score']}"}],
+        )
+
+
+class BuildLearningMapTool(BaseTool):
+    def get_definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="build_learning_map",
+            description="生成知识图谱，支持 syllabus 与 document 两种模式。",
+            category="map",
+            parameters=[
+                ToolParameter(name="topic", type="string", description="课程主题", required=False, default=None),
+                ToolParameter(name="file_id", type="integer", description="学习资料 file_id", required=False, default=None),
+                ToolParameter(name="map_mode", type="string", description="syllabus 或 document", required=False, default="document"),
+                ToolParameter(name="provider", type="string", description="模型提供商", required=False, default=None),
+            ],
+            intent_tags=["learning_map", "mindmap", "graph"],
+            preconditions=["至少提供 topic 或 file_id"],
+            output_schema={"type": "object", "properties": {"session_id": {"type": "integer"}}},
+            quality_checks=["节点与边必须成图", "包含来源信息"],
+            fallback_policy="raise_error",
+        )
+
+    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+        params = self.validate_params(kwargs)
+        result = LearningMapService.generate_graph(
+            db=db,
+            user_id=user_id,
+            file_id=params.get("file_id"),
+            course_topic=params.get("topic"),
+            provider=params.get("provider"),
+            map_mode=params.get("map_mode", "document"),
+        )
+        graph = LearningMapService.get_graph(db, user_id=user_id, session_id=result["session_id"])
+        return self.build_result(
+            success=True,
+            payload={**result, "graph": graph},
+            evidence=[{"type": "learning_map", "summary": f"{result['node_count']} 节点 / {result['edge_count']} 边"}],
+            confidence=0.82,
+        )
+
+
+class ExportLearningMapXMindTool(BaseTool):
+    REPORT_DIR = Path("reports")
 
     def get_definition(self) -> ToolDefinition:
         return ToolDefinition(
-            name="generate_quiz",
-            description="根据主题和难度生成测验题目",
-            category="quiz",
-            parameters=[
-                ToolParameter(
-                    name="topic",
-                    type="string",
-                    description="测验主题或学习内容",
-                    required=True
-                ),
-                ToolParameter(
-                    name="num_questions",
-                    type="integer",
-                    description="题目数量（默认 5）",
-                    required=False,
-                    default=5
-                ),
-                ToolParameter(
-                    name="difficulty",
-                    type="string",
-                    description="难度等级：easy, medium, hard（默认 medium）",
-                    required=False,
-                    default="medium"
-                )
-            ]
+            name="export_learning_map_xmind",
+            description="将知识图谱导出为真实 .xmind 文件。",
+            category="export",
+            parameters=[ToolParameter(name="session_id", type="integer", description="知识图谱 session_id")],
+            intent_tags=["learning_map_export", "xmind"],
+            preconditions=["必须先生成知识图谱"],
+            output_schema={"type": "object", "properties": {"file_path": {"type": "string"}}},
+            quality_checks=["导出文件必须为 .xmind ZIP 包"],
+            fallback_policy="raise_error",
         )
 
     async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
-        """执行智能组卷"""
-        try:
-            params = self.validate_params(kwargs)
+        params = self.validate_params(kwargs)
+        export_result = LearningMapService.export_learning_map(
+            db=db,
+            user_id=user_id,
+            session_id=params["session_id"],
+            export_format="xmind",
+        )
+        self.REPORT_DIR.mkdir(parents=True, exist_ok=True)
+        file_path = self.REPORT_DIR / export_result["filename"]
+        file_path.write_bytes(export_result["content"])
+        return self.build_result(
+            success=True,
+            payload={
+                "file_name": export_result["filename"],
+                "file_path": str(file_path),
+                "size": len(export_result["content"]),
+            },
+            evidence=[{"type": "file", "summary": export_result["filename"]}],
+            confidence=0.95,
+        )
 
+
+class StudyPlanGeneratorTool(BaseTool):
+    def get_definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="generate_study_plan",
+            description="生成个性化学习计划。",
+            category="plan",
+            parameters=[
+                ToolParameter(name="goal", type="string", description="学习目标"),
+                ToolParameter(name="duration_days", type="integer", description="计划天数", required=False, default=30),
+                ToolParameter(name="content", type="string", description="补充内容", required=False, default=""),
+            ],
+            intent_tags=["study_plan", "learning_path"],
+            preconditions=["需要明确学习目标"],
+            output_schema={"type": "object", "properties": {"plan": {"type": "object"}}},
+            quality_checks=["计划需包含阶段和任务"],
+            fallback_policy="return_error",
+        )
+
+    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+        try:
+            from utils.plan_generator import generate_study_plan
+
+            params = self.validate_params(kwargs)
+            plan_data = generate_study_plan(
+                user_id=user_id,
+                goals=params["goal"],
+                file_text=params.get("content") or None,
+            )
+            return self.build_result(
+                success=True,
+                payload={
+                    "plan": {
+                        "goal": params["goal"],
+                        "duration_days": params.get("duration_days", 30),
+                        "daily_plan": plan_data,
+                    }
+                },
+                confidence=0.78,
+            )
+        except Exception as exc:
+            logger.error("学习计划生成失败: %s", exc)
+            return self.build_result(success=False, error=str(exc), quality_status="failed", confidence=0.2)
+
+
+class WebSearchTool(BaseTool):
+    def get_definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="web_search",
+            description="执行通用网络搜索。",
+            category="search",
+            parameters=[
+                ToolParameter(name="query", type="string", description="搜索词"),
+                ToolParameter(name="max_results", type="integer", description="最大结果数", required=False, default=5),
+            ],
+            intent_tags=["web_search", "latest_information"],
+            preconditions=["需要互联网搜索时使用"],
+            output_schema={"type": "object", "properties": {"results": {"type": "array"}}},
+            quality_checks=["优先返回标题、摘要、链接"],
+            fallback_policy="return_empty_with_warning",
+        )
+
+    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+        params = self.validate_params(kwargs)
+        try:
+            from ddgs import DDGS
+
+            search_results = DDGS().text(params["query"], max_results=params.get("max_results", 5))
+            results = []
+            evidence = []
+            for item in search_results:
+                result = {
+                    "title": item.get("title", ""),
+                    "snippet": item.get("body", ""),
+                    "url": item.get("href", ""),
+                }
+                results.append(result)
+                evidence.append({"type": "web_result", "summary": result["title"], "excerpt": result["snippet"]})
+            return self.build_result(
+                success=True,
+                payload={"query": params["query"], "results": results, "count": len(results)},
+                evidence=evidence,
+                confidence=0.74,
+            )
+        except Exception as exc:
+            logger.warning("网络搜索降级: %s", exc)
+            return self.build_result(
+                success=True,
+                payload={"query": params["query"], "results": [], "count": 0, "text": "网络搜索暂不可用。"},
+                quality_status="warning",
+                confidence=0.2,
+                fallback_used=True,
+            )
+
+
+class QuizGeneratorTool(BaseTool):
+    def get_definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="generate_quiz",
+            description="生成常规测验题目。",
+            category="quiz",
+            parameters=[
+                ToolParameter(name="topic", type="string", description="测验主题"),
+                ToolParameter(name="num_questions", type="integer", description="题目数量", required=False, default=5),
+                ToolParameter(name="difficulty", type="string", description="难度", required=False, default="medium"),
+            ],
+            intent_tags=["quiz_generation"],
+            preconditions=["常规测评场景"],
+            output_schema={"type": "object", "properties": {"questions": {"type": "array"}}},
+            quality_checks=["题目数量与答案完整"],
+            fallback_policy="template_questions",
+        )
+
+    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+        try:
+            from services.quiz_service import QuizService
+
+            params = self.validate_params(kwargs)
             quiz_service = QuizService(db)
             result = await quiz_service.generate_quiz(
                 user_id=user_id,
                 topic=params["topic"],
                 num_questions=params.get("num_questions", 5),
-                difficulty=params.get("difficulty", "medium")
+                difficulty=params.get("difficulty", "medium"),
             )
-
-            return {
-                "success": True,
-                "quiz_id": result.get("quiz_id"),
-                "questions": result.get("questions"),
-                "topic": params["topic"]
-            }
-        except Exception as e:
-            logger.error(f"智能组卷失败: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-
-
-class LearningMapBuilderTool(BaseTool):
-    """知识图谱构建工具"""
-
-    def get_definition(self) -> ToolDefinition:
-        return ToolDefinition(
-            name="build_learning_map",
-            description="根据学习主题构建知识图谱",
-            category="map",
-            parameters=[
-                ToolParameter(
-                    name="topic",
-                    type="string",
-                    description="学习主题或课程名称（如：Java异步编程、Python数据分析）",
-                    required=True
-                )
-            ]
-        )
-
-    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
-        """执行知识图谱构建"""
-        try:
-            params = self.validate_params(kwargs)
-            topic = params.get("topic", "")
-
-            if not topic:
-                return {
-                    "success": False,
-                    "error": "请提供学习主题"
-                }
-
-            # 调用 generate_graph 生成图谱
-            result = LearningMapService.generate_graph(
-                db=db,
-                user_id=user_id,
-                file_id=None,
-                course_topic=topic,
-                provider=None
+            return self.build_result(
+                success=True,
+                payload={"quiz_id": result.get("quiz_id"), "questions": result.get("questions", [])},
+                confidence=0.75,
             )
-
-            # generate_graph 返回的是 session_id，需要再获取图谱数据
-            if result.get("success") and result.get("session_id"):
-                session_id = result["session_id"]
-
-                # 获取完整的图谱数据
-                graph_data = LearningMapService.get_graph(db, session_id, user_id)
-
-                if graph_data:
-                    return {
-                        "success": True,
-                        "session_id": session_id,
-                        "node_count": result.get("node_count", 0),
-                        "edge_count": result.get("edge_count", 0),
-                        "nodes": graph_data.get("nodes", []),
-                        "edges": graph_data.get("edges", []),
-                        "message": f"成功生成知识图谱，包含 {result.get('node_count', 0)} 个知识点"
-                    }
-
-            return {
-                "success": False,
-                "error": "知识图谱生成失败"
-            }
-
-        except Exception as e:
-            logger.error(f"知识图谱构建失败: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-
-
-class StudyPlanGeneratorTool(BaseTool):
-    """学习计划生成工具"""
-
-    def get_definition(self) -> ToolDefinition:
-        return ToolDefinition(
-            name="generate_study_plan",
-            description="生成个性化学习计划",
-            category="plan",
-            parameters=[
-                ToolParameter(
-                    name="goal",
-                    type="string",
-                    description="学习目标",
-                    required=True
-                ),
-                ToolParameter(
-                    name="duration_days",
-                    type="integer",
-                    description="计划天数（默认 30）",
-                    required=False,
-                    default=30
-                ),
-                ToolParameter(
-                    name="content",
-                    type="string",
-                    description="学习内容或参考资料",
-                    required=False,
-                    default=""
-                )
-            ]
-        )
-
-    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
-        """执行学习计划生成"""
-        try:
-            params = self.validate_params(kwargs)
-
-            # 调用真实的学习计划生成服务
-            from utils.plan_generator import generate_study_plan
-
-            # 构建学习目标描述
-            goal = params["goal"]
-            duration_days = params.get("duration_days", 30)
-            content = params.get("content", "")
-
-            # 组合目标描述
-            full_goal = f"{goal}（计划 {duration_days} 天）"
-
-            # 调用生成器
-            plan_data = generate_study_plan(
-                user_id=user_id,
-                goals=full_goal,
-                file_text=content if content else None
-            )
-
-            # 转换为更详细的格式
-            plan = {
-                "goal": goal,
-                "duration_days": duration_days,
-                "daily_plan": plan_data,
-                "total_days": len(plan_data)
-            }
-
-            return {
-                "success": True,
-                "plan": plan
-            }
-        except Exception as e:
-            logger.error(f"学习计划生成失败: {str(e)}")
-            return {
-                "success": False,
-                "error": "学习计划生成失败，请检查 AI 模型配置是否正确，或稍后重试"
-            }
-
-
-class WebSearchTool(BaseTool):
-    """网络搜索工具"""
-
-    def get_definition(self) -> ToolDefinition:
-        return ToolDefinition(
-            name="web_search",
-            description="在互联网上搜索信息，获取最新的知识和资料",
-            category="search",
-            parameters=[
-                ToolParameter(
-                    name="query",
-                    type="string",
-                    description="搜索关键词或问题",
-                    required=True
-                ),
-                ToolParameter(
-                    name="max_results",
-                    type="integer",
-                    description="最大返回结果数（默认 5）",
-                    required=False,
-                    default=5
-                )
-            ]
-        )
-
-    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
-        """执行网络搜索"""
-        try:
-            params = self.validate_params(kwargs)
-            query = params["query"]
-            max_results = params.get("max_results", 5)
-
-            # 使用 DuckDuckGo 搜索（无需 API 密钥）
-            try:
-                from ddgs import DDGS
-
-                results = []
-                ddgs = DDGS()
-                search_results = ddgs.text(query, max_results=max_results)
-                for r in search_results:
-                    results.append({
-                        "title": r.get("title", ""),
-                        "snippet": r.get("body", ""),
-                        "url": r.get("href", "")
-                    })
-
-                if not results:
-                    return {
-                        "success": False,
-                        "error": "未找到相关结果"
-                    }
-
-                # 格式化搜索结果（使用 Markdown 链接格式）
-                formatted_results = "\n\n".join([
-                    f"**{i+1}. [{r['title']}]({r['url']})**\n\n{r['snippet']}\n\n[点击访问原文]({r['url']})"
-                    for i, r in enumerate(results)
-                ])
-
-                return {
-                    "success": True,
-                    "query": query,
-                    "results": results,
-                    "text": formatted_results,
-                    "count": len(results)
-                }
-            except ImportError:
-                # 如果没有安装 duckduckgo_search，返回提示
-                logger.warning("duckduckgo_search 未安装，使用模拟搜索")
-                return {
-                    "success": True,
-                    "query": query,
-                    "text": f"搜索关键词：{query}\n\n提示：网络搜索功能需要安装 duckduckgo-search 库。\n请运行: pip install duckduckgo-search",
-                    "count": 0
-                }
-            except Exception as search_err:
-                # 搜索服务本身出错（网络问题、API 限制等）
-                logger.warning(f"网络搜索服务异常: {str(search_err)}")
-                return {
-                    "success": True,
-                    "query": query,
-                    "text": f"关于「{query}」的搜索暂时无法完成（网络服务暂时不可用），但我可以根据已有知识为你提供一些参考信息。",
-                    "count": 0
-                }
-        except Exception as e:
-            logger.error(f"网络搜索失败: {str(e)}")
-            return {
-                "success": False,
-                "error": "搜索服务暂时不可用，请稍后重试"
-            }
-
-
-class KnowledgeSearchTool(BaseTool):
-    """本地知识库语义搜索工具（RAG）"""
-
-    def get_definition(self) -> ToolDefinition:
-        return ToolDefinition(
-            name="search_knowledge",
-            description="在本地知识库中语义搜索学科知识、真题、概念解析等。适用：数学公式、物理定律、化学原理、语文知识、历史事件、真题解析、知识点讲解",
-            category="search",
-            parameters=[
-                ToolParameter(
-                    name="query",
-                    type="string",
-                    description="搜索查询（支持自然语言，如：分数加减法如何计算）",
-                    required=True
-                ),
-                ToolParameter(
-                    name="limit",
-                    type="integer",
-                    description="最大返回结果数（默认 5）",
-                    required=False,
-                    default=5
-                ),
-                ToolParameter(
-                    name="grade_level",
-                    type="string",
-                    description="年级过滤：小学/初中/高中/大学/通用（可选）",
-                    required=False,
-                    default=None
-                ),
-                ToolParameter(
-                    name="subject",
-                    type="string",
-                    description="学科过滤：数学/物理/化学/生物/语文/英语/历史/地理/政治/信息技术（可选）",
-                    required=False,
-                    default=None
-                )
-            ]
-        )
-
-    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
-        """执行 RAG 语义检索"""
-        try:
-            params = self.validate_params(kwargs)
-            query = params["query"]
-            limit = params.get("limit", 5)
-            grade_level = params.get("grade_level")
-            subject = params.get("subject")
-
-            from services.rag_service import RAGService
-
-            results = RAGService.search(
-                query=query,
-                n_results=limit,
-                grade_level=grade_level,
-                subject=subject
-            )
-
-            if not results:
-                return {
-                    "success": True,
-                    "query": query,
-                    "text": f"知识库中暂无与「{query}」相关的内容。请尝试换个关键词，或通过管理后台上传相关知识文档。",
-                    "count": 0
-                }
-
-            # 构建 RAG context
-            rag_context = RAGService.build_rag_context(query, results)
-
-            return {
-                "success": True,
-                "query": query,
-                "text": rag_context,
-                "count": len(results),
-                "results": [
-                    {
-                        "title": r.title,
-                        "grade_level": r.grade_level,
-                        "subject": r.subject,
-                        "section_title": r.section_title,
-                        "text_preview": r.text[:200],
-                        "image_paths": r.image_paths
-                    }
-                    for r in results
-                ]
-            }
-        except Exception as e:
-            logger.error(f"知识库搜索失败: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+        except Exception as exc:
+            logger.error("测验生成失败: %s", exc)
+            return self.build_result(success=False, error=str(exc), quality_status="failed", confidence=0.2)

@@ -3,10 +3,12 @@
 作者：智学伴开发团队
 """
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from database import get_db
 from services.learning_map_service import LearningMapService
 from typing import Optional
+from core.security import get_current_user
 from schemas.learning_map import (
     LearningMapUploadResponse,
     LearningMapGenerateRequest,
@@ -55,6 +57,7 @@ async def generate_learning_map(
             file_id=request.file_id,
             course_topic=request.course_topic,
             provider=request.provider,
+            map_mode=request.map_mode,
         )
         return result
     except ValueError as exc:
@@ -129,5 +132,39 @@ async def delete_learning_map_session(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"删除知识图谱会话失败: {exc}",
+        )
+
+
+@router.get("/{session_id}/export")
+async def export_learning_map(
+    session_id: int,
+    format: str = "xmind",
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """
+    导出知识图谱
+    """
+    try:
+        export_result = LearningMapService.export_learning_map(
+            db=db,
+            user_id=current_user.id,
+            session_id=session_id,
+            export_format=format,
+        )
+        media_type = "application/vnd.xmind.workbook" if format == "xmind" else "application/octet-stream"
+        return Response(
+            content=export_result["content"],
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{export_result["filename"]}"'
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"导出知识图谱失败: {exc}",
         )
 

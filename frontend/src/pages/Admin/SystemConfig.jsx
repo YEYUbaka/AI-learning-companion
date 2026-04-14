@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../../components/AdminLayout';
 import api from '../../api/apiClient';
 import { useThemeStore } from '../../store/themeStore';
+import logger from '../../utils/logger';
 
 const SystemConfig = () => {
   const [config, setConfig] = useState({
@@ -58,7 +59,7 @@ const SystemConfig = () => {
       const response = await api.get('/api/v1/admin/system-config');
       setConfig(response.data);
     } catch (error) {
-      console.error('获取系统配置失败:', error);
+      logger.error('获取系统配置失败', error);
     } finally {
       setLoading(false);
     }
@@ -177,4 +178,3 @@ const SystemConfig = () => {
 };
 
 export default SystemConfig;
-
