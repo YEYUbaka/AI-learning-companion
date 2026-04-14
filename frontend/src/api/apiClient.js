@@ -125,6 +125,10 @@ export const deletePaper = async (paperId, userId) => {
   return api.delete(`/api/v1/quiz/paper/${paperId}?user_id=${userId}`);
 };
 
+export const regeneratePaperQuestions = async (paperId, payload) => {
+  return api.post(`/api/v1/quiz/paper/${paperId}/regenerate`, payload, { timeout: 120000 });
+};
+
 export const exportPaper = async (paperId, userId, format = 'pdf', includeAnswer = true) => {
   return api.get(`/api/v1/quiz/paper/${paperId}/export?user_id=${userId}&format=${format}&include_answer=${includeAnswer}`, {
     responseType: 'blob'
@@ -295,6 +299,12 @@ export const getLearningMapHistory = async (userId, limit = 20) => {
 
 export const deleteLearningMapSession = async (userId, sessionId) => {
   return api.delete(`/api/v1/learning-map/${userId}/sessions/${sessionId}`);
+};
+
+export const exportLearningMapXMind = async (sessionId) => {
+  return api.get(`/api/v1/learning-map/export/xmind/${sessionId}`, {
+    responseType: 'blob',
+  });
 };
 
 export default api;
