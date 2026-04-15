@@ -18,6 +18,16 @@ const getStepExtraData = (step) => step?.extra_data || {};
 const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
   const [expandedSteps, setExpandedSteps] = useState(new Set());
 
+  // 从 sessionStorage 读取当前用户 ID，用于拼接下载链接
+  const userId = (() => {
+    try {
+      const info = JSON.parse(sessionStorage.getItem('userInfo') || '{}');
+      return info.id || info.user_id || null;
+    } catch {
+      return null;
+    }
+  })();
+
   const toggleStep = (index) => {
     const next = new Set(expandedSteps);
     if (next.has(index)) {
@@ -167,6 +177,10 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
     if (result.file_name || result.filename) summaryBlocks.push(['文件', result.file_name || result.filename]);
     if (result.session_id) summaryBlocks.push(['session_id', result.session_id]);
 
+    const paperId = result.paper_id;
+    const xmindFileName = result.file_name || result.filename;
+    const isXmind = xmindFileName && (xmindFileName.endsWith('.xmind') || xmindFileName.endsWith('.zip'));
+
     return (
       <div className={`border rounded-lg p-3 ${isDark ? 'bg-violet-900/20 border-violet-800' : 'bg-violet-50 border-violet-200'}`}>
         <div className={`font-medium mb-2 text-sm ${isDark ? 'text-violet-300' : 'text-violet-800'}`}>
@@ -182,6 +196,55 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
             </div>
           ))}
         </div>
+
+        {/* 试卷下载按钮区域 */}
+        {paperId ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a
+              href={`/quiz/paper/${paperId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`inline-flex items-center px-3 py-1.5 text-sm font-medium rounded border transition-colors ${
+                isDark
+                  ? 'border-blue-500 text-blue-400 hover:bg-blue-900/30'
+                  : 'border-blue-600 text-blue-600 hover:bg-blue-50'
+              }`}
+            >
+              查看试卷
+            </a>
+            {userId ? (
+              <a
+                href={`/api/v1/quiz/paper/${paperId}/export?user_id=${userId}&format=pdf&include_answer=true`}
+                download
+                className={`inline-flex items-center px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                  isDark
+                    ? 'bg-blue-700 text-white hover:bg-blue-600'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
+              >
+                下载试卷（PDF）
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* XMind 文件下载按钮区域 */}
+        {isXmind ? (
+          <div className="mt-3">
+            <a
+              href={`/api/v1/learning-map/export/xmind/${result.session_id || ''}`}
+              download={xmindFileName}
+              className={`inline-flex items-center px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                isDark
+                  ? 'bg-green-700 text-white hover:bg-green-600'
+                  : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
+            >
+              下载思维导图（XMind）
+            </a>
+          </div>
+        ) : null}
+
         {renderMeta(step)}
       </div>
     );

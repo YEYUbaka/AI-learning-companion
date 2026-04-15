@@ -164,10 +164,16 @@ class QuizPaperService:
     @staticmethod
     def _build_generation_prompt(config: Dict[str, Any], blueprint: Dict[str, Any], specs: List[Dict[str, Any]]) -> str:
         spec_lines = []
-        for spec in specs:
+        for i, spec in enumerate(specs):
+            # 兼容两种格式：标准格式(question_id/question_type/knowledge_points)和Agent格式(type/knowledge_point)
+            qid = spec.get("question_id") or f"Q{i + 1}"
+            qtype = spec.get("question_type") or spec.get("type", "choice")
+            kps = spec.get("knowledge_points") or (
+                [spec["knowledge_point"]] if spec.get("knowledge_point") else ["通用"]
+            )
             spec_lines.append(
-                f"- {spec['question_id']} | type={spec['question_type']} | difficulty={spec['difficulty']} "
-                f"| knowledge={','.join(spec['knowledge_points'])} | score={spec['score']}"
+                f"- {qid} | type={qtype} | difficulty={spec.get('difficulty', 'medium')} "
+                f"| knowledge={','.join(kps)} | score={spec.get('score', 5)}"
             )
 
         return f"""
@@ -208,10 +214,16 @@ class QuizPaperService:
 """
 
     @staticmethod
-    def _fallback_question_from_spec(spec: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
-        knowledge = "、".join(spec.get("knowledge_points") or ["综合能力"])
-        qtype = spec["question_type"]
-        stem = f"围绕“{knowledge}”生成的{qtype}题（{spec['difficulty']}）"
+    def _fallback_question_from_spec(spec: Dict[str, Any], config: Dict[str, Any], index: int = 0) -> Dict[str, Any]:
+        # 兼容Agent格式(type/knowledge_point)和标准格式(question_type/knowledge_points)
+        kps = spec.get("knowledge_points") or (
+            [spec["knowledge_point"]] if spec.get("knowledge_point") else ["综合能力"]
+        )
+        knowledge = "、".join(kps)
+        qtype = spec.get("question_type") or spec.get("type", "choice")
+        qid = spec.get("question_id") or f"Q{index + 1}"
+        difficulty = spec.get("difficulty", "medium")
+        stem = f"围绕【{knowledge}】生成的{qtype}题（{difficulty}）"
         options = []
         answer = "参考答案"
         if qtype in {"choice", "multiple_choice"}:
@@ -223,14 +235,14 @@ class QuizPaperService:
             answer = "填空答案"
 
         return {
-            "question_id": spec["question_id"],
+            "question_id": qid,
             "type": qtype,
             "stem": stem,
             "options": options,
             "answer": answer,
             "explanation": f"该题对应知识点：{knowledge}。",
-            "difficulty": spec["difficulty"],
-            "knowledge_points": spec.get("knowledge_points") or [],
+            "difficulty": difficulty,
+            "knowledge_points": kps,
             "source_type": "ai_generated",
             "quality_score": 60,
         }
@@ -261,16 +273,22 @@ class QuizPaperService:
             normalized = []
             for index, spec in enumerate(specs):
                 raw = questions[index] if index < len(questions) and isinstance(questions[index], dict) else {}
+                # 兼容Agent格式(type/knowledge_point)和标准格式(question_type/knowledge_points)
+                qid = spec.get("question_id") or f"Q{index + 1}"
+                qtype = spec.get("question_type") or spec.get("type", "choice")
+                kps = spec.get("knowledge_points") or (
+                    [spec["knowledge_point"]] if spec.get("knowledge_point") else []
+                )
                 normalized.append(
                     {
-                        "question_id": raw.get("question_id") or spec["question_id"],
-                        "type": raw.get("type") or spec["question_type"],
-                        "stem": raw.get("stem") or raw.get("question") or f"{spec['question_type']}题",
+                        "question_id": raw.get("question_id") or qid,
+                        "type": raw.get("type") or qtype,
+                        "stem": raw.get("stem") or raw.get("question") or f"{qtype}题",
                         "options": raw.get("options") or [],
                         "answer": raw.get("answer") or "",
                         "explanation": raw.get("explanation") or "",
-                        "difficulty": raw.get("difficulty") or spec["difficulty"],
-                        "knowledge_points": raw.get("knowledge_points") or spec.get("knowledge_points") or [],
+                        "difficulty": raw.get("difficulty") or spec.get("difficulty", "medium"),
+                        "knowledge_points": raw.get("knowledge_points") or kps,
                         "source_type": raw.get("source_type") or ("knowledge_base" if blueprint["source_policy"] == "knowledge_first" else "ai_generated"),
                         "quality_score": int(raw.get("quality_score") or 75),
                     }
@@ -278,7 +296,7 @@ class QuizPaperService:
             return normalized
         except Exception as exc:
             logger.warning("AI 题目生成失败，使用兜底题目: %s", exc)
-            return [QuizPaperService._fallback_question_from_spec(spec, config) for spec in specs]
+            return [QuizPaperService._fallback_question_from_spec(spec, config, i) for i, spec in enumerate(specs)]
 
     @staticmethod
     def generate_questions_from_blueprint(
@@ -287,6 +305,10 @@ class QuizPaperService:
         blueprint: Dict[str, Any],
         batch_size: int = 5,
     ) -> List[Dict[str, Any]]:
+        # 补全 Agent 蓝图中可能缺失的字段，确保下游函数正常工作
+        blueprint.setdefault("mode", "teacher")
+        blueprint.setdefault("source_policy", "knowledge_first")
+        blueprint.setdefault("review_level", "normal")
         specs = blueprint["question_specs"]
         generated: List[Dict[str, Any]] = []
         for index in range(0, len(specs), batch_size):
@@ -308,7 +330,10 @@ class QuizPaperService:
         duplicates = len(non_empty_stems) - len(set(non_empty_stems))
         duplicate_rate = duplicates / len(non_empty_stems) if non_empty_stems else 0
 
-        expected_specs = {spec["question_id"]: spec for spec in blueprint["question_specs"]}
+        expected_specs = {
+            (spec.get("question_id") or f"Q{i}"): spec
+            for i, spec in enumerate(blueprint["question_specs"])
+        }
         actual_type_distribution = Counter(question.get("type") for question in questions if question.get("type"))
         actual_difficulty_distribution = Counter(question.get("difficulty") for question in questions if question.get("difficulty"))
         coverage_knowledge_points = sorted(

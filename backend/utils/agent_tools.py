@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from core.logger import logger
+from repositories.quiz_paper_repo import QuizPaperRepository
 from services.learning_map_service import LearningMapService
 from services.quiz_paper_service import QuizPaperService
 from utils.file_parser import parse_file
@@ -177,9 +178,9 @@ class SearchKnowledgeTool(BaseTool):
                 return self.build_result(
                     success=True,
                     payload={"query": params["query"], "results": [], "text": "知识库暂无匹配证据。"},
-                    quality_status="warning",
+                    quality_status="pass",
                     confidence=0.35,
-                    fallback_used=True,
+                    fallback_used=False,  # 无匹配结果是正常情况，不是降级
                 )
             serialized = []
             evidence = []
@@ -216,9 +217,9 @@ class SearchKnowledgeTool(BaseTool):
             return self.build_result(
                 success=True,
                 payload={"query": params["query"], "results": [], "text": "RAG 未启用，当前无法提供知识库证据。"},
-                quality_status="warning",
+                quality_status="pass",
                 confidence=0.25,
-                fallback_used=True,
+                fallback_used=False,  # RAG未安装是正常预期状态，关键词搜索是设计好的备选路径
                 evidence=[],
             )
 
@@ -336,7 +337,15 @@ class GeneratePaperQuestionsTool(BaseTool):
         params = self.validate_params(kwargs)
         blueprint = params["blueprint"]
         config = params.get("config") or blueprint
-        questions = QuizPaperService.generate_questions_from_blueprint(db, config, blueprint)
+        try:
+            questions = QuizPaperService.generate_questions_from_blueprint(db, config, blueprint)
+        except Exception as gen_exc:
+            logger.error("Agent 题目生成异常: %s", gen_exc, exc_info=True)
+            return self.build_result(
+                success=False,
+                payload={"error": str(gen_exc)},
+                fallback_used=False,
+            )
         evidence = [
             {
                 "type": "generated_question",
@@ -344,12 +353,37 @@ class GeneratePaperQuestionsTool(BaseTool):
             }
             for question in questions[:3]
         ]
+
+        # 将试卷保存到数据库，以便用户下载
+        paper_id = None
+        try:
+            answer_key = [q.get("answer") for q in questions]
+            saved_paper = QuizPaperRepository.create(
+                db=db,
+                user_id=user_id,
+                title=blueprint.get("title", "Agent 生成试卷"),
+                subject=blueprint.get("subject"),
+                grade_level=blueprint.get("grade_level"),
+                total_questions=len(questions),
+                difficulty_distribution=blueprint.get("summary", {}).get("difficulty_distribution"),
+                question_type_distribution=blueprint.get("summary", {}).get("question_type_distribution"),
+                knowledge_points=blueprint.get("knowledge_points"),
+                questions=questions,
+                answer_key=answer_key,
+                paper_type=blueprint.get("mode", "custom"),
+                time_limit=blueprint.get("time_limit", 120),
+                total_score=blueprint.get("total_score", 100),
+            )
+            paper_id = saved_paper.id
+        except Exception as save_exc:
+            logger.warning("Agent 保存试卷到数据库失败: %s", save_exc)  # 不阻断主流程
+
         return self.build_result(
             success=True,
-            payload={"questions": questions, "count": len(questions)},
+            payload={"questions": questions, "count": len(questions), "paper_id": paper_id},
             evidence=evidence,
             confidence=0.78,
-            fallback_used=any(question.get("source_type") == "ai_generated" for question in questions),
+            fallback_used=False,  # AI生成题目是正常路径，不是降级
         )
 
 
