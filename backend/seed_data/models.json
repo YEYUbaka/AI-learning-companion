@@ -2,18 +2,29 @@
   {
     "provider_name": "DeepSeek",
     "api_key": "${DEEPSEEK_API_KEY}",
-    "base_url": "https://api.siliconflow.cn/v1/chat/completions",
+    "base_url": "https://api.deepseek.com/v1",
     "priority": 100,
     "enabled": true,
     "params": {
-      "model": "deepseek-ai/DeepSeek-V3",
+      "model": "deepseek-chat",
+      "max_tokens": 16384
+    }
+  },
+  {
+    "provider_name": "硅基流动",
+    "api_key": "${SILICONFLOW_API_KEY}",
+    "base_url": "https://api.siliconflow.cn/v1",
+    "priority": 95,
+    "enabled": true,
+    "params": {
+      "model": "Pro/deepseek-ai/DeepSeek-V3",
       "max_tokens": 16384
     }
   },
   {
     "provider_name": "文心一言",
     "api_key": "${WENXIN_API_KEY}",
-    "base_url": "https://qianfan.baidubce.com/v2/chat/completions",
+    "base_url": "https://qianfan.baidubce.com/v2",
     "priority": 90,
     "enabled": true,
     "params": {
@@ -24,7 +35,7 @@
   {
     "provider_name": "星火",
     "api_key": "${XINGHUO_API_KEY}",
-    "base_url": "https://spark-api-open.xf-yun.com/v1/chat/completions",
+    "base_url": "https://spark-api-open.xf-yun.com/v1",
     "priority": 80,
     "enabled": true,
     "params": {
@@ -35,7 +46,7 @@
   {
     "provider_name": "智谱清言",
     "api_key": "${CHATGLM_API_KEY}",
-    "base_url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4",
     "priority": 70,
     "enabled": true,
     "params": {
@@ -46,7 +57,7 @@
   {
     "provider_name": "Kimi",
     "api_key": "${MOONSHOT_API_KEY}",
-    "base_url": "https://api.moonshot.cn/v1/chat/completions",
+    "base_url": "https://api.moonshot.cn/v1",
     "priority": 60,
     "enabled": true,
     "params": {

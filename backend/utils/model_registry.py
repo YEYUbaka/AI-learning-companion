@@ -200,6 +200,29 @@ PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
         reasoning=True,
         long_output=True,
     ),
+    "siliconflow": _provider_template(
+        display_name="SiliconFlow (硅基流动)",
+        default_base_url="https://api.siliconflow.cn/v1",
+        default_model="Qwen/Qwen2.5-7B-Instruct",
+        available_models=[
+            "Qwen/Qwen2.5-7B-Instruct",
+            "Qwen/Qwen2.5-72B-Instruct",
+            "Qwen/Qwen3-8B",
+            "Qwen/Qwen3-30B-A3B",
+            "deepseek-ai/DeepSeek-V3",
+            "deepseek-ai/DeepSeek-R1",
+            "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+            "THUDM/glm-4-9b-chat",
+            "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "meta-llama/Meta-Llama-3.1-70B-Instruct",
+            "Pro/Qwen/Qwen2.5-7B-Instruct",
+            "Pro/deepseek-ai/DeepSeek-V3",
+            "Pro/deepseek-ai/DeepSeek-R1",
+        ],
+        tool_calling=True,
+        reasoning=True,
+        long_output=True,
+    ),
     "openrouter": _provider_template(
         display_name="OpenRouter",
         default_base_url="https://openrouter.ai/api/v1",
@@ -237,6 +260,9 @@ PROVIDER_ALIASES: Dict[str, str] = {
     "月之暗面": "moonshot",
     "Kimi": "moonshot",
     "DeepSeek": "deepseek",
+    # 硅基流动
+    "硅基流动": "siliconflow",
+    "SiliconFlow": "siliconflow",
 }
 
 
