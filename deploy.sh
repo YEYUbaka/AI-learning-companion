@@ -188,6 +188,7 @@ cat > /etc/nginx/sites-available/zhixueban <<EOF
 server {
     listen 80;
     server_name ${DOMAIN};
+    send_timeout 3600s;
 
     # 前端静态文件
     location / {
@@ -197,17 +198,34 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
-    # 后端 API 代理
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000;
+    # Agent SSE 流式接口
+    location = /api/agent/task/stream {
+        proxy_pass http://127.0.0.1:8000/api/agent/task/stream;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        gzip off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        send_timeout 3600s;
+    }
+
+    # 后端 API 代理
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
     }
 
     # 后端文档

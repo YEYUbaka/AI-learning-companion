@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from core.logger import logger
 from repositories.agent_repo import AgentRepository
 from services.ai_service import AIService
@@ -364,11 +365,18 @@ class AgentExecutor:
         )
         return "\n\n".join(sections)
 
-    def _build_final_answer(self, goal: str, plan: Dict[str, Any], observations: List[Dict[str, Any]], review: Dict[str, Any]) -> str:
+    def _build_final_answer_prompt(
+        self,
+        goal: str,
+        plan: Dict[str, Any],
+        observations: List[Dict[str, Any]],
+        review: Dict[str, Any],
+    ) -> str:
         evidence_text = "\n".join(
-            f"- {item.get('summary') or item.get('excerpt') or ''}" for item in review.get("evidence", [])[:8]
+            f"- {item.get('summary') or item.get('excerpt') or ''}"
+            for item in review.get("evidence", [])[:8]
         )
-        prompt = f"""
+        return f"""
 你是智学伴的结构化教育助手。请基于工具证据生成最终回答。
 
 目标：{goal}
@@ -382,13 +390,38 @@ class AgentExecutor:
 工具结果摘要：
 {json.dumps(observations, ensure_ascii=False)[:4000]}
 """
+
+    def _build_final_answer(self, goal: str, plan: Dict[str, Any], observations: List[Dict[str, Any]], review: Dict[str, Any]) -> str:
+        prompt = self._build_final_answer_prompt(goal, plan, observations, review)
         try:
             result = AIService.call_ai(
                 db=self.db,
                 user_prompt=prompt,
                 system_prompt_name="system_prompt",
                 temperature=0.2,
-                max_tokens=1400,
+                max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
+            )
+            text = result.get("text", "").strip()
+            if text:
+                return text
+        except Exception as exc:
+            logger.warning("最终答案 AI 生成失败，回退到模板拼装: %s", exc)
+        return self._build_final_answer_fallback(goal, plan, observations, review)
+
+    async def _build_final_answer_async(
+        self,
+        goal: str,
+        plan: Dict[str, Any],
+        observations: List[Dict[str, Any]],
+        review: Dict[str, Any],
+    ) -> str:
+        prompt = self._build_final_answer_prompt(goal, plan, observations, review)
+        try:
+            result = await AIService.call_ai_async(
+                user_prompt=prompt,
+                system_prompt_name="system_prompt",
+                temperature=0.2,
+                max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
             )
             text = result.get("text", "").strip()
             if text:
@@ -432,7 +465,7 @@ class AgentExecutor:
                 step_number += 1
 
             review = self.reviewer.review(plan, observations)
-            final_answer = self._build_final_answer(goal, plan, observations, review)
+            final_answer = await self._build_final_answer_async(goal, plan, observations, review)
             self._record_step(
                 step_number,
                 "final_answer",
@@ -512,7 +545,7 @@ class AgentExecutor:
             step_number += 1
 
         review = self.reviewer.review(plan, observations)
-        final_answer = self._build_final_answer(goal, plan, observations, review)
+        final_answer = await self._build_final_answer_async(goal, plan, observations, review)
         self._record_step(
             step_number + 1,
             "final_answer",
@@ -547,12 +580,11 @@ class AgentExecutor:
 
     async def execute_cot(self, goal: str) -> Dict[str, Any]:
         try:
-            result = AIService.call_ai(
-                db=self.db,
+            result = await AIService.call_ai_async(
                 user_prompt=f"请逐步分析并回答：{goal}",
                 system_prompt_name="system_prompt",
                 temperature=0.3,
-                max_tokens=1800,
+                max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
             )
             answer = result.get("text", "")
             self._record_step(0, "goal", goal, {})
@@ -608,13 +640,12 @@ class AgentExecutor:
         tools = [tool.to_openai_tool() for tool in self.tool_registry.get_structured_tools()]
 
         try:
-            native_result = AIService.call_ai_with_tools(
-                db=self.db,
+            native_result = await AIService.call_ai_with_tools_async(
                 user_prompt=goal,
                 tools=tools,
                 system_prompt_name="system_prompt",
                 temperature=0.2,
-                max_tokens=1400,
+                max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
                 quality_context={"mode": "function_calling"},
             )
             trace_id = native_result["trace_id"]
@@ -701,7 +732,7 @@ class AgentExecutor:
 
             review = self.reviewer.review(plan, observations)
             review["fallback_used"] = review.get("fallback_used", False) or native_result.get("fallback_used", False)
-            final_answer = self._build_final_answer(goal, plan, observations, review)
+            final_answer = await self._build_final_answer_async(goal, plan, observations, review)
             self._record_step(
                 step_number,
                 "final_answer",

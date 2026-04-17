@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from core.config import settings
 from database import Base
 from repositories.model_config_repo import ModelConfigRepository
 from repositories.prompt_repo import PromptRepository
@@ -122,4 +123,34 @@ def test_sync_models_upserts_configs(db_session):
     assert new_model is not None
     assert new_model.base_url == "https://qwen.example.com"
     assert new_model.priority == 50
+
+
+def test_sync_models_backfills_default_max_tokens(db_session):
+    """Missing max_tokens should be backfilled from the global default."""
+    ModelConfigRepository.create(
+        db_session,
+        provider_name="deepseek",
+        api_key="old",
+        base_url="https://api.deepseek.com/v1",
+        enabled=True,
+        priority=10,
+        params={"model": "deepseek-chat"},
+    )
+
+    seeds = [
+        {
+            "provider_name": "deepseek",
+            "api_key": "old",
+            "base_url": "https://api.deepseek.com/v1",
+            "enabled": True,
+            "priority": 10,
+            "params": {"model": "deepseek-chat"},
+        }
+    ]
+
+    changes = BootstrapService.sync_models_from_data(db_session, seeds)
+    updated = ModelConfigRepository.get_by_provider(db_session, "deepseek")
+
+    assert changes == 1
+    assert updated.params["max_tokens"] == settings.AI_DEFAULT_MAX_TOKENS
 

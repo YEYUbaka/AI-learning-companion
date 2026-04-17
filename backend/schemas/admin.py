@@ -77,6 +77,32 @@ class ModelConfigResponse(BaseModel):
         from_attributes = True
 
 
+# 提供商模板
+class ProviderTemplateItem(BaseModel):
+    """提供商模板响应模型"""
+    key: str
+    display_name: str
+    default_base_url: str
+    default_model: str
+    default_max_tokens: int
+    available_models: List[str]
+    requires_extra_headers: bool
+    extra_header_keys: List[str]
+    capabilities: Dict[str, bool]
+
+
+# 拉取提供商模型列表
+class FetchModelListRequest(BaseModel):
+    """拉取提供商模型列表请求"""
+    base_url: str = Field(..., description="提供商 API Base URL")
+    api_key: str = Field(..., description="提供商 API Key")
+
+
+class FetchModelListResponse(BaseModel):
+    """拉取提供商模型列表响应"""
+    models: List[str]
+
+
 # 测试模型调用
 class ModelTestRequest(BaseModel):
     """测试模型调用请求模型"""

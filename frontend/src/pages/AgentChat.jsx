@@ -1,9 +1,10 @@
 /**
  * Agent 对话界面 - 智学智能助手
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useThemeStore } from '../store/themeStore';
 import agentApi from '../api/agentApi';
+import apiClient from '../api/apiClient';
 import AgentStepViewer from '../components/AgentStepViewer';
 import logger from '../utils/logger';
 
@@ -15,6 +16,12 @@ const AgentChat = () => {
   const [sessions, setSessions] = useState([]);
   const [tools, setTools] = useState([]);
   const [error, setError] = useState(null);
+  const [streamRecovery, setStreamRecovery] = useState(null);
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+  const activeStreamRef = useRef(null);
+  const activeStreamRunIdRef = useRef(0);
 
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
@@ -22,7 +29,17 @@ const AgentChat = () => {
   useEffect(() => {
     loadTools();
     loadSessions();
+
+    return () => {
+      cancelActiveStream();
+    };
   }, []);
+
+  const cancelActiveStream = () => {
+    activeStreamRunIdRef.current += 1;
+    activeStreamRef.current?.abort?.();
+    activeStreamRef.current = null;
+  };
 
   const loadTools = async () => {
     try {
@@ -42,16 +59,67 @@ const AgentChat = () => {
     }
   };
 
+  const handleFileUpload = async (file) => {
+    if (!file) return;
+    const allowedExt = ['.pdf', '.txt', '.md', '.markdown', '.docx', '.pptx'];
+    const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    if (!allowedExt.includes(ext)) {
+      setError(`不支持的文件类型: ${ext}，支持 PDF / DOCX / PPTX / TXT / MD`);
+      return;
+    }
+
+    setUploading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await apiClient.post('/api/v1/files/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      const data = response.data;
+      setUploadedFile({
+        file_name: data.file_name,
+        file_path: data.file_path,
+        text_length: data.text_length
+      });
+    } catch (err) {
+      logger.error('文件上传失败', err);
+      setError(err.response?.data?.detail || '文件上传失败，请重试');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleFileDrop = (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) handleFileUpload(file);
+  };
+
+  const handleFileInputChange = (e) => {
+    const file = e.target.files[0];
+    if (file) handleFileUpload(file);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!goal.trim()) return;
 
+    cancelActiveStream();
+    const streamRunId = activeStreamRunIdRef.current;
     setLoading(true);
     setError(null);
+    setStreamRecovery(null);
     setCurrentSession(null);
 
+    const finalGoal = uploadedFile
+      ? `${goal.trim()}
+
+[Uploaded file path: ${uploadedFile.file_path}. You may use the parse_file tool to read and analyze it.]`
+      : goal.trim();
+
     const tempSession = {
-      goal: goal,
+      goal: finalGoal,
       session_type: mode,
       status: 'running',
       steps: [],
@@ -60,10 +128,14 @@ const AgentChat = () => {
     setCurrentSession(tempSession);
 
     try {
-      agentApi.createTaskStream(
-        goal,
+      activeStreamRef.current = agentApi.createTaskStream(
+        finalGoal,
         mode,
         (event) => {
+          if (activeStreamRunIdRef.current !== streamRunId) {
+            return;
+          }
+
           setCurrentSession(prev => {
             if (!prev) return prev;
 
@@ -75,6 +147,7 @@ const AgentChat = () => {
 
             switch (event.type) {
               case 'session_created':
+                setStreamRecovery(null);
                 return { ...newSession, session_id: event.session_id };
 
               case 'goal':
@@ -188,27 +261,64 @@ const AgentChat = () => {
           });
         },
         () => {
+          if (activeStreamRunIdRef.current !== streamRunId) {
+            return;
+          }
+
           setLoading(false);
+          setStreamRecovery(null);
+          activeStreamRef.current = null;
           loadSessions();
         },
         (err) => {
+          if (activeStreamRunIdRef.current !== streamRunId) {
+            return;
+          }
+
           setLoading(false);
-          setError(err.message || '任务执行失败');
+          activeStreamRef.current = null;
+          if (err?.sessionId) {
+            setStreamRecovery({
+              sessionId: err.sessionId,
+              recoverable: Boolean(err.recoverable),
+            });
+            setCurrentSession(prev => (
+              prev
+                ? {
+                    ...prev,
+                    session_id: prev.session_id || err.sessionId,
+                    status: prev.status === 'completed' ? prev.status : 'interrupted',
+                  }
+                : prev
+            ));
+          }
+          setError(err.message || 'Task failed');
         }
       );
     } catch (err) {
       setLoading(false);
-      setError(err.message || '任务执行失败');
+      activeStreamRef.current = null;
+      setError(err.message || 'Task failed');
     }
   };
 
   const handleLoadSession = async (sessionId) => {
     try {
+      cancelActiveStream();
+      setLoading(false);
       const session = await agentApi.getSession(sessionId);
       setCurrentSession(session);
+      setStreamRecovery(null);
+      setError(null);
     } catch (err) {
-      setError('加载会话失败');
+      setError('Failed to load session');
     }
+  };
+
+  const handleResumeSession = async () => {
+    if (!streamRecovery?.sessionId) return;
+    await handleLoadSession(streamRecovery.sessionId);
+    loadSessions();
   };
 
   const cardClass = `${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border rounded-lg shadow-sm p-6`;
@@ -242,7 +352,7 @@ const AgentChat = () => {
                   <textarea
                     value={goal}
                     onChange={(e) => setGoal(e.target.value)}
-                    placeholder="例如：分析 test.pdf 并生成学习计划和测验"
+                    placeholder="例如：分析上传的文件并生成学习计划和测验"
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
                       isDark
                         ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-500'
@@ -251,6 +361,85 @@ const AgentChat = () => {
                     rows="4"
                     disabled={loading}
                   />
+                </div>
+
+                {/* 文件上传区域 */}
+                <div>
+                  <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
+                    上传文件（可选）
+                  </label>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileInputChange}
+                    accept=".pdf,.txt,.md,.markdown,.docx,.pptx"
+                    className="hidden"
+                    disabled={loading || uploading}
+                  />
+                  {!uploadedFile ? (
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      onDrop={handleFileDrop}
+                      onDragOver={(e) => e.preventDefault()}
+                      className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
+                        uploading
+                          ? 'opacity-60 cursor-not-allowed'
+                          : isDark
+                            ? 'border-slate-600 hover:border-slate-400 text-slate-400'
+                            : 'border-gray-300 hover:border-gray-400 text-gray-500'
+                      }`}
+                    >
+                      {uploading ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className={`animate-spin rounded-full h-4 w-4 border-b-2 ${isDark ? 'border-blue-400' : 'border-blue-600'}`}></div>
+                          <span className="text-sm">上传中...</span>
+                        </div>
+                      ) : (
+                        <>
+                          <svg className="w-6 h-6 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                          </svg>
+                          <p className="text-sm">点击或拖拽文件到此处</p>
+                          <p className={`text-xs mt-1 ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
+                            支持 PDF / DOCX / PPTX / TXT / MD，最大 10MB
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className={`border rounded-lg p-3 flex items-center justify-between ${
+                      isDark ? 'border-green-700 bg-green-900/20' : 'border-green-200 bg-green-50'
+                    }`}>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <svg className={`w-4 h-4 flex-shrink-0 ${isDark ? 'text-green-400' : 'text-green-600'}`}
+                          fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <div className="min-w-0">
+                          <p className={`text-sm font-medium truncate ${isDark ? 'text-green-300' : 'text-green-800'}`}>
+                            {uploadedFile.file_name}
+                          </p>
+                          <p className={`text-xs ${isDark ? 'text-green-500' : 'text-green-600'}`}>
+                            已提取 {uploadedFile.text_length.toLocaleString()} 字符
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setUploadedFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                        disabled={loading}
+                        className={`ml-2 flex-shrink-0 p-1 rounded transition-colors ${
+                          isDark ? 'text-slate-400 hover:text-red-400' : 'text-gray-400 hover:text-red-500'
+                        }`}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -338,6 +527,7 @@ const AgentChat = () => {
                         <span className={`text-xs px-2 py-0.5 rounded ${
                           session.status === 'completed' ? 'bg-green-100 text-green-800' :
                           session.status === 'failed' ? 'bg-red-100 text-red-800' :
+                          session.status === 'interrupted' ? 'bg-orange-100 text-orange-800' :
                           'bg-yellow-100 text-yellow-800'
                         }`}>
                           {session.status}
@@ -375,6 +565,14 @@ const AgentChat = () => {
                         执行失败
                       </h3>
                       <p className={`text-sm ${isDark ? 'text-red-300' : 'text-red-700'}`}>{error}</p>
+                      {streamRecovery?.recoverable && (
+                        <button
+                          onClick={handleResumeSession}
+                          className="mt-3 text-xs text-red-500 hover:text-red-400 underline"
+                        >
+                          重新加载会话
+                        </button>
+                      )}
                       {error.includes('API 密钥') && (
                         <p className={`text-xs mt-2 ${isDark ? 'text-red-400' : 'text-red-600'}`}>
                           提示：请联系管理员检查 AI 模型配置
@@ -428,6 +626,7 @@ const AgentChat = () => {
                       <span className={`px-3 py-1 rounded text-sm ${
                         currentSession.status === 'completed' ? 'bg-green-100 text-green-800' :
                         currentSession.status === 'failed' ? 'bg-red-100 text-red-800' :
+                        currentSession.status === 'interrupted' ? 'bg-orange-100 text-orange-800' :
                         'bg-yellow-100 text-yellow-800'
                       }`}>
                         {currentSession.status}

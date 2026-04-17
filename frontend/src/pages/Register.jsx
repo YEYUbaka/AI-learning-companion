@@ -233,6 +233,7 @@ function Register() {
                   name="email"
                   type="email"
                   required
+                  autoComplete="email"
                   value={formData.email}
                   onChange={handleChange}
                   onBlur={handleBlur}
@@ -267,6 +268,7 @@ function Register() {
                   name="name"
                   type="text"
                   required
+                  autoComplete="nickname"
                   value={formData.name}
                   onChange={handleChange}
                   onBlur={handleBlur}
@@ -302,6 +304,7 @@ function Register() {
                     name="password"
                     type={showPassword ? 'text' : 'password'}
                     required
+                    autoComplete="new-password"
                     value={formData.password}
                     onChange={handleChange}
                     onBlur={handleBlur}

@@ -11,8 +11,8 @@ from xml.etree import ElementTree as ET
 from core.logger import logger
 
 # 最大提取文本长度（字符数）
-MAX_TEXT_LENGTH = 8000
-TRUNCATE_LENGTH = 6000
+MAX_TEXT_LENGTH = 15000
+TRUNCATE_LENGTH = 12000
 
 
 def parse_file(file_path: str) -> tuple[str, int]:

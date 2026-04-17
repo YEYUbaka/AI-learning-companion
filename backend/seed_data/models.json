@@ -6,7 +6,8 @@
     "priority": 100,
     "enabled": true,
     "params": {
-      "model": "deepseek-ai/DeepSeek-V3"
+      "model": "deepseek-ai/DeepSeek-V3",
+      "max_tokens": 16384
     }
   },
   {
@@ -16,7 +17,8 @@
     "priority": 90,
     "enabled": true,
     "params": {
-      "model": "ernie-x1.1-preview"
+      "model": "ernie-x1.1-preview",
+      "max_tokens": 16384
     }
   },
   {
@@ -26,7 +28,8 @@
     "priority": 80,
     "enabled": true,
     "params": {
-      "model": "4.0Ultra"
+      "model": "4.0Ultra",
+      "max_tokens": 16384
     }
   },
   {
@@ -36,7 +39,8 @@
     "priority": 70,
     "enabled": true,
     "params": {
-      "model": "glm-4.6"
+      "model": "glm-4.6",
+      "max_tokens": 16384
     }
   },
   {
@@ -46,7 +50,8 @@
     "priority": 60,
     "enabled": true,
     "params": {
-      "model": "kimi-k2-0905-preview"
+      "model": "kimi-k2-0905-preview",
+      "max_tokens": 16384
     }
   }
 ]

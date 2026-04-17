@@ -9,6 +9,8 @@ import os
 import re
 from typing import Optional, AsyncIterator
 
+from core.config import settings
+
 # 加载 .env 文件中的环境变量
 load_dotenv()
 
@@ -180,7 +182,7 @@ def ask_gpt(prompt: str, provider: Optional[str] = None) -> tuple[bool, str, str
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=2000,
+            max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
             temperature=0.7,
         )
         
@@ -338,7 +340,7 @@ async def ask_gpt_stream(prompt: str, provider: Optional[str] = None, history: O
             stream = client.chat.completions.create(
                 model=model,
                 messages=messages,  # 确保这里使用的是包含历史的完整消息列表
-                max_tokens=2000,
+                max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
                 temperature=0.7,
                 stream=True
             )

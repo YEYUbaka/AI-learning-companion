@@ -1,133 +1,233 @@
 /**
- * Agent API 客户端
+ * Agent API client.
  */
 import apiClient from './apiClient';
 import logger from '../utils/logger';
 
+const buildStreamError = (message, extras = {}) =>
+  Object.assign(new Error(message), extras);
+
+const classifyHttpError = async (response) => {
+  let detail = '';
+  try {
+    const payload = await response.clone().json();
+    detail = payload?.detail || payload?.message || '';
+  } catch {
+    detail = '';
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    return buildStreamError(detail || '登录状态已失效，请重新登录后再试。', {
+      code: 'AUTH_ERROR',
+      status: response.status,
+    });
+  }
+
+  if ([502, 503, 504].includes(response.status)) {
+    return buildStreamError(
+      detail || '服务暂时不可用或流式代理被中断，请稍后重试。',
+      {
+        code: 'UPSTREAM_ERROR',
+        status: response.status,
+      }
+    );
+  }
+
+  return buildStreamError(
+    detail || `请求失败（HTTP ${response.status}）。`,
+    {
+      code: 'HTTP_ERROR',
+      status: response.status,
+    }
+  );
+};
+
+const classifyStreamError = (error, sessionId) => {
+  if (error?.name === 'AbortError') {
+    return buildStreamError('请求已取消。', {
+      code: 'ABORTED',
+      aborted: true,
+      sessionId,
+    });
+  }
+
+  if (error?.code) {
+    return error;
+  }
+
+  if (error instanceof TypeError) {
+    return buildStreamError(
+      sessionId
+        ? '网络连接已中断，任务可能仍在后台继续执行，请稍后刷新会话查看结果。'
+        : '网络连接已中断，请检查网络或稍后重试。',
+      {
+        code: 'NETWORK_ERROR',
+        recoverable: Boolean(sessionId),
+        sessionId,
+      }
+    );
+  }
+
+  return buildStreamError(
+    sessionId
+      ? '流式连接已中断，任务可能仍在后台继续执行，请稍后刷新会话查看结果。'
+      : (error?.message || '任务执行失败。'),
+    {
+      code: 'STREAM_ERROR',
+      recoverable: Boolean(sessionId),
+      sessionId,
+    }
+  );
+};
+
 const agentApi = {
-  /**
-   * 创建并执行 Agent 任务
-   */
   createTask: async (goal, mode = 'react') => {
     const response = await apiClient.post('/api/agent/task', {
       goal,
-      mode
+      mode,
     });
     return response.data;
   },
 
-  /**
-   * 获取会话详情
-   */
   getSession: async (sessionId) => {
     const response = await apiClient.get(`/api/agent/session/${sessionId}`);
     return response.data;
   },
 
-  /**
-   * 获取用户的会话列表
-   */
   getUserSessions: async (limit = 20, offset = 0) => {
     const response = await apiClient.get('/api/agent/sessions', {
-      params: { limit, offset }
+      params: { limit, offset },
     });
     return response.data;
   },
 
-  /**
-   * 列出可用工具
-   */
   listTools: async () => {
     const response = await apiClient.get('/api/agent/tools');
     return response.data;
   },
 
-  /**
-   * 流式执行 Agent 任务
-   * @param {string} goal - 任务目标
-   * @param {string} mode - 执行模式
-   * @param {function} onMessage - 消息回调
-   * @param {function} onComplete - 完成回调
-   * @param {function} onError - 错误回调
-   * @returns {EventSource} EventSource 实例
-   */
   createTaskStream: (goal, mode, onMessage, onComplete, onError) => {
     const token = sessionStorage.getItem('token');
     const hostname = window.location.hostname;
-    const protocol = window.location.protocol;
-    // 开发环境使用 localhost:8000，生产环境使用相对路径通过 Nginx 代理
-    const baseURL = (hostname === 'localhost' || hostname === '127.0.0.1')
-      ? 'http://127.0.0.1:8000'
-      : '';
-
-    // 构建 URL（包含认证 token）
+    const baseURL =
+      hostname === 'localhost' || hostname === '127.0.0.1'
+        ? 'http://127.0.0.1:8000'
+        : '';
     const url = `${baseURL}/api/agent/task/stream`;
+    const controller = new AbortController();
 
-    // 使用 fetch 进行 POST 请求并获取流式响应
-    fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ goal, mode })
-    })
-      .then(response => {
+    let sessionId = null;
+    let receivedDone = false;
+    let completed = false;
+
+    const finish = () => {
+      if (completed) {
+        return;
+      }
+      completed = true;
+      onComplete?.();
+    };
+
+    const run = async () => {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ goal, mode }),
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+
         if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+          throw await classifyHttpError(response);
+        }
+
+        if (!response.body) {
+          throw buildStreamError('未收到流式响应体。', {
+            code: 'EMPTY_STREAM',
+          });
         }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
 
-        // 读取流式数据
-        const readStream = () => {
-          reader.read().then(({ done, value }) => {
-            if (done) {
-              onComplete();
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) {
+            if (receivedDone) {
+              finish();
               return;
             }
 
-            // 解码数据
-            buffer += decoder.decode(value, { stream: true });
-
-            // 按行分割
-            const lines = buffer.split('\n');
-            buffer = lines.pop(); // 保留最后一个不完整的行
-
-            // 处理每一行
-            lines.forEach(line => {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-
-                if (data === '[DONE]') {
-                  onComplete();
-                  return;
-                }
-
-                try {
-                  const event = JSON.parse(data);
-                  onMessage(event);
-                } catch (e) {
-                  logger.error('解析 SSE 数据失败', e, data);
-                }
+            throw buildStreamError(
+              sessionId
+                ? '连接已断开，任务可能仍在后台继续执行，请稍后刷新会话查看结果。'
+                : '连接已断开，请重试。',
+              {
+                code: 'STREAM_TRUNCATED',
+                recoverable: Boolean(sessionId),
+                sessionId,
               }
-            });
+            );
+          }
 
-            // 继续读取
-            readStream();
-          }).catch(error => {
-          onError(error);
-          });
-        };
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
-        readStream();
-      })
-      .catch(error => {
-        onError(error);
-      });
-  }
+          for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line || line.startsWith(':')) {
+              continue;
+            }
+
+            if (!line.startsWith('data: ')) {
+              continue;
+            }
+
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') {
+              receivedDone = true;
+              finish();
+              return;
+            }
+
+            try {
+              const event = JSON.parse(data);
+              if (event?.type === 'session_created' && event?.session_id) {
+                sessionId = event.session_id;
+              }
+              onMessage?.(event);
+            } catch (error) {
+              logger.error('解析 SSE 数据失败', error, data);
+            }
+          }
+        }
+      } catch (error) {
+        if (completed) {
+          return;
+        }
+
+        const streamError = classifyStreamError(error, sessionId);
+        if (streamError.aborted) {
+          return;
+        }
+
+        onError?.(streamError);
+      }
+    };
+
+    run();
+
+    return {
+      abort: () => controller.abort(),
+    };
+  },
 };
 
 export default agentApi;

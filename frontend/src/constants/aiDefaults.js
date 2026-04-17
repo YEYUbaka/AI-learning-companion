@@ -1,0 +1,1 @@
+export const DEFAULT_AI_MAX_TOKENS = 16384;

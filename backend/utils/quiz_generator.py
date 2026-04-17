@@ -6,6 +6,7 @@ import json
 import re
 from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
+from core.config import settings
 from services.ai_service import AIService
 from core.logger import logger
 from utils.openai_client import get_provider_config, get_api_config
@@ -178,7 +179,7 @@ def generate_quiz(
             system_prompt_name="quiz_generator_prompt",
             provider=provider,
             temperature=0.7,
-            max_tokens=3000
+            max_tokens=settings.AI_DEFAULT_MAX_TOKENS
         )
         
         # 提取返回内容
@@ -289,7 +290,7 @@ def generate_quiz_legacy(
                 {"role": "system", "content": QUIZ_GENERATION_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=2000,
+            max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
             temperature=0.7,
         )
         
@@ -379,7 +380,7 @@ def evaluate_quiz(questions: List[Dict], user_answers: List[str], provider: Opti
                 {"role": "system", "content": EVALUATION_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=2000,
+            max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
             temperature=0.3,  # 降低温度，使批改更准确
         )
         

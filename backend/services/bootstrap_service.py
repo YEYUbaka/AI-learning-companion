@@ -114,6 +114,7 @@ class BootstrapService:
             params = item.get("params")
             if isinstance(params, str):
                 params = BootstrapService._safe_json_load(params, default=None)
+            params = BootstrapService._apply_model_defaults(params)
 
             existing = ModelConfigRepository.get_by_provider(db, provider)
 
@@ -144,6 +145,13 @@ class BootstrapService:
                 changes += 1
 
         return changes
+
+    @staticmethod
+    def _apply_model_defaults(params: Any) -> Dict[str, Any]:
+        """Ensure model params always include the global token budget."""
+        normalized = dict(params or {})
+        normalized.setdefault("max_tokens", settings.AI_DEFAULT_MAX_TOKENS)
+        return normalized
 
     @staticmethod
     def _safe_json_load(raw: str, default: Any = None) -> Any:

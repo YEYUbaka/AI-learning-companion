@@ -6,13 +6,20 @@ AI相关Schemas
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 
+from core.config import settings
+
 
 class AIRequest(BaseModel):
     """AI请求模型"""
     prompt: str = Field(..., description="用户输入的提示词")
     provider: Optional[str] = Field(None, description="指定使用的AI提供商（可选）")
     temperature: Optional[float] = Field(0.7, ge=0, le=2, description="温度参数")
-    max_tokens: Optional[int] = Field(2000, ge=1, le=8000, description="最大token数")
+    max_tokens: Optional[int] = Field(
+        settings.AI_DEFAULT_MAX_TOKENS,
+        ge=1,
+        le=65536,
+        description="最大token数",
+    )
 
 
 class AIResponse(BaseModel):

@@ -5,6 +5,7 @@ AI学习计划生成器
 import json
 import re
 from typing import Optional, List, Dict
+from core.config import settings
 from utils.openai_client import get_provider_config, get_api_config
 from openai import OpenAI
 import os
@@ -97,7 +98,7 @@ def generate_study_plan(user_id: int, goals: str = "", file_text: Optional[str] 
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=2000,
+            max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
             temperature=0.7,
         )
         

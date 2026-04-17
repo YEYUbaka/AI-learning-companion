@@ -2,12 +2,15 @@
 AI 服务
 统一封装系统 Prompt 注入、fallback、品牌清洗、日志和追踪元数据。
 """
+import asyncio
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from core.logger import logger
+from database import SessionLocal
 from repositories.api_call_repo import APICallRepository
 from repositories.model_config_repo import ModelConfigRepository
 from services.prompt_service import PromptService
@@ -20,6 +23,62 @@ DEFAULT_SYSTEM_PROMPT = "你是一个专业的 AI 学习助手，帮助用户学
 
 class AIService:
     """AI 服务类"""
+
+    @staticmethod
+    async def call_ai_async(
+        user_prompt: str,
+        system_prompt_name: str = "system_prompt",
+        provider: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = settings.AI_DEFAULT_MAX_TOKENS,
+        quality_context: Optional[Dict[str, Any]] = None,
+        allow_fallback: bool = True,
+    ) -> Dict[str, Any]:
+        def _runner() -> Dict[str, Any]:
+            db = SessionLocal()
+            try:
+                return AIService.call_ai(
+                    db=db,
+                    user_prompt=user_prompt,
+                    system_prompt_name=system_prompt_name,
+                    provider=provider,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    quality_context=quality_context,
+                    allow_fallback=allow_fallback,
+                )
+            finally:
+                db.close()
+
+        return await asyncio.to_thread(_runner)
+
+    @staticmethod
+    async def call_ai_with_tools_async(
+        user_prompt: str,
+        tools: List[Dict[str, Any]],
+        system_prompt_name: str = "system_prompt",
+        provider: Optional[str] = None,
+        temperature: float = 0.2,
+        max_tokens: int = settings.AI_DEFAULT_MAX_TOKENS,
+        quality_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        def _runner() -> Dict[str, Any]:
+            db = SessionLocal()
+            try:
+                return AIService.call_ai_with_tools(
+                    db=db,
+                    user_prompt=user_prompt,
+                    tools=tools,
+                    system_prompt_name=system_prompt_name,
+                    provider=provider,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    quality_context=quality_context,
+                )
+            finally:
+                db.close()
+
+        return await asyncio.to_thread(_runner)
 
     @staticmethod
     def _record_api_call(
@@ -39,7 +98,7 @@ class AIService:
         system_prompt_name: str = "system_prompt",
         provider: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 2000,
+        max_tokens: int = settings.AI_DEFAULT_MAX_TOKENS,
         quality_context: Optional[Dict[str, Any]] = None,
         allow_fallback: bool = True,
     ) -> Dict[str, Any]:
@@ -109,7 +168,7 @@ class AIService:
         system_prompt_name: str = "system_prompt",
         provider: Optional[str] = None,
         temperature: float = 0.2,
-        max_tokens: int = 2000,
+        max_tokens: int = settings.AI_DEFAULT_MAX_TOKENS,
         quality_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         trace_id = str(uuid4())
@@ -199,8 +258,8 @@ class AIService:
                 "error": f"模型已禁用: {provider_name}",
             }
 
-        provider_bundle = registry.build_provider_from_config(config)
-        if not provider_bundle:
+        provider_instance = registry.build_provider_from_config(config)
+        if not provider_instance:
             return {
                 "success": False,
                 "provider": provider_name,
@@ -210,13 +269,11 @@ class AIService:
                 "error": "模型缺少有效的 API Key 或未被支持",
             }
 
-        provider_instance, default_params = provider_bundle
-
         try:
             import time
 
             start_time = time.time()
-            result = provider_instance.call(messages, **default_params)
+            result = provider_instance.call(messages)
             latency = (time.time() - start_time) * 1000
             raw_text = result.get("text", "")
             cleaned_text = clean_ai_response(raw_text)

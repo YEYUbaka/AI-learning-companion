@@ -48,9 +48,10 @@ function Quiz() {
     return answers.filter((ans, idx) => {
       const q = questions[idx];
       if (!q) return false;
-      if (q.type === 'fill' && ans?.trim()) return true;
-      if (q.type === 'choice' && ans) return true;
-      if (q.type === 'judge' && ans) return true;
+      // 文本输入类：填空题、简答题、计算题、综合题
+      if (['fill', 'essay', 'calculation', 'comprehensive'].includes(q.type) && ans?.trim()) return true;
+      // 选择类：单选题、多选题、判断题
+      if (['choice', 'multiple_choice', 'judge'].includes(q.type) && ans) return true;
       return false;
     }).length;
   }, [answers, questions]);
@@ -639,7 +640,15 @@ function Quiz() {
                   <p className="font-semibold text-lg mb-4">
                     {i + 1}. {q.question || q.stem}
                     <span className={`ml-2 text-sm ${palette.textMuted}`}>
-                      ({q.type === 'choice' ? '选择题' : q.type === 'fill' ? '填空题' : q.type === 'judge' ? '判断题' : q.type === 'essay' ? '简答题' : '其他题型'})
+                      ({({
+                        choice: '选择题',
+                        multiple_choice: '多选题',
+                        fill: '填空题',
+                        judge: '判断题',
+                        essay: '简答题',
+                        calculation: '计算题',
+                        comprehensive: '综合题'
+                      })[q.type] || '其他题型'})
                     </span>
                     {q.points && (
                       <span className={`ml-2 text-sm ${palette.textMuted}`}>

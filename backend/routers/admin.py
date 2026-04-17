@@ -3,15 +3,20 @@
 作者：智学伴开发团队
 目的：提供管理后台API接口（仅管理员可访问）
 """
-from typing import List
+import json
+import httpx
+from typing import List, Optional, Generator
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from database import get_db
 from core.security import get_current_admin
+from core.logger import logger
 from models.users import User
 from schemas.admin import (
     PromptCreate, PromptUpdate, PromptResponse,
     ModelConfigCreate, ModelConfigUpdate, ModelConfigResponse,
+    ProviderTemplateItem, FetchModelListRequest, FetchModelListResponse,
     ModelTestRequest, ModelTestResponse,
     SystemConfigResponse, SystemConfigUpdate,
     DashboardStats, ChartDataResponse,
@@ -23,11 +28,9 @@ from services.admin_service import AdminService
 from repositories.model_config_repo import ModelConfigRepository
 from repositories.user_repo import UserRepository
 from repositories.api_call_repo import APICallRepository
-from services.admin_service import AdminService
 from core.security import encrypt_api_key, decrypt_api_key
-from utils.model_registry import registry
+from utils.model_registry import registry, PROVIDER_TEMPLATES
 from datetime import datetime, timedelta
-from typing import Optional
 
 router = APIRouter(prefix="/api/v1/admin", tags=["管理后台"])
 
@@ -148,6 +151,83 @@ async def enable_prompt_version(
 
 
 # 模型配置管理
+@router.get("/models/templates", response_model=List[ProviderTemplateItem])
+async def get_provider_templates(
+    current_user: User = Depends(get_current_admin)
+):
+    """获取提供商模板列表"""
+    templates = []
+    for key, tpl in PROVIDER_TEMPLATES.items():
+        templates.append(ProviderTemplateItem(
+            key=key,
+            display_name=tpl["display_name"],
+            default_base_url=tpl["default_base_url"],
+            default_model=tpl["default_model"],
+            default_max_tokens=tpl["default_max_tokens"],
+            available_models=tpl["available_models"],
+            requires_extra_headers=tpl["requires_extra_headers"],
+            extra_header_keys=tpl["extra_header_keys"],
+            capabilities=tpl["capabilities"],
+        ))
+    return templates
+
+
+@router.post("/models/fetch-model-list", response_model=FetchModelListResponse)
+async def fetch_model_list(
+    data: FetchModelListRequest,
+    current_user: User = Depends(get_current_admin)
+):
+    """代理拉取提供商模型列表（避免前端跨域）"""
+    try:
+        base_url = data.base_url.rstrip("/")
+        endpoint = f"{base_url}/models"
+        headers = {
+            "Authorization": f"Bearer {data.api_key}",
+            "Content-Type": "application/json",
+        }
+        with httpx.Client(timeout=10) as client:
+            response = client.get(endpoint, headers=headers)
+            response.raise_for_status()
+            result = response.json()
+            models = [item["id"] for item in result.get("data", []) if "id" in item]
+            return FetchModelListResponse(models=models)
+    except Exception as e:
+        logger.warning("拉取模型列表失败: %s", e)
+        return FetchModelListResponse(models=[])
+
+
+@router.get("/models/test-stream/{provider_name}")
+async def test_model_stream(
+    provider_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """流式测试模型调用（SSE），前端通过 EventSource / fetch ReadableStream 接收"""
+    provider = registry.get_provider(provider_name)
+    if not provider:
+        raise HTTPException(
+            status_code=404,
+            detail=f"提供商 {provider_name} 未找到或未启用，请先保存配置"
+        )
+
+    test_messages = [{"role": "user", "content": "你好，请用一句话介绍你自己"}]
+
+    def generate():
+        try:
+            yield from provider.call_stream(test_messages)
+        except Exception as e:
+            yield f'data: {json.dumps({"type": "error", "message": str(e)[:300]}, ensure_ascii=False)}\n\n'
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
 @router.get("/models", response_model=List[ModelConfigResponse])
 async def get_model_configs(
     skip: int = 0,

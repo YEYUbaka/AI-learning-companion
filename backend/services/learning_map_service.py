@@ -12,6 +12,7 @@ from uuid import uuid4
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from core.logger import logger
 from repositories.learning_map_repo import LearningMapRepository
 from services.ai_service import AIService
@@ -35,7 +36,7 @@ LEARNING_MAP_PROMPT = """
       "title": "知识点名称",
       "description": "简短说明",
       "level": "foundation|intermediate|advanced",
-      "mastery": "strong|medium|weak|unknown",
+      "mastery": "beginner|familiar|proficient",
       "example": "例题或场景",
       "resources": [{{"title": "资源名称", "url": "https://example.com"}}],
       "node_type": "topic|chapter|concept|skill|example",
@@ -60,6 +61,11 @@ LEARNING_MAP_PROMPT = """
 2. syllabus 模式优先补全章节层级和先修链路。
 3. document 模式优先抽取材料中真实出现的概念关系，并尽量填写 source_excerpt/source_ref。
 4. JSON 之外不得输出任何解释。
+5. mastery 字段必须从 beginner/familiar/proficient 三个值中选择，禁止使用 unknown：
+   - foundation 级别知识点：初次接触内容，默认填 beginner
+   - intermediate 级别知识点：有一定基础，默认填 familiar
+   - advanced 级别知识点：高阶内容，默认填 familiar（或 proficient 当内容显示已深入掌握）
+   - 无论是否有学习历史，都必须根据内容难度和深度作出合理评估，不得使用 unknown
 
 学习内容：
 {content}
@@ -174,7 +180,7 @@ class LearningMapService:
                 system_prompt_name="learning_map_system",
                 provider=provider,
                 temperature=0.4,
-                max_tokens=4000,
+                max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
                 quality_context={
                     "task": "learning_map_generation",
                     "map_mode": map_mode,
@@ -201,7 +207,7 @@ class LearningMapService:
             "title": (node.get("title") or "未命名知识点")[:255],
             "description": (node.get("description") or "")[:1000],
             "level": (node.get("level") or "intermediate")[:64],
-            "mastery": (node.get("mastery") or "unknown")[:32],
+            "mastery": (node.get("mastery") or "beginner")[:32],
             "example": (node.get("example") or "")[:1000],
             "resources": json.dumps(resources, ensure_ascii=False),
             "node_type": (node.get("node_type") or "concept")[:64],
@@ -257,7 +263,7 @@ class LearningMapService:
         if course_topic:
             source_text = f"课程主题：{course_topic}\n{source_text}".strip()
 
-        content_excerpt = source_text[:4000]
+        content_excerpt = source_text[:10000]
         payload = LearningMapService._invoke_ai_with_retry(
             db=db,
             source_excerpt=content_excerpt,
