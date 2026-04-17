@@ -207,3 +207,22 @@ class APICallLogListResponse(BaseModel):
     logs: List[APICallLogResponse]
     total: int
 
+
+# 功能专属模型路由
+class FeatureModelConfigResponse(BaseModel):
+    """功能专属模型配置响应模型"""
+    feature_key: str
+    feature_label: str
+    provider_name: Optional[str]
+    enabled: bool
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FeatureModelConfigUpdate(BaseModel):
+    """更新功能专属模型配置请求模型"""
+    provider_name: Optional[str] = Field(None, description="提供商名称，null表示使用系统默认")
+    enabled: bool = Field(True, description="是否启用专属配置")
+

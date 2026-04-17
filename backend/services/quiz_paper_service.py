@@ -12,6 +12,7 @@ from core.logger import logger
 from repositories.paper_template_repo import PaperTemplateRepository
 from repositories.quiz_paper_repo import QuizPaperRepository
 from services.ai_service import AIService
+from services.feature_model_config_service import FeatureModelConfigService
 
 
 DEFAULT_DIFFICULTY = {"easy": 30, "medium": 50, "hard": 20}
@@ -258,6 +259,7 @@ class QuizPaperService:
             return []
 
         prompt = QuizPaperService._build_generation_prompt(config, blueprint, specs)
+        provider = FeatureModelConfigService.get_provider_for_feature(db, "paper")
         try:
             result = AIService.call_ai(
                 db=db,
@@ -265,6 +267,7 @@ class QuizPaperService:
                 system_prompt_name="quiz_generator_prompt",
                 temperature=0.4 if blueprint["mode"] == "teacher" else 0.7,
                 max_tokens=min(6000, 1200 + len(specs) * 700),
+                provider=provider,
             )
             payload = QuizPaperService._extract_json_payload(result.get("raw", "") or result.get("text", ""))
             questions = payload.get("questions", payload if isinstance(payload, list) else [])

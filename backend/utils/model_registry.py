@@ -167,7 +167,7 @@ PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
         display_name="Zhipu AI (GLM)",
         default_base_url="https://open.bigmodel.cn/api/paas/v4",
         default_model="glm-4-flash",
-        available_models=["glm-4-flash", "glm-4-air", "glm-4", "glm-4-long"],
+        available_models=["glm-4.7-flash", "glm-4-flash", "glm-4-air", "glm-4", "glm-4-long", "glm-z1-flash", "glm-z1-air"],
         tool_calling=True,
         reasoning=True,
     ),
@@ -300,8 +300,8 @@ class ModelRegistry:
             try:
                 provider = self.build_provider_from_config(config)
                 if provider:
-                    self.register_provider(config.provider_name, provider)
-                    logger.info("从数据库加载提供商: %s", config.provider_name)
+                    self.register_provider(str(config.id), provider)
+                    logger.info("从数据库加载提供商: %s (id=%s)", config.provider_name, config.id)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error("加载提供商 %s 失败: %s", config.provider_name, e)
 
@@ -508,7 +508,7 @@ class ModelRegistry:
             max_tokens=int(params.get("max_tokens", template.get("default_max_tokens", settings.AI_DEFAULT_MAX_TOKENS))),
             top_p=float(params.get("top_p", 1.0)),
             extra_headers=extra_headers,
-            timeout=int(params.get("timeout", 60)),
+            timeout=int(params.get("timeout", 120)),
         )
 
     @staticmethod

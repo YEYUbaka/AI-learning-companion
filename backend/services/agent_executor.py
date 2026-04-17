@@ -13,6 +13,7 @@ from core.config import settings
 from core.logger import logger
 from repositories.agent_repo import AgentRepository
 from services.ai_service import AIService
+from services.feature_model_config_service import FeatureModelConfigService
 from utils.tool_registry import ToolRegistry
 
 
@@ -229,6 +230,7 @@ class AgentExecutor:
         self.tool_registry = ToolRegistry()
         self.planner = AgentPlanner(self.tool_registry)
         self.reviewer = AgentReviewer()
+        self.agent_provider = FeatureModelConfigService.get_provider_for_feature(db, "agent")
 
     def _record_step(self, step_number: int, step_type: str, content: Any, extra_data: Dict[str, Any]) -> None:
         content_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
@@ -400,6 +402,7 @@ class AgentExecutor:
                 system_prompt_name="system_prompt",
                 temperature=0.2,
                 max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
+                provider=self.agent_provider,
             )
             text = result.get("text", "").strip()
             if text:
@@ -422,6 +425,7 @@ class AgentExecutor:
                 system_prompt_name="system_prompt",
                 temperature=0.2,
                 max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
+                provider=self.agent_provider,
             )
             text = result.get("text", "").strip()
             if text:
@@ -585,6 +589,7 @@ class AgentExecutor:
                 system_prompt_name="system_prompt",
                 temperature=0.3,
                 max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
+                provider=self.agent_provider,
             )
             answer = result.get("text", "")
             self._record_step(0, "goal", goal, {})
@@ -647,6 +652,7 @@ class AgentExecutor:
                 temperature=0.2,
                 max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
                 quality_context={"mode": "function_calling"},
+                provider=self.agent_provider,
             )
             trace_id = native_result["trace_id"]
             tool_steps = self._extract_native_tool_steps(native_result.get("tool_calls", []))

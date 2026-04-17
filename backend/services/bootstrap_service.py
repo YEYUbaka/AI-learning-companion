@@ -15,6 +15,7 @@ from core.logger import logger
 from repositories.prompt_repo import PromptRepository
 from repositories.model_config_repo import ModelConfigRepository
 from services.prompt_service import PromptService
+from services.feature_model_config_service import FeatureModelConfigService
 from utils.seed_loader import SeedLoader
 
 
@@ -36,6 +37,7 @@ class BootstrapService:
 
         prompt_changes = BootstrapService.sync_prompts_from_data(db, prompt_seeds)
         model_changes = BootstrapService.sync_models_from_data(db, model_seeds)
+        FeatureModelConfigService.ensure_defaults(db)
 
         if prompt_changes or model_changes:
             logger.info(

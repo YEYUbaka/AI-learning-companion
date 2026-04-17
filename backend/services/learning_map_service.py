@@ -16,6 +16,7 @@ from core.config import settings
 from core.logger import logger
 from repositories.learning_map_repo import LearningMapRepository
 from services.ai_service import AIService
+from services.feature_model_config_service import FeatureModelConfigService
 from utils.file_parser import parse_file
 
 
@@ -251,6 +252,9 @@ class LearningMapService:
     ) -> Dict[str, int]:
         if not file_id and not course_topic:
             raise ValueError("请提供 file_id 或 course_topic")
+
+        if provider is None:
+            provider = FeatureModelConfigService.get_provider_for_feature(db, "learning_map")
 
         map_mode = map_mode if map_mode in MAP_MODE_HINTS else "document"
         source_text = ""

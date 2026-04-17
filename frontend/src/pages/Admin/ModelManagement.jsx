@@ -9,6 +9,7 @@ import api from '../../api/apiClient';
 import { useThemeStore } from '../../store/themeStore';
 import logger from '../../utils/logger';
 import { DEFAULT_AI_MAX_TOKENS } from '../../constants/aiDefaults';
+import FeatureModelRouting from './FeatureModelRouting';
 
 // ─── 默认表单状态 ───────────────────────────────────────────────────────────────
 const DEFAULT_FORM = {
@@ -58,7 +59,8 @@ const ModelManagement = () => {
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
 
-  // 数据状态
+  // tab: 'providers' | 'routing'
+  const [activeTab, setActiveTab] = useState('providers');
   const [templates, setTemplates] = useState([]);
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -226,7 +228,12 @@ const ModelManagement = () => {
       timeout: p.timeout ?? 60,
       extra_headers: p.extra_headers || {},
     });
-    setCustomModelInput(false);
+    const tpl = getTemplate(model.provider_name);
+    const savedModel = p.model_name || '';
+    const isCustom = savedModel !== '' &&
+      tpl && tpl.available_models.length > 0 &&
+      !tpl.available_models.includes(savedModel);
+    setCustomModelInput(isCustom);
     setFetchedModels([]);
     setShowAdvanced(false);
     setEditingModel(model);
@@ -246,16 +253,23 @@ const ModelManagement = () => {
   };
 
   // ─── 流式测试 ──────────────────────────────────────────────────────────────
-  const handleStreamTest = async (providerName) => {
-    if (abortControllers.current[providerName]) {
-      abortControllers.current[providerName].abort();
+  const handleStreamTest = async (configId) => {
+    if (abortControllers.current[configId]) {
+      abortControllers.current[configId].abort();
     }
     const controller = new AbortController();
-    abortControllers.current[providerName] = controller;
+    abortControllers.current[configId] = controller;
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      setTestResults(prev => ({
+        ...prev,
+        [configId]: { loading: false, done: true, error: '测试超时（150秒），请检查 API Key 和模型名称是否正确', text: '' },
+      }));
+    }, 150000);
 
     setTestResults(prev => ({
       ...prev,
-      [providerName]: { loading: true, text: '', latency: null, model: '', error: null, done: false },
+      [configId]: { loading: true, text: '', latency: null, model: '', error: null, done: false },
     }));
 
     try {
@@ -265,7 +279,7 @@ const ModelManagement = () => {
       const baseURL = (hostname === 'localhost' || hostname === '127.0.0.1')
         ? 'http://127.0.0.1:8000'
         : '';
-      const response = await fetch(`${baseURL}/api/v1/admin/models/test-stream/${providerName}`, {
+      const response = await fetch(`${baseURL}/api/v1/admin/models/test-stream/${configId}`, {
         headers: { Authorization: token },
         signal: controller.signal,
       });
@@ -295,16 +309,16 @@ const ModelManagement = () => {
             if (data.type === 'token') {
               setTestResults(prev => ({
                 ...prev,
-                [providerName]: {
-                  ...prev[providerName],
-                  text: (prev[providerName]?.text || '') + data.content,
+                [configId]: {
+                  ...prev[configId],
+                  text: (prev[configId]?.text || '') + data.content,
                 },
               }));
             } else if (data.type === 'done') {
               setTestResults(prev => ({
                 ...prev,
-                [providerName]: {
-                  ...prev[providerName],
+                [configId]: {
+                  ...prev[configId],
                   loading: false,
                   done: true,
                   latency: data.latency_ms,
@@ -314,7 +328,7 @@ const ModelManagement = () => {
             } else if (data.type === 'error') {
               setTestResults(prev => ({
                 ...prev,
-                [providerName]: { loading: false, done: true, error: data.message, text: '' },
+                [configId]: { loading: false, done: true, error: data.message, text: '' },
               }));
             }
           } catch {
@@ -322,11 +336,13 @@ const ModelManagement = () => {
           }
         }
       }
+      clearTimeout(timeoutId);
     } catch (err) {
+      clearTimeout(timeoutId);
       if (err.name === 'AbortError') return;
       setTestResults(prev => ({
         ...prev,
-        [providerName]: { loading: false, done: true, error: err.message, text: '' },
+        [configId]: { loading: false, done: true, error: err.message, text: '' },
       }));
     }
   };
@@ -337,7 +353,7 @@ const ModelManagement = () => {
     setTestResults({});
     const enabled = models.filter(m => m.enabled);
     for (const model of enabled) {
-      await handleStreamTest(model.provider_name);
+      await handleStreamTest(model.id);
       await new Promise(resolve => setTimeout(resolve, 300));
     }
     setTestingAll(false);
@@ -367,21 +383,49 @@ const ModelManagement = () => {
           <h2 className={`text-2xl font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
             模型管理
           </h2>
-          <button
-            onClick={handleTestAll}
-            disabled={testingAll || models.filter(m => m.enabled).length === 0}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              isDark
-                ? 'bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-300'
-            }`}
-          >
-            {testingAll ? '测试中...' : '一键测试所有'}
-          </button>
+          {activeTab === 'providers' && (
+            <button
+              onClick={handleTestAll}
+              disabled={testingAll || models.filter(m => m.enabled).length === 0}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                isDark
+                  ? 'bg-slate-700 text-slate-200 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:bg-gray-50 disabled:text-gray-300'
+              }`}
+            >
+              {testingAll ? '测试中...' : '一键测试所有'}
+            </button>
+          )}
         </div>
 
-        {/* ── 左右分栏主区域 ── */}
-        <div className="flex gap-5 min-h-0 flex-1">
+        {/* ── Tab 切换器 ── */}
+        <div className={`flex gap-1 mb-4 shrink-0 p-1 rounded-lg w-fit ${isDark ? 'bg-slate-800' : 'bg-gray-100'}`}>
+          {[
+            { key: 'providers', label: 'Provider 配置' },
+            { key: 'routing', label: '功能路由' },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
+                activeTab === tab.key
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : isDark
+                    ? 'text-slate-400 hover:text-slate-200'
+                    : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── 功能路由面板 ── */}
+        {activeTab === 'routing' && <FeatureModelRouting />}
+
+        {/* ── Provider 配置主区域 ── */}
+        {activeTab === 'providers' && (
+          <div className="flex gap-5 min-h-0 flex-1">
 
           {/* ════ 左侧：模型列表面板 ════ */}
           <div className={`w-80 shrink-0 flex flex-col rounded-xl border overflow-hidden ${
@@ -428,7 +472,7 @@ const ModelManagement = () => {
                     const temperature = params.temperature ?? 0.7;
     const maxTokens = params.max_tokens ?? DEFAULT_AI_MAX_TOKENS;
                     const timeout = params.timeout ?? 60;
-                    const testResult = testResults[model.provider_name];
+                    const testResult = testResults[model.id];
                     const isSelected = editingModel?.id === model.id;
 
                     return (
@@ -487,7 +531,7 @@ const ModelManagement = () => {
                         >
                           {/* 测试按钮 */}
                           <button
-                            onClick={() => handleStreamTest(model.provider_name)}
+                            onClick={() => handleStreamTest(model.id)}
                             disabled={testResult?.loading}
                             className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
                               isDark
@@ -945,7 +989,9 @@ const ModelManagement = () => {
             )}
           </div>
 
-        </div>{/* end 左右分栏 */}
+        </div>
+        )}
+
       </div>
 
       {/* ════ 测试结果详情模态框 ════ */}
@@ -1018,16 +1064,14 @@ const ModelManagement = () => {
                     <p className={`text-sm ${isDark ? 'text-red-300' : 'text-red-700'}`}>
                       {formatTestError(result.error)}
                     </p>
-                    {result.error.length > 80 && (
-                      <details className="mt-2">
-                        <summary className={`text-xs cursor-pointer ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
-                          原始错误信息
-                        </summary>
-                        <pre className={`mt-1 text-xs whitespace-pre-wrap break-all ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
-                          {result.error}
-                        </pre>
-                      </details>
-                    )}
+                    <details className="mt-2">
+                      <summary className={`text-xs cursor-pointer ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
+                        原始输出
+                      </summary>
+                      <pre className={`mt-1 text-xs whitespace-pre-wrap break-all ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+                        {result.error}
+                      </pre>
+                    </details>
                   </div>
                 )}
 

@@ -10,6 +10,7 @@ from .api_call_log import APICallLog
 from .learning_map import LearningMapFile, LearningNode, LearningEdge
 from .agent_session import AgentSession, AgentStep, AgentToolCall
 from .knowledge import KnowledgeDocument, KnowledgeChunk
+from .feature_model_config import FeatureModelConfig
 
 __all__ = [
     "User",
@@ -26,4 +27,5 @@ __all__ = [
     "AgentToolCall",
     "KnowledgeDocument",
     "KnowledgeChunk",
+    "FeatureModelConfig",
 ]

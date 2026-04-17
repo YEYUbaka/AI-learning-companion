@@ -17,7 +17,7 @@ class ModelConfig(Base):
     __tablename__ = "model_configs"
     
     id = Column(Integer, primary_key=True, index=True, comment="配置ID")
-    provider_name = Column(String(50), nullable=False, unique=True, index=True, comment="提供商名称（如：deepseek, qwen, chatglm等）")
+    provider_name = Column(String(50), nullable=False, index=True, comment="提供商名称（如：deepseek, qwen, chatglm等）")
     api_key = Column(Text, nullable=True, comment="加密后的API密钥")
     base_url = Column(String(500), nullable=True, comment="API基础URL")
     priority = Column(Integer, default=0, nullable=False, comment="优先级（数字越大优先级越高）")

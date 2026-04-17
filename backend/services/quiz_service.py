@@ -6,6 +6,7 @@
 from typing import Dict, Any
 from sqlalchemy.orm import Session
 from services.ai_service import AIService
+from services.feature_model_config_service import FeatureModelConfigService
 
 
 class QuizService:
@@ -15,8 +16,9 @@ class QuizService:
     def generate_quiz(db: Session, topic: str, num_questions: int = 5) -> Dict[str, Any]:
         """生成测验（使用AI服务）"""
         prompt = f"请为以下主题生成{num_questions}道测验题目：{topic}。要求：3道选择题（4个选项），2道填空题。返回JSON格式。"
-        
-        result = AIService.call_ai(db, prompt, system_prompt_name="quiz_generator")
+
+        provider = FeatureModelConfigService.get_provider_for_feature(db, "quiz")
+        result = AIService.call_ai(db, prompt, system_prompt_name="quiz_generator", provider=provider)
         # 这里简化处理，实际应该解析AI返回的JSON
         return {
             "topic": topic,
