@@ -15,6 +15,7 @@ from core.config import settings
 from core.security import decrypt_api_key
 from sqlalchemy.orm import Session
 from repositories.model_config_repo import ModelConfigRepository
+import threading
 
 
 class AIProvider(ABC):
@@ -119,6 +120,124 @@ class OpenAICompatProvider(AIProvider):
             yield f'data: {json.dumps({"type": "error", "message": str(e)[:300]}, ensure_ascii=False)}\n\n'
 
 
+class WenxinProvider(AIProvider):
+    """百度文心一言专用提供商（千帆 V2 API，OAuth2 access_token 认证）"""
+
+    _TOKEN_URL = "https://aip.baidubce.com/oauth/2.0/token"
+
+    def __init__(
+        self,
+        api_key: str,
+        secret_key: str,
+        base_url: str,
+        model_name: str,
+        temperature: float = 0.7,
+        max_tokens: int = settings.AI_DEFAULT_MAX_TOKENS,
+        top_p: float = 1.0,
+        timeout: int = 60,
+    ):
+        self.api_key = api_key
+        self.secret_key = secret_key
+        self.base_url = base_url.rstrip("/")
+        self.model_name = model_name
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.top_p = top_p
+        self.timeout = timeout
+        self._access_token: Optional[str] = None
+        self._token_expires_at: float = 0.0
+        self._token_lock = threading.Lock()
+
+    def _get_access_token(self) -> str:
+        with self._token_lock:
+            if self._access_token and time.time() < self._token_expires_at:
+                return self._access_token
+            params = {
+                "grant_type": "client_credentials",
+                "client_id": self.api_key,
+                "client_secret": self.secret_key,
+            }
+            with httpx.Client(timeout=15) as client:
+                resp = client.post(self._TOKEN_URL, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            if "error" in data:
+                raise RuntimeError(f"百度 OAuth2 获取 token 失败: {data.get('error_description', data['error'])}")
+            self._access_token = data["access_token"]
+            # 提前 60 秒刷新，避免边界问题
+            self._token_expires_at = time.time() + int(data.get("expires_in", 2592000)) - 60
+            return self._access_token
+
+    def _build_headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._get_access_token()}",
+            "Content-Type": "application/json",
+        }
+
+    def call(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
+        headers = self._build_headers()
+        payload = {
+            "model": kwargs.get("model", self.model_name),
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "top_p": kwargs.get("top_p", self.top_p),
+        }
+        endpoint = self.base_url + "/chat/completions"
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.post(endpoint, json=payload, headers=headers)
+            response.raise_for_status()
+            result = response.json()
+            return {
+                "text": result["choices"][0]["message"]["content"],
+                "usage": result.get("usage", {}),
+                "model": result.get("model", self.model_name),
+            }
+
+    def call_stream(self, messages: List[Dict[str, str]], **kwargs) -> Generator[str, None, None]:
+        try:
+            headers = self._build_headers()
+        except Exception as e:
+            yield f'data: {json.dumps({"type": "error", "message": str(e)[:300]}, ensure_ascii=False)}\n\n'
+            return
+
+        payload = {
+            "model": kwargs.get("model", self.model_name),
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "top_p": kwargs.get("top_p", self.top_p),
+            "stream": True,
+        }
+        endpoint = self.base_url + "/chat/completions"
+        start_time = time.time()
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                with client.stream("POST", endpoint, json=payload, headers=headers) as response:
+                    response.raise_for_status()
+                    model_name = self.model_name
+                    for line in response.iter_lines():
+                        line = line.strip()
+                        if not line or line == "data: [DONE]":
+                            continue
+                        if line.startswith("data: "):
+                            try:
+                                chunk_data = json.loads(line[6:])
+                                delta = chunk_data.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    yield f'data: {json.dumps({"type": "token", "content": content}, ensure_ascii=False)}\n\n'
+                                if chunk_data.get("model"):
+                                    model_name = chunk_data["model"]
+                            except (json.JSONDecodeError, IndexError, KeyError):
+                                continue
+            latency = (time.time() - start_time) * 1000
+            yield f'data: {json.dumps({"type": "done", "latency_ms": round(latency, 2), "model": model_name}, ensure_ascii=False)}\n\n'
+        except Exception as e:
+            yield f'data: {json.dumps({"type": "error", "message": str(e)[:300]}, ensure_ascii=False)}\n\n'
+
+
 # ---------------------------------------------------------------------------
 # 提供商模板（数据驱动，替代硬编码 Provider 类映射）
 # ---------------------------------------------------------------------------
@@ -135,6 +254,7 @@ def _provider_template(
     tool_calling: bool = False,
     reasoning: bool = False,
     long_output: bool = True,
+    default_max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     return {
         "display_name": display_name,
@@ -144,7 +264,7 @@ def _provider_template(
         "requires_extra_headers": requires_extra_headers,
         "extra_header_keys": extra_header_keys or [],
         "extra_headers": extra_headers or {},
-        "default_max_tokens": settings.AI_DEFAULT_MAX_TOKENS,
+        "default_max_tokens": default_max_tokens if default_max_tokens is not None else settings.AI_DEFAULT_MAX_TOKENS,
         "capabilities": {
             "streaming": True,
             "tool_calling": tool_calling,
@@ -159,6 +279,7 @@ PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
         display_name="DeepSeek",
         default_base_url="https://api.deepseek.com/v1",
         default_model="deepseek-chat",
+        default_max_tokens=8192,
         available_models=["deepseek-chat", "deepseek-reasoner"],
         tool_calling=True,
         reasoning=True,
@@ -464,8 +585,8 @@ class ModelRegistry:
 
         raise Exception(f"所有 Function Calling 提供商调用失败，最后错误: {last_error}")
 
-    def build_provider_from_config(self, config) -> Optional[OpenAICompatProvider]:
-        """根据模型配置创建 OpenAICompatProvider 实例"""
+    def build_provider_from_config(self, config) -> Optional[AIProvider]:
+        """根据模型配置创建 Provider 实例"""
         # 解析别名（向后兼容旧 DB 记录）
         normalized = self._normalize_provider_name(config.provider_name)
         template = PROVIDER_TEMPLATES.get(normalized, PROVIDER_TEMPLATES["openai_compat"])
@@ -484,6 +605,36 @@ class ModelRegistry:
         # 自动去除末尾的 /chat/completions（DB 中旧数据可能已包含该路径）
         if base_url.endswith("/chat/completions"):
             base_url = base_url[: -len("/chat/completions")]
+
+        # 百度文心专用 Provider（OAuth2 token 认证）
+        if normalized == "wenxin":
+            # 新版 IAM key（bce-v3/... 格式）直接用 Bearer 认证，无需 OAuth2
+            if api_key.startswith("bce-v3/"):
+                return OpenAICompatProvider(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model_name=model_name,
+                    temperature=float(params.get("temperature", 0.7)),
+                    max_tokens=int(params.get("max_tokens", template.get("default_max_tokens", settings.AI_DEFAULT_MAX_TOKENS))),
+                    top_p=float(params.get("top_p", 1.0)),
+                    extra_headers={},
+                    timeout=int(params.get("timeout", 120)),
+                )
+            # 旧版 OAuth2 格式：支持 "APIKEY:SECRETKEY" 合并填写（冒号分隔），兼容仅填 api_key + params.secret_key
+            if ":" in api_key:
+                api_key, secret_key = api_key.split(":", 1)
+            else:
+                secret_key = params.get("secret_key", "")
+            return WenxinProvider(
+                api_key=api_key,
+                secret_key=secret_key,
+                base_url=base_url,
+                model_name=model_name,
+                temperature=float(params.get("temperature", 0.7)),
+                max_tokens=int(params.get("max_tokens", template.get("default_max_tokens", settings.AI_DEFAULT_MAX_TOKENS))),
+                top_p=float(params.get("top_p", 1.0)),
+                timeout=int(params.get("timeout", 120)),
+            )
 
         # 自动升级旧版 Qwen 非兼容接口
         if normalized == "qwen" and base_url and "compatible-mode" not in base_url:

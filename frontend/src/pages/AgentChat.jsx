@@ -19,9 +19,15 @@ const AgentChat = () => {
   const [streamRecovery, setStreamRecovery] = useState(null);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [mobileSections, setMobileSections] = useState({
+    tools: false,
+    history: false,
+  });
   const fileInputRef = useRef(null);
   const activeStreamRef = useRef(null);
   const activeStreamRunIdRef = useRef(0);
+  const userScrolledUpRef = useRef(false);
 
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
@@ -321,14 +327,85 @@ const AgentChat = () => {
     loadSessions();
   };
 
-  const cardClass = `${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border rounded-lg shadow-sm p-6`;
+  const toggleMobileSection = (sectionKey) => {
+    setMobileSections(prev => ({
+      ...prev,
+      [sectionKey]: !prev[sectionKey],
+    }));
+  };
+
+  const getMobileSectionClass = (sectionKey) => (
+    mobileSections[sectionKey] ? 'block lg:block' : 'hidden lg:block'
+  );
+
+  const isNearPageBottom = () => {
+    if (typeof window === 'undefined') return true;
+    const threshold = 120;
+    const scrollElement = document.documentElement;
+    return scrollElement.scrollHeight - (window.scrollY + window.innerHeight) < threshold;
+  };
+
+  const updateScrollToBottomVisibility = () => {
+    const shouldShow = Boolean(currentSession) && !isNearPageBottom();
+    userScrolledUpRef.current = shouldShow;
+    setShowScrollToBottom(shouldShow);
+  };
+
+  const scrollToBottom = (behavior = 'smooth') => {
+    if (typeof window === 'undefined') return;
+    userScrolledUpRef.current = false;
+    setShowScrollToBottom(false);
+    const scrollElement = document.documentElement;
+    window.scrollTo({ top: scrollElement.scrollHeight, behavior });
+    window.setTimeout(() => {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
+    }, 450);
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const handleWindowScroll = () => {
+      updateScrollToBottomVisibility();
+    };
+
+    window.addEventListener('scroll', handleWindowScroll, { passive: true });
+    window.addEventListener('resize', handleWindowScroll);
+    requestAnimationFrame(handleWindowScroll);
+
+    return () => {
+      window.removeEventListener('scroll', handleWindowScroll);
+      window.removeEventListener('resize', handleWindowScroll);
+    };
+  }, [currentSession?.session_id]);
+
+  useEffect(() => {
+    if (!currentSession) {
+      userScrolledUpRef.current = false;
+      setShowScrollToBottom(false);
+      return;
+    }
+
+    if (!userScrolledUpRef.current) {
+      requestAnimationFrame(() => {
+        scrollToBottom(loading ? 'auto' : 'smooth');
+      });
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      updateScrollToBottomVisibility();
+    });
+  }, [currentSession?.session_id, currentSession?.steps?.length, currentSession?.tool_calls?.length, loading]);
+
+  const cardClass = `${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border rounded-xl shadow-sm p-4 sm:p-6`;
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-gray-50'}`}>
-      <div className="max-w-7xl mx-auto px-4 py-8">
+      <div className="max-w-7xl mx-auto px-3 py-4 sm:px-4 sm:py-8">
         {/* 页面标题 */}
         <div className="mb-8">
-          <h1 className={`text-3xl font-bold mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+          <h1 className={`text-2xl font-bold mb-2 sm:text-3xl ${isDark ? 'text-white' : 'text-gray-900'}`}>
             智学智能助手
           </h1>
           <p className={`${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
@@ -338,7 +415,7 @@ const AgentChat = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* 左侧：输入区域和工具列表 */}
-          <div className="lg:col-span-1 space-y-6">
+          <div className="order-2 space-y-6 lg:order-1 lg:col-span-1">
             {/* 任务输入 */}
             <div className={cardClass}>
               <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-800'}`}>
@@ -474,10 +551,36 @@ const AgentChat = () => {
 
             {/* 可用工具 */}
             <div className={cardClass}>
-              <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-800'}`}>
-                可用工具
-              </h2>
-              <div className="space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>
+                    可用工具
+                  </h2>
+                  <p className={`mt-1 text-xs lg:hidden ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {tools.length > 0 ? `${tools.length} 个可用工具` : '暂无可用工具'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => toggleMobileSection('tools')}
+                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm transition-colors lg:hidden ${
+                    isDark ? 'bg-slate-700 text-slate-200' : 'bg-gray-100 text-gray-700'
+                  }`}
+                  aria-expanded={mobileSections.tools}
+                  aria-controls="agent-tools-panel"
+                >
+                  <span>{mobileSections.tools ? '收起' : '展开'}</span>
+                  <svg
+                    className={`h-4 w-4 transition-transform ${mobileSections.tools ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
+              <div id="agent-tools-panel" className={`${getMobileSectionClass('tools')} mt-4 space-y-2 lg:mt-4`}>
                 {tools.map((tool, index) => (
                   <div
                     key={index}
@@ -501,10 +604,36 @@ const AgentChat = () => {
 
             {/* 历史会话 */}
             <div className={cardClass}>
-              <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-800'}`}>
-                历史会话
-              </h2>
-              <div className="space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>
+                    历史会话
+                  </h2>
+                  <p className={`mt-1 text-xs lg:hidden ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {sessions.length > 0 ? `${sessions.length} 条最近记录` : '暂无历史记录'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => toggleMobileSection('history')}
+                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm transition-colors lg:hidden ${
+                    isDark ? 'bg-slate-700 text-slate-200' : 'bg-gray-100 text-gray-700'
+                  }`}
+                  aria-expanded={mobileSections.history}
+                  aria-controls="agent-history-panel"
+                >
+                  <span>{mobileSections.history ? '收起' : '展开'}</span>
+                  <svg
+                    className={`h-4 w-4 transition-transform ${mobileSections.history ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
+              <div id="agent-history-panel" className={`${getMobileSectionClass('history')} mt-4 space-y-2 lg:mt-4`}>
                 {sessions.length === 0 ? (
                   <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
                     暂无历史会话
@@ -544,7 +673,7 @@ const AgentChat = () => {
           </div>
 
           {/* 右侧：执行过程展示 */}
-          <div className="lg:col-span-2">
+          <div className="order-1 min-w-0 lg:order-2 lg:col-span-2">
             <div className={cardClass}>
               <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-800'}`}>
                 执行过程
@@ -614,16 +743,16 @@ const AgentChat = () => {
               {currentSession && (
                 <div>
                   <div className={`mb-6 pb-4 border-b ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <h3 className={`break-words font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>
                           {currentSession.goal}
                         </h3>
                         <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
                           模式: {currentSession.session_type} | 状态: {currentSession.status}
                         </p>
                       </div>
-                      <span className={`px-3 py-1 rounded text-sm ${
+                      <span className={`shrink-0 px-3 py-1 rounded text-sm ${
                         currentSession.status === 'completed' ? 'bg-green-100 text-green-800' :
                         currentSession.status === 'failed' ? 'bg-red-100 text-red-800' :
                         currentSession.status === 'interrupted' ? 'bg-orange-100 text-orange-800' :
@@ -644,6 +773,24 @@ const AgentChat = () => {
           </div>
         </div>
       </div>
+      {showScrollToBottom && currentSession && (
+        <button
+          onClick={() => scrollToBottom('smooth')}
+          className={`fixed right-4 z-50 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium shadow-lg transition-all hover:scale-105 sm:right-6 ${
+            isDark
+              ? 'bg-blue-600 text-white hover:bg-blue-700'
+              : 'bg-blue-500 text-white hover:bg-blue-600'
+          }`}
+          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 1rem)' }}
+          aria-label="回到底部"
+          title="回到底部"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+          </svg>
+          <span>回到底部</span>
+        </button>
+      )}
     </div>
   );
 };

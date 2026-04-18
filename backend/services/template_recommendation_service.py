@@ -15,136 +15,67 @@ class TemplateRecommendationService:
     """模板推荐服务类"""
     
     @staticmethod
-    def _get_standard_params(grade_level: str, subject: Optional[str] = None) -> Dict[str, Any]:
-        """获取标准参数（基于实际考试标准）"""
-        if grade_level == "高中":
-            if subject == "语文":
-                return {
-                    "total_questions": 23,
-                    "question_type_distribution": {
-                        "choice": 13,  # 语言文字运用选择题 + 阅读选择题
-                        "fill": 5,     # 名句默写 + 文言文填空
-                        "essay": 4,    # 阅读简答题
-                        "composition": 1,  # 作文
-                        "multiple_choice": 0,
-                        "judge": 0,
-                        "calculation": 0,
-                        "comprehensive": 0
-                    },
-                    "difficulty_distribution": {"easy": 30, "medium": 50, "hard": 20},
-                    "time_limit": 150,
-                    "total_score": 150,
-                    "description": "高考语文标准：23题，150分，150分钟。题型：选择题13题（语言文字运用+阅读），填空题5题（名句默写+文言文），简答题4题（阅读），作文1题。难度：基础30%，中等50%，难题20%。"
-                }
-            elif subject == "数学":
-                return {
-                    "total_questions": 22,
-                    "question_type_distribution": {
-                        "choice": 8,   # 选择题
-                        "fill": 6,     # 填空题
-                        "calculation": 8,  # 解答题
-                        "multiple_choice": 0,
-                        "judge": 0,
-                        "essay": 0,
-                        "comprehensive": 0,
-                        "composition": 0
-                    },
-                    "difficulty_distribution": {"easy": 25, "medium": 50, "hard": 25},
-                    "time_limit": 120,
-                    "total_score": 150,
-                    "description": "高考数学标准：22题，150分，120分钟。题型：选择题8题，填空题6题，解答题8题。难度：基础25%，中等50%，难题25%。"
-                }
-            elif subject == "英语":
-                return {
-                    "total_questions": 80,
-                    "question_type_distribution": {
-                        "choice": 60,  # 听力、阅读、完形等选择题
-                        "fill": 10,    # 语法填空
-                        "essay": 10,   # 短文改错、书面表达等
-                        "multiple_choice": 0,
-                        "judge": 0,
-                        "calculation": 0,
-                        "comprehensive": 0,
-                        "composition": 0
-                    },
-                    "difficulty_distribution": {"easy": 30, "medium": 50, "hard": 20},
-                    "time_limit": 120,
-                    "total_score": 150,
-                    "description": "高考英语标准：约80题，150分，120分钟。题型：选择题60题（听力、阅读、完形），填空题10题（语法填空），简答题10题（改错、写作）。难度：基础30%，中等50%，难题20%。"
-                }
-            else:
-                # 高中其他科目通用标准
-                return {
-                    "total_questions": 30,
-                    "question_type_distribution": {
-                        "choice": 12,
-                        "multiple_choice": 4,
-                        "fill": 6,
-                        "essay": 8,
-                        "judge": 0,
-                        "calculation": 0,
-                        "comprehensive": 0,
-                        "composition": 0
-                    },
-                    "difficulty_distribution": {"easy": 20, "medium": 55, "hard": 25},
-                    "time_limit": 120,
-                    "total_score": 150,
-                    "description": "高中通用标准：30题，150分，120分钟。题型：选择题12题，多选题4题，填空题6题，简答题8题。难度：基础20%，中等55%，难题25%。"
-                }
-        elif grade_level == "初中":
-            return {
-                "total_questions": 25,
-                "question_type_distribution": {
-                    "choice": 10,
-                    "fill": 6,
-                    "essay": 9,
-                    "multiple_choice": 0,
-                    "judge": 0,
-                    "calculation": 0,
-                    "comprehensive": 0,
-                    "composition": 0
-                },
-                "difficulty_distribution": {"easy": 30, "medium": 50, "hard": 20},
-                "time_limit": 120,
-                "total_score": 150,
-                "description": "初中标准：25题，150分，120分钟。题型：选择题10题，填空题6题，简答题9题。难度：基础30%，中等50%，难题20%。"
-            }
-        elif grade_level == "小学":
-            return {
-                "total_questions": 25,
-                "question_type_distribution": {
-                    "choice": 15,
-                    "fill": 6,
-                    "judge": 4,
-                    "multiple_choice": 0,
-                    "essay": 0,
-                    "calculation": 0,
-                    "comprehensive": 0,
-                    "composition": 0
-                },
+    def _get_standard_params(
+        grade_level: str,
+        subject: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """优先从 JSON 模板库获取标准参数，失败时回退到通用默认值"""
+        try:
+            from utils.paper_templates import PaperTemplates
+
+            template = PaperTemplates.get_template(
+                grade_level=grade_level,
+                subject=subject,
+                title=title,
+            )
+            if template:
+                return template
+        except Exception as exc:
+            logger.warning(f"读取 JSON 试卷模板失败，改用默认配置: {exc}")
+
+        generic_defaults = {
+            "小学": {
+                "total_questions": 20,
+                "question_type_distribution": {"choice": 10, "fill": 6, "judge": 4},
                 "difficulty_distribution": {"easy": 70, "medium": 25, "hard": 5},
                 "time_limit": 60,
                 "total_score": 100,
-                "description": "小学标准：25题，100分，60分钟。题型：选择题15题，填空题6题，判断题4题。难度：基础70%，中等25%，难题5%。"
-            }
-        else:  # 大学
-            return {
-                "total_questions": 30,
-                "question_type_distribution": {
-                    "choice": 12,
-                    "fill": 6,
-                    "calculation": 6,
-                    "essay": 6,
-                    "multiple_choice": 0,
-                    "judge": 0,
-                    "comprehensive": 0,
-                    "composition": 0
-                },
+                "description": "小学通用默认模板",
+            },
+            "初中": {
+                "total_questions": 20,
+                "question_type_distribution": {"choice": 8, "fill": 4, "calculation": 4, "comprehensive": 4},
+                "difficulty_distribution": {"easy": 35, "medium": 45, "hard": 20},
+                "time_limit": 90,
+                "total_score": 100,
+                "description": "初中通用默认模板",
+            },
+            "高中": {
+                "total_questions": 22,
+                "question_type_distribution": {"choice": 8, "multiple_choice": 4, "fill": 4, "essay": 4, "comprehensive": 2},
+                "difficulty_distribution": {"easy": 25, "medium": 50, "hard": 25},
+                "time_limit": 120,
+                "total_score": 150,
+                "description": "高中通用默认模板",
+            },
+            "大学": {
+                "total_questions": 20,
+                "question_type_distribution": {"choice": 8, "fill": 4, "calculation": 4, "essay": 4},
                 "difficulty_distribution": {"easy": 25, "medium": 50, "hard": 25},
                 "time_limit": 120,
                 "total_score": 100,
-                "description": "大学标准：30题，100分，120分钟。题型：选择题12题，填空题6题，计算题6题，简答题6题。难度：基础25%，中等50%，难题25%。"
-            }
+                "description": "大学通用默认模板",
+            },
+        }
+
+        fallback = generic_defaults.get(grade_level, generic_defaults["高中"]).copy()
+        all_type_keys = ["choice", "multiple_choice", "fill", "judge", "essay", "calculation", "comprehensive", "composition"]
+        distribution = fallback.get("question_type_distribution", {}).copy()
+        for key in all_type_keys:
+            distribution.setdefault(key, 0)
+        fallback["question_type_distribution"] = distribution
+        return fallback
     
     @staticmethod
     def get_recommended_template(
@@ -173,7 +104,7 @@ class TemplateRecommendationService:
         """
         try:
             # 根据科目和学段确定标准参数
-            standard_params = TemplateRecommendationService._get_standard_params(grade_level, subject)
+            standard_params = TemplateRecommendationService._get_standard_params(grade_level, subject, title)
             
             # 确定最终使用的参数（用户设置优先，否则使用标准值）
             final_total_questions = total_questions if total_questions else standard_params.get('total_questions', 20)

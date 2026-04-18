@@ -506,7 +506,7 @@ class StudyPlanGeneratorTool(BaseTool):
             category="plan",
             parameters=[
                 ToolParameter(name="goal", type="string", description="学习目标"),
-                ToolParameter(name="duration_days", type="integer", description="计划天数", required=False, default=30),
+                ToolParameter(name="duration_days", type="integer", description="可选计划天数；不传时系统自动识别或交给AI推断", required=False),
                 ToolParameter(name="content", type="string", description="补充内容", required=False, default=""),
             ],
             intent_tags=["study_plan", "learning_path"],
@@ -531,7 +531,7 @@ class StudyPlanGeneratorTool(BaseTool):
                 payload={
                     "plan": {
                         "goal": params["goal"],
-                        "duration_days": params.get("duration_days", 30),
+                        "duration_days": len(plan_data),
                         "daily_plan": plan_data,
                     }
                 },

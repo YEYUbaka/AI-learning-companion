@@ -3,7 +3,10 @@
  */
 import React, { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
+import { normalizeMarkdownContent } from '../utils/markdown';
 
 const STATUS_MAP = {
   pass: { label: '通过', light: 'bg-green-100 text-green-700', dark: 'bg-green-900/30 text-green-300' },
@@ -283,14 +286,76 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
     }
     if (step.step_type === 'final_answer') {
       return (
-        <div className={`border rounded-lg p-4 ${isDark ? 'bg-amber-900/20 border-amber-800' : 'bg-amber-50 border-amber-200'}`}>
+        <div className={`border rounded-lg p-4 overflow-hidden ${isDark ? 'bg-amber-900/20 border-amber-800' : 'bg-amber-50 border-amber-200'}`}>
           <div className={`font-medium mb-2 text-sm ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>
             最终回答
           </div>
           <div className={`prose prose-sm max-w-none ${isDark ? 'prose-invert text-slate-200' : 'text-gray-800'}`}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw, rehypeSanitize]}
               components={{
+                p: ({ children }) => <p className="mb-2 last:mb-0 break-words">{children}</p>,
+                ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                li: ({ children }) => <li className="ml-2 break-words">{children}</li>,
+                blockquote: ({ children }) => (
+                  <blockquote
+                    className={`my-3 border-l-4 pl-4 italic ${
+                      isDark ? 'border-slate-600 text-slate-300' : 'border-slate-300 text-slate-600'
+                    }`}
+                  >
+                    {children}
+                  </blockquote>
+                ),
+                table: ({ children }) => (
+                  <div className="my-3 max-w-full">
+                    <div
+                      className={`mb-2 flex items-center justify-between text-[11px] sm:hidden ${
+                        isDark ? 'text-slate-400' : 'text-slate-500'
+                      }`}
+                    >
+                      <span>左右滑动查看完整表格</span>
+                      <span className="font-medium">表格</span>
+                    </div>
+                    <div
+                      className={`max-w-full overflow-x-auto overscroll-x-contain rounded-xl border ${
+                        isDark ? 'border-slate-700 bg-slate-900/40' : 'border-amber-200 bg-white/70'
+                      }`}
+                      style={{ WebkitOverflowScrolling: 'touch' }}
+                    >
+                      <table
+                        className={`w-max min-w-full border-collapse text-sm ${
+                          isDark ? 'border-slate-700 text-slate-200' : 'border-amber-200 text-gray-800'
+                        }`}
+                      >
+                        {children}
+                      </table>
+                    </div>
+                  </div>
+                ),
+                thead: ({ children }) => (
+                  <thead className={isDark ? 'bg-slate-800/80' : 'bg-amber-100/80'}>{children}</thead>
+                ),
+                tbody: ({ children }) => <tbody>{children}</tbody>,
+                tr: ({ children }) => (
+                  <tr className={isDark ? 'border-b border-slate-700' : 'border-b border-amber-200'}>{children}</tr>
+                ),
+                th: ({ children }) => (
+                  <th className="min-w-[6rem] px-3 py-2 text-left align-top font-semibold sm:min-w-[7rem]">{children}</th>
+                ),
+                td: ({ children }) => (
+                  <td className="min-w-[6rem] px-3 py-2 align-top break-words sm:min-w-[7rem]">{children}</td>
+                ),
+                code: ({ children }) => (
+                  <code
+                    className={`rounded px-1.5 py-0.5 text-[0.9em] ${
+                      isDark ? 'bg-slate-800 text-slate-100' : 'bg-amber-100 text-amber-950'
+                    }`}
+                  >
+                    {children}
+                  </code>
+                ),
                 a: ({ node, ...props }) => (
                   <a
                     {...props}
@@ -301,7 +366,7 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
                 ),
               }}
             >
-              {step.content}
+              {normalizeMarkdownContent(step.content)}
             </ReactMarkdown>
           </div>
           {renderMeta(step)}
@@ -331,9 +396,9 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0">
       {steps.map((step, index) => (
-        <div key={`${step.step_number}-${index}`} className="flex">
+        <div key={`${step.step_number}-${index}`} className="flex min-w-0">
           <div className="flex flex-col items-center mr-4">
             {renderStepIcon(step.step_type)}
             {index < steps.length - 1 ? (
@@ -341,7 +406,7 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
             ) : null}
           </div>
 
-          <div className="flex-1 pb-6">
+          <div className="flex-1 min-w-0 pb-6">
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               <span className={`text-xs font-medium ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
                 步骤 {step.step_number}

@@ -207,10 +207,13 @@ async def test_model_stream(
     """流式测试模型调用（SSE），前端通过 EventSource / fetch ReadableStream 接收"""
     provider = registry.get_provider(str(config_id))
     if not provider:
-        raise HTTPException(
-            status_code=404,
-            detail=f"配置 ID {config_id} 未找到或未启用，请先保存配置"
-        )
+        # 注册表仅缓存启用的配置，禁用配置需直接从 DB 构建
+        config = ModelConfigRepository.get_by_id(db, config_id)
+        if not config:
+            raise HTTPException(status_code=404, detail=f"配置 ID {config_id} 不存在")
+        provider = registry.build_provider_from_config(config)
+        if not provider:
+            raise HTTPException(status_code=400, detail=f"配置 ID {config_id} 无法构建提供商（API Key 可能为空）")
 
     test_messages = [{"role": "user", "content": "你好，请用一句话介绍你自己"}]
 

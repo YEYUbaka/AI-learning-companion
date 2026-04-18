@@ -324,6 +324,78 @@ def generate_quiz_legacy(
         raise ValueError(f"生成测验题目失败: {str(e)}")
 
 
+def _stringify_quiz_value(value) -> str:
+    if value is None:
+        return ""
+
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, list):
+        return ", ".join(
+            item for item in (_stringify_quiz_value(entry).strip() for entry in value) if item
+        )
+
+    if isinstance(value, dict):
+        for key in ("text", "content", "label", "name", "value", "answer"):
+            if value.get(key) not in (None, ""):
+                return _stringify_quiz_value(value.get(key))
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except TypeError:
+            return str(value)
+
+    return str(value)
+
+
+def _stringify_quiz_option(option) -> str:
+    if isinstance(option, dict):
+        option_value = None
+        for key in ("value", "key", "id"):
+            if option.get(key) not in (None, ""):
+                option_value = _stringify_quiz_value(option.get(key)).strip()
+                break
+
+        option_text = None
+        for key in ("text", "content", "label", "name"):
+            if option.get(key) not in (None, ""):
+                option_text = _stringify_quiz_value(option.get(key)).strip()
+                break
+
+        if option_value and option_text:
+            return f"{option_value}. {option_text}"
+
+        if option_text:
+            return option_text
+
+        if option_value:
+            return option_value
+
+        if option:
+            return ", ".join(
+                f"{key}. {_stringify_quiz_value(value)}" for key, value in option.items()
+            )
+
+        return ""
+
+    return _stringify_quiz_value(option)
+
+
+def _stringify_quiz_options(options) -> List[str]:
+    if isinstance(options, dict):
+        return [
+            f"{key}. {_stringify_quiz_value(value)}"
+            for key, value in options.items()
+            if _stringify_quiz_value(value).strip()
+        ]
+
+    if isinstance(options, list):
+        return [item for item in (_stringify_quiz_option(option).strip() for option in options) if item]
+
+    single_option = _stringify_quiz_option(options).strip()
+    return [single_option] if single_option else []
+
+
 def evaluate_quiz(questions: List[Dict], user_answers: List[str], provider: Optional[str] = None) -> Dict:
     """
     批改测验并生成讲解
@@ -336,15 +408,18 @@ def evaluate_quiz(questions: List[Dict], user_answers: List[str], provider: Opti
     Returns:
         Dict: 包含 score 和 explanations
     """
-    # 构建答题数据文本
+    # 构建答题数据文本，兼容字符串、对象化选项和历史缓存结构
     qa_text = ""
     for i, q in enumerate(questions):
-        user_answer = user_answers[i] if i < len(user_answers) else ""
-        qa_text += f"题目{i+1}：{q.get('question', '')}\n"
-        qa_text += f"标准答案：{q.get('answer', '')}\n"
+        user_answer = _stringify_quiz_value(user_answers[i] if i < len(user_answers) else "")
+        standard_answer = _stringify_quiz_value(q.get("answer", ""))
+        option_texts = _stringify_quiz_options(q.get("options", [])) if "options" in q else []
+
+        qa_text += f"题目{i+1}：{_stringify_quiz_value(q.get('question', ''))}\n"
+        qa_text += f"标准答案：{standard_answer}\n"
         qa_text += f"用户答案：{user_answer}\n"
-        if q.get('type') == 'choice' and 'options' in q:
-            qa_text += f"选项：{', '.join(q.get('options', []))}\n"
+        if option_texts:
+            qa_text += f"选项：{', '.join(option_texts)}\n"
         qa_text += "\n"
     
     user_prompt = f"请根据以下题目与答案进行评分并提供讲解。\n\n{qa_text}"

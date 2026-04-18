@@ -18,7 +18,7 @@ class QuizService:
         prompt = f"请为以下主题生成{num_questions}道测验题目：{topic}。要求：3道选择题（4个选项），2道填空题。返回JSON格式。"
 
         provider = FeatureModelConfigService.get_provider_for_feature(db, "quiz")
-        result = AIService.call_ai(db, prompt, system_prompt_name="quiz_generator", provider=provider)
+        result = AIService.call_ai(db, prompt, system_prompt_name="quiz_generator_prompt", provider=provider)
         # 这里简化处理，实际应该解析AI返回的JSON
         return {
             "topic": topic,

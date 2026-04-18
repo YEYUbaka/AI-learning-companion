@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="500" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2563eb" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <rect width="500" height="500" fill="url(#bg)"/>
+  
+  <!-- 大圆装饰 -->
+  <circle cx="250" cy="250" r="180" stroke="#2563eb" stroke-width="1" fill="none" opacity="0.1"/>
+  <circle cx="250" cy="250" r="140" stroke="#7c3aed" stroke-width="1" fill="none" opacity="0.08"/>
+  <circle cx="250" cy="250" r="100" stroke="#2563eb" stroke-width="1.5" fill="none" opacity="0.12"/>
+  
+  <!-- 中心图标：书本 + 灯泡 -->
+  <g transform="translate(190, 170)">
+    <!-- 书本 -->
+    <rect x="0" y="40" width="120" height="90" rx="6" fill="white" stroke="#2563eb" stroke-width="2"/>
+    <rect x="10" y="50" width="100" height="5" rx="2.5" fill="#2563eb" opacity="0.3"/>
+    <rect x="10" y="62" width="80" height="4" rx="2" fill="#2563eb" opacity="0.2"/>
+    <rect x="10" y="72" width="90" height="4" rx="2" fill="#2563eb" opacity="0.2"/>
+    <rect x="10" y="82" width="70" height="4" rx="2" fill="#2563eb" opacity="0.2"/>
+    <rect x="10" y="92" width="85" height="4" rx="2" fill="#2563eb" opacity="0.2"/>
+    <rect x="10" y="102" width="60" height="4" rx="2" fill="#2563eb" opacity="0.2"/>
+    <!-- 灯泡 -->
+    <circle cx="60" cy="25" r="22" fill="url(#accent)" opacity="0.9"/>
+    <path d="M60 10 C50 10 43 18 43 25 C43 32 48 37 53 40 L53 45 L67 45 L67 40 C72 37 77 32 77 25 C77 18 70 10 60 10 Z" fill="white" opacity="0.9"/>
+    <rect x="55" y="45" width="10" height="5" rx="2" fill="white" opacity="0.7"/>
+    <!-- 光线 -->
+    <line x1="60" y1="0" x2="60" y2="-5" stroke="#2563eb" stroke-width="2" opacity="0.4"/>
+    <line x1="40" y1="8" x2="35" y2="3" stroke="#2563eb" stroke-width="2" opacity="0.4"/>
+    <line x1="80" y1="8" x2="85" y2="3" stroke="#2563eb" stroke-width="2" opacity="0.4"/>
+  </g>
+  
+  <!-- 装饰点阵 -->
+  <g opacity="0.2">
+    <circle cx="80" cy="80" r="3" fill="#2563eb"/>
+    <circle cx="100" cy="80" r="3" fill="#2563eb"/>
+    <circle cx="120" cy="80" r="3" fill="#2563eb"/>
+    <circle cx="80" cy="100" r="3" fill="#2563eb"/>
+    <circle cx="100" cy="100" r="3" fill="#2563eb"/>
+    <circle cx="120" cy="100" r="3" fill="#2563eb"/>
+    <circle cx="80" cy="120" r="3" fill="#2563eb"/>
+    <circle cx="100" cy="120" r="3" fill="#2563eb"/>
+    <circle cx="120" cy="120" r="3" fill="#2563eb"/>
+  </g>
+  
+  <!-- 浮动元素 -->
+  <circle cx="420" cy="100" r="8" fill="#2563eb" opacity="0.15"/>
+  <circle cx="440" cy="130" r="5" fill="#7c3aed" opacity="0.15"/>
+  <circle cx="400" cy="150" r="6" fill="#10b981" opacity="0.1"/>
+  <rect x="60" y="400" width="14" height="14" rx="3" fill="#7c3aed" opacity="0.1" transform="rotate(45 67 407)"/>
+  <rect x="420" y="380" width="10" height="10" rx="2" fill="#2563eb" opacity="0.1" transform="rotate(30 425 385)"/>
+  <circle cx="100" cy="440" r="12" fill="#f97316" opacity="0.08"/>
+  
+  <!-- 小图表 -->
+  <g transform="translate(350, 320)">
+    <rect x="0" y="0" width="80" height="60" rx="6" fill="white" stroke="#e5e7eb" stroke-width="1.5"/>
+    <rect x="10" y="35" width="12" height="15" rx="2" fill="#2563eb" opacity="0.5"/>
+    <rect x="28" y="25" width="12" height="25" rx="2" fill="#2563eb" opacity="0.6"/>
+    <rect x="46" y="15" width="12" height="35" rx="2" fill="#2563eb" opacity="0.7"/>
+    <rect x="64" y="20" width="12" height="30" rx="2" fill="#7c3aed" opacity="0.5"/>
+  </g>
+  
+  <!-- 底部波浪 -->
+  <path d="M0 460 Q125 430 250 460 T500 460 L500 500 L0 500 Z" fill="#2563eb" opacity="0.06"/>
+  <path d="M0 480 Q125 460 250 480 T500 480 L500 500 L0 500 Z" fill="#7c3aed" opacity="0.04"/>
+</svg>

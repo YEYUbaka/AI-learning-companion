@@ -105,7 +105,7 @@ class AgentPlanner:
             tool_steps = [
                 {
                     "tool_name": "generate_study_plan",
-                    "tool_input": {"goal": goal_text, "duration_days": 14},
+                    "tool_input": {"goal": goal_text},
                     "reason": "根据目标生成学习计划",
                 }
             ]

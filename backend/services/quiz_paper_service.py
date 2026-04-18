@@ -264,7 +264,7 @@ class QuizPaperService:
             result = AIService.call_ai(
                 db=db,
                 user_prompt=prompt,
-                system_prompt_name="quiz_generator_prompt",
+                system_prompt_name="paper_question_generation_prompt",
                 temperature=0.4 if blueprint["mode"] == "teacher" else 0.7,
                 max_tokens=min(6000, 1200 + len(specs) * 700),
                 provider=provider,

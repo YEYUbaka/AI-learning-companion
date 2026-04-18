@@ -144,7 +144,13 @@ backend/seed_data/PROMPT_DESIGN_GUIDE.md
 temp-*.txt
 *.conf
 .playwright-cli/
+.playwright-mcp/
 AGENTS.md
+_server_apiClient.js
+agent-stream-test.png
+
+# 前端构建压缩包
+frontend/dist.tar.gz
 
 # 其他
 .cursor/

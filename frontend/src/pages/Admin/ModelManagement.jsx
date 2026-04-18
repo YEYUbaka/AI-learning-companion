@@ -114,7 +114,7 @@ const ModelManagement = () => {
   const fetchModels = async () => {
     try {
       const res = await api.get('/api/v1/admin/models');
-      setModels(res.data);
+      setModels([...res.data].sort((a, b) => b.priority - a.priority));
     } catch (err) {
       logger.error('获取模型列表失败', err);
     } finally {
@@ -555,7 +555,7 @@ const ModelManagement = () => {
                                       失败
                                     </span>
                                     <button
-                                      onClick={() => setTestDetailModal(model.provider_name)}
+                                      onClick={() => setTestDetailModal(model.id)}
                                       className={`text-xs underline underline-offset-2 truncate ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-gray-400 hover:text-gray-600'}`}
                                     >
                                       查看详情
@@ -567,7 +567,7 @@ const ModelManagement = () => {
                                       {testResult.latency ? testResult.latency.toFixed(0) + ' ms' : '成功'}
                                     </span>
                                     <button
-                                      onClick={() => setTestDetailModal(model.provider_name)}
+                                      onClick={() => setTestDetailModal(model.id)}
                                       className={`text-xs underline underline-offset-2 truncate ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-gray-400 hover:text-gray-600'}`}
                                     >
                                       查看回复
@@ -748,7 +748,11 @@ const ModelManagement = () => {
                             type="password"
                             value={formData.api_key}
                             onChange={e => setFormData({ ...formData, api_key: e.target.value })}
-                            placeholder={editingModel ? '留空则保留原密钥' : '请输入 API 密钥'}
+                            placeholder={
+                              editingModel
+                                ? (formData.provider_name === 'wenxin' ? '留空则保留原密钥（格式：API Key:Secret Key）' : '留空则保留原密钥')
+                                : (formData.provider_name === 'wenxin' ? '请输入百度 API Key:Secret Key（冒号分隔）' : '请输入 API 密钥')
+                            }
                             className={inputCls}
                           />
                         </div>
@@ -998,6 +1002,7 @@ const ModelManagement = () => {
       {testDetailModal && (() => {
         const result = testResults[testDetailModal];
         if (!result) return null;
+        const modalModel = models.find(m => m.id === testDetailModal);
         return (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -1019,7 +1024,7 @@ const ModelManagement = () => {
                     测试结果详情
                   </h3>
                   <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {testDetailModal}
+                    {modalModel?.provider_name ?? testDetailModal}
                   </p>
                 </div>
                 <button

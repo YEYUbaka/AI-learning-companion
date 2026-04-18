@@ -21,7 +21,7 @@ class GeneratePlanRequest(BaseModel):
     file_text: Optional[str] = None
     file_name: Optional[str] = None
     provider: Optional[str] = None
-    duration_days: Optional[int] = 30
+    duration_days: Optional[int] = None
 
 
 class PlanResponse(BaseModel):

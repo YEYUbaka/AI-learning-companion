@@ -9,280 +9,367 @@ import { useThemeStore } from '../store/themeStore';
 import PaperGenerator from '../components/PaperGenerator';
 import { getUserId } from '../utils/auth';
 import logger from '../utils/logger';
+import { normalizeQuizQuestion, normalizeQuizQuestions } from '../utils/quiz';
 
 const PAPER_STORAGE_KEY = 'zhixueban_custom_paper';
 const ANSWER_STORAGE_KEY = 'zhixueban_quiz_progress';
 
+const QUESTION_TYPE_LABELS = {
+  choice: '单选题',
+  multiple_choice: '多选题',
+  fill: '填空题',
+  judge: '判断题',
+  essay: '简答题',
+  calculation: '计算题',
+  comprehensive: '综合题',
+  composition: '作文题',
+};
+
+const buildRegularDistribution = (total, choicePercent) => {
+  const safeTotal = Math.max(3, Number(total) || 5);
+  const safePercent = Math.max(0, Math.min(100, Number(choicePercent) || 60));
+  const choice = Math.max(0, Math.round((safeTotal * safePercent) / 100));
+  const fill = Math.max(0, safeTotal - choice);
+  return { choice, fill };
+};
+
+const formatDuration = (seconds = 0) => {
+  const safeSeconds = Math.max(0, seconds);
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainSeconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(remainSeconds).padStart(2, '0')}`;
+};
+
+const getOptionValue = (option, index) => {
+  if (typeof option === 'string') {
+    const matched = option.trim().match(/^([A-Z])[\.\)、]/i);
+    if (matched) {
+      return matched[1].toUpperCase();
+    }
+  }
+
+  if (option && typeof option === 'object' && option.value) {
+    return String(option.value).toUpperCase();
+  }
+
+  return String.fromCharCode(65 + index);
+};
+
+const getOptionLabel = (option, index) => {
+  if (typeof option === 'string') {
+    return option;
+  }
+
+  if (option && typeof option === 'object') {
+    if (option.label) return option.label;
+    if (option.text) return `${getOptionValue(option, index)}. ${option.text}`;
+  }
+
+  return `${getOptionValue(option, index)}. 选项 ${index + 1}`;
+};
+
+const parseMultipleChoiceAnswer = (answer = '') =>
+  String(answer)
+    .split(',')
+    .map((item) => item.trim().toUpperCase())
+    .filter(Boolean);
+
+const isQuestionAnswered = (question, answer) => {
+  if (!question) return false;
+  const normalizedQuestion = normalizeQuizQuestion(question);
+
+  if (['choice', 'judge'].includes(normalizedQuestion.type)) {
+    return Boolean(String(answer || '').trim());
+  }
+
+  if (normalizedQuestion.type === 'multiple_choice') {
+    return parseMultipleChoiceAnswer(answer).length > 0;
+  }
+
+  return Boolean(String(answer || '').trim());
+};
+
+const findFirstUnansweredIndex = (questions = [], answers = []) =>
+  questions.findIndex((question, index) => !isQuestionAnswered(question, answers[index]));
+
 function Quiz() {
-  const [mode, setMode] = useState('regular'); // 'regular' 或 'custom'
-  const [topic, setTopic] = useState('');
-  const [numQuestions, setNumQuestions] = useState(5);
-  const [choicePercent, setChoicePercent] = useState(60); // 选择题百分比
-  const [questionTypeDistribution, setQuestionTypeDistribution] = useState({
-    choice: 3,
-    fill: 2
-  });
-  const [startTime, setStartTime] = useState(null); // 答题开始时间
-  
-  // 题型选项（常规测评模式支持的类型）
-  const regularQuestionTypes = [
-    { key: 'choice', label: '单选题' },
-    { key: 'fill', label: '填空题' },
-    { key: 'judge', label: '判断题' }
-  ];
-  const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
-  const [questions, setQuestions] = useState([]);
-  const [answers, setAnswers] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [paperData, setPaperData] = useState(null); // 智能组卷生成的试卷数据
-  const [statusMessage, setStatusMessage] = useState('');
   const navigate = useNavigate();
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
 
-  // 计算答题进度
-  const answeredCount = useMemo(() => {
-    return answers.filter((ans, idx) => {
-      const q = questions[idx];
-      if (!q) return false;
-      // 文本输入类：填空题、简答题、计算题、综合题
-      if (['fill', 'essay', 'calculation', 'comprehensive'].includes(q.type) && ans?.trim()) return true;
-      // 选择类：单选题、多选题、判断题
-      if (['choice', 'multiple_choice', 'judge'].includes(q.type) && ans) return true;
-      return false;
-    }).length;
-  }, [answers, questions]);
+  const [mode, setMode] = useState('regular');
+  const [topic, setTopic] = useState('');
+  const [numQuestions, setNumQuestions] = useState(8);
+  const [choicePercent, setChoicePercent] = useState(60);
+  const [questions, setQuestions] = useState([]);
+  const [answers, setAnswers] = useState([]);
+  const [paperData, setPaperData] = useState(null);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [startTime, setStartTime] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [showQuestionOverview, setShowQuestionOverview] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
+
+  const regularDistribution = useMemo(
+    () => buildRegularDistribution(numQuestions, choicePercent),
+    [numQuestions, choicePercent]
+  );
+
+  const answeredCount = useMemo(
+    () => questions.filter((question, index) => isQuestionAnswered(question, answers[index])).length,
+    [answers, questions]
+  );
+
+  const unansweredCount = Math.max(questions.length - answeredCount, 0);
+  const currentQuestion = questions[currentQuestionIndex] || null;
+  const isRegularSetupView = mode === 'regular' && questions.length === 0 && !paperData;
+  const isRegularExamView = mode === 'regular' && questions.length > 0 && !paperData;
 
   const palette = useMemo(
     () =>
       isDark
         ? {
-            page: 'min-h-screen bg-slate-900 text-white',
-            card: 'bg-slate-800 border border-slate-700 rounded-2xl shadow-lg',
-            textMuted: 'text-slate-400',
+            page: 'min-h-screen bg-slate-950 text-white',
+            shell: 'rounded-xl border border-slate-800 bg-slate-900/88 shadow-[0_24px_90px_rgba(2,6,23,0.45)]',
+            soft: 'rounded-lg border border-slate-800 bg-slate-900/78',
+            mutedSoft: 'rounded-md border border-slate-800 bg-slate-950/65',
             input:
-              'flex-1 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-slate-400 text-white',
-            gradientButton:
-              'bg-blue-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition',
-            secondaryButton:
-              'bg-slate-700 text-slate-300 px-4 py-2 rounded-lg hover:bg-slate-600 transition text-sm',
-            alert: 'p-4 rounded-xl bg-red-900/20 border border-red-500/40 text-red-200',
-            questionCard: 'bg-slate-800 border border-slate-700 rounded-xl',
-            choice:
-              'flex items-center p-3 rounded-lg border-2 transition cursor-pointer text-white bg-slate-800',
-            choiceActive: 'bg-blue-600 border-transparent text-white',
-            choiceInactive: 'border-slate-700 hover:border-blue-500',
-            inputSmall:
-              'w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 focus:ring-2 focus:ring-blue-500 placeholder:text-slate-400 text-white',
+              'w-full rounded-md border border-slate-700 bg-slate-950/80 px-4 py-3 text-white outline-none transition focus:border-[#5b85a5] focus:ring-2 focus:ring-[#5b85a5]/25',
+            primary:
+              'rounded-md bg-[#325a79] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#3d6b8f] disabled:cursor-not-allowed disabled:opacity-60',
+            secondary:
+              'rounded-md border border-slate-700 bg-slate-900/80 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:bg-slate-800',
+            title: 'text-slate-50',
+            text: 'text-slate-300',
+            muted: 'text-slate-500',
+            info: 'border-sky-700/40 bg-sky-500/10 text-sky-200',
+            warning: 'border-amber-700/40 bg-amber-500/10 text-amber-200',
+            error: 'border-red-700/40 bg-red-500/10 text-red-200',
+            optionIdle: 'border-slate-700 bg-slate-950/70 text-slate-100 hover:border-[#5b85a5] hover:bg-slate-900',
+            optionActive: 'border-[#5b85a5] bg-[#132334] text-white shadow-[0_12px_30px_rgba(29,78,216,0.18)]',
+            navIdle: 'border-slate-700 bg-slate-950/70 text-slate-300 hover:bg-slate-900',
+            navCurrent: 'border-[#5b85a5] bg-[#132334] text-white',
+            navDone: 'border-emerald-700/40 bg-emerald-500/10 text-emerald-200',
+            progressTrack: 'bg-slate-800',
+            progressBar: 'bg-[#4d82a7]',
           }
         : {
-            page: 'min-h-screen bg-gray-50 text-slate-900',
-            card: 'bg-white rounded-2xl shadow-lg border border-gray-200',
-            textMuted: 'text-gray-500',
+            page: 'min-h-screen bg-slate-100 text-slate-900',
+            shell: 'rounded-xl border border-slate-200 bg-white shadow-[0_20px_80px_rgba(15,23,42,0.08)]',
+            soft: 'rounded-lg border border-slate-200 bg-white',
+            mutedSoft: 'rounded-md border border-slate-200 bg-slate-50/85',
             input:
-              'flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent',
-            gradientButton:
-              'bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition',
-            secondaryButton:
-              'bg-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-300 transition text-sm',
-            alert: 'mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800',
-            questionCard: 'bg-white border border-gray-200 rounded-xl',
-            choice:
-              'flex items-center p-3 rounded-lg cursor-pointer transition-colors bg-white border-2 border-gray-200',
-            choiceActive: 'bg-blue-100 border-blue-500',
-            choiceInactive: 'hover:border-blue-300',
-            inputSmall:
-              'w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent',
+              'w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15',
+            primary:
+              'rounded-md bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60',
+            secondary:
+              'rounded-md border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50',
+            title: 'text-slate-900',
+            text: 'text-slate-600',
+            muted: 'text-slate-400',
+            info: 'border-blue-200 bg-blue-50 text-blue-700',
+            warning: 'border-amber-200 bg-amber-50 text-amber-700',
+            error: 'border-red-200 bg-red-50 text-red-700',
+            optionIdle: 'border-slate-200 bg-white text-slate-800 hover:border-blue-300 hover:bg-blue-50/45',
+            optionActive: 'border-blue-500 bg-blue-50 text-blue-700 shadow-[0_12px_30px_rgba(37,99,235,0.10)]',
+            navIdle: 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+            navCurrent: 'border-blue-500 bg-blue-600 text-white',
+            navDone: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+            progressTrack: 'bg-slate-200',
+            progressBar: 'bg-blue-600',
           },
     [isDark]
   );
 
+  const syncProgress = (nextAnswers, nextIndex = currentQuestionIndex, nextStartTime = startTime) => {
+    if (!isRegularExamView) return;
+
+    sessionStorage.setItem(
+      ANSWER_STORAGE_KEY,
+      JSON.stringify({
+        topic,
+        questions,
+        answers: nextAnswers,
+        startTime: nextStartTime,
+        currentQuestionIndex: nextIndex,
+      })
+    );
+  };
+
+  const handleAnswerChange = (index, value) => {
+    const nextAnswers = [...answers];
+    nextAnswers[index] = value;
+    setAnswers(nextAnswers);
+    syncProgress(nextAnswers);
+  };
+
+  const handleToggleMultipleChoice = (index, optionValue) => {
+    const currentValues = new Set(parseMultipleChoiceAnswer(answers[index]));
+    if (currentValues.has(optionValue)) {
+      currentValues.delete(optionValue);
+    } else {
+      currentValues.add(optionValue);
+    }
+    const nextValue = Array.from(currentValues).sort().join(',');
+    handleAnswerChange(index, nextValue);
+  };
+
   const handleGenerate = async () => {
     if (!topic.trim()) {
-      setError('请输入测验主题');
-      return;
-    }
-
-    // 验证题型分布总和是否等于总题数
-    const totalDistributed = Object.values(questionTypeDistribution).reduce((sum, count) => sum + count, 0);
-    if (totalDistributed !== numQuestions) {
-      setError(`题型分布总和（${totalDistributed}）必须等于总题数（${numQuestions}）`);
+      setError('请输入本次测评主题');
       return;
     }
 
     setLoading(true);
     setError('');
-    setStatusMessage('AI 正在生成测验题目，通常需要 10-30 秒，请耐心等待...');
+    setStatusMessage('AI 正在生成本次测评，请稍候...');
 
     try {
       const response = await requestQuizGenerate({
         topic,
         num_questions: numQuestions,
-        question_type_distribution: questionTypeDistribution,
+        question_type_distribution: regularDistribution,
       });
 
-      if (response.data.success) {
-        setQuestions(response.data.questions);
-        setAnswers(new Array(response.data.questions.length).fill(''));
-        setStartTime(Date.now());
-        setError('');
-        setStatusMessage('测验生成完成，可以开始答题。');
-        setTimeout(() => setStatusMessage(''), 4000);
-      } else {
-        setError(response.data.message || '生成测验题目失败');
-        setStatusMessage('');
+      if (!response.data.success) {
+        throw new Error(response.data.message || '生成测评失败');
       }
+
+      const nextQuestions = normalizeQuizQuestions(response.data.questions || []);
+      const nextAnswers = new Array(nextQuestions.length).fill('');
+      const nextStartTime = Date.now();
+
+      setQuestions(nextQuestions);
+      setAnswers(nextAnswers);
+      setStartTime(nextStartTime);
+      setElapsedSeconds(0);
+      setCurrentQuestionIndex(0);
+      setShowQuestionOverview(false);
+      setStatusMessage('测评已生成，可以开始作答了。');
+      sessionStorage.removeItem(PAPER_STORAGE_KEY);
+      sessionStorage.setItem(
+        ANSWER_STORAGE_KEY,
+        JSON.stringify({
+          topic,
+          questions: nextQuestions,
+          answers: nextAnswers,
+          startTime: nextStartTime,
+          currentQuestionIndex: 0,
+        })
+      );
     } catch (err) {
-      logger.error('生成测验失败', err);
-      const errorMsg = err.response?.data?.detail || err.response?.data?.message || err.message || '生成测验题目失败';
-      setError(errorMsg);
+      logger.error('生成测评失败', err);
+      setError(err.response?.data?.detail || err.response?.data?.message || err.message || '生成测评失败');
       setStatusMessage('');
     } finally {
       setLoading(false);
     }
   };
-  
-  const handleNumQuestionsChange = (value) => {
-    const newValue = parseInt(value) || 5;
-    setNumQuestions(newValue);
-
-    // 根据百分比自动计算题型分布
-    const choiceCount = Math.round(newValue * choicePercent / 100);
-    const fillCount = newValue - choiceCount;
-    setQuestionTypeDistribution({
-      choice: choiceCount,
-      fill: fillCount
-    });
-  };
-
-  const handleChoicePercentChange = (value) => {
-    const percent = parseInt(value) || 60;
-    setChoicePercent(percent);
-
-    // 自动计算题型分布
-    const choiceCount = Math.round(numQuestions * percent / 100);
-    const fillCount = numQuestions - choiceCount;
-    setQuestionTypeDistribution({
-      choice: choiceCount,
-      fill: fillCount
-    });
-  };
-
-  const handleAnswerChange = (index, value) => {
-    const newAnswers = [...answers];
-    newAnswers[index] = value;
-    setAnswers(newAnswers);
-
-    // 自动保存答题进度
-    sessionStorage.setItem(ANSWER_STORAGE_KEY, JSON.stringify({
-      topic,
-      questions,
-      answers: newAnswers,
-      startTime
-    }));
-  };
 
   const handleSubmit = async () => {
-    // 检查是否所有题目都已作答
-    const unanswered = answers.some((ans, idx) => {
-      const q = questions[idx];
-      if (q.type === 'fill' && !ans.trim()) return true;
-      if (q.type === 'choice' && !ans) return true;
-      return false;
-    });
-
-    if (unanswered) {
-      setError('请完成所有题目后再提交');
-      return;
+    const firstUnanswered = findFirstUnansweredIndex(questions, answers);
+    if (firstUnanswered !== -1) {
+      const confirmed = window.confirm(`还有 ${unansweredCount} 题未作答，确定现在交卷吗？`);
+      if (!confirmed) {
+        setCurrentQuestionIndex(firstUnanswered);
+        setShowQuestionOverview(true);
+        return;
+      }
     }
 
     setSubmitting(true);
     setError('');
-    setStatusMessage('AI 正在批改本次测验，通常需要 5-15 秒，请稍候...');
+    setStatusMessage('AI 正在统一批改并生成复盘建议...');
 
     try {
-      const user_id = getUserId();
       const response = await requestQuizSubmit({
-        user_id,
+        user_id: getUserId(),
         topic,
         questions,
         answers,
       });
 
-      if (response.data.success) {
-        setStatusMessage('批改完成，正在跳转到结果页...');
-        // 跳转到结果页面
-        navigate('/quiz-result', {
-          state: {
-            score: response.data.score,
-            explanations: response.data.explanations,
-            questions: questions,
-            answers: answers,
-            topic: topic
-          }
-        });
+      if (!response.data.success) {
+        throw new Error(response.data.message || '提交测评失败');
       }
+
+      sessionStorage.removeItem(ANSWER_STORAGE_KEY);
+      navigate('/quiz-result', {
+        state: {
+          score: response.data.score,
+          explanations: response.data.explanations,
+          questions,
+          answers,
+          topic,
+          durationSeconds: elapsedSeconds,
+          submittedAt: new Date().toISOString(),
+        },
+      });
     } catch (err) {
-      setError(err.response?.data?.detail || '提交测验失败');
+      logger.error('提交测评失败', err);
+      setError(err.response?.data?.detail || err.response?.data?.message || err.message || '提交测评失败');
       setSubmitting(false);
       setStatusMessage('');
     }
   };
 
   const handleReset = () => {
+    setMode('regular');
+    setTopic('');
+    setNumQuestions(8);
+    setChoicePercent(60);
     setQuestions([]);
     setAnswers([]);
-    setTopic('');
-    setError('');
     setPaperData(null);
-    setNumQuestions(5);
-    setChoicePercent(60);
-    setQuestionTypeDistribution({ choice: 3, fill: 2 });
-    setShowAdvancedConfig(false);
+    setCurrentQuestionIndex(0);
     setStartTime(null);
+    setElapsedSeconds(0);
+    setShowQuestionOverview(false);
+    setError('');
+    setStatusMessage('');
     sessionStorage.removeItem(ANSWER_STORAGE_KEY);
+    sessionStorage.removeItem(PAPER_STORAGE_KEY);
   };
-  
+
   const handlePaperGenerated = (data) => {
+    const nextQuestions = normalizeQuizQuestions(data.questions || []);
     setPaperData(data);
-    const nextQuestions = data.questions || [];
     setQuestions(nextQuestions);
     setAnswers(new Array(nextQuestions.length).fill(''));
-    // 智能组卷不进入答题模式，保持在custom模式用于预览和导出
     setMode('custom');
+    setError('');
+    setStatusMessage('试卷已生成，可以继续预览、导出或重生不合格题目。');
   };
-  
+
   const handleExportPaper = async (format = 'pdf') => {
-    if (!paperData) return;
-    
+    if (!paperData?.paper_id) return;
+
     try {
       const userId = getUserId();
-      
       const response = await api.get(
         `/api/v1/quiz/paper/${paperData.paper_id}/export?user_id=${userId}&format=${format}&include_answer=true`,
         { responseType: 'blob' }
       );
-      
-      // 创建下载链接
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+
+      const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
-      link.href = url;
-      // 修复文件后缀：word格式应该是docx
-      const fileExt = format === 'word' ? 'docx' : format;
-      link.setAttribute('download', `试卷_${paperData.paper_id}.${fileExt}`);
+      const extension = format === 'word' ? 'docx' : format;
+      link.href = blobUrl;
+      link.setAttribute('download', `试卷_${paperData.paper_id}.${extension}`);
       document.body.appendChild(link);
       link.click();
       link.remove();
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(blobUrl);
     } catch (err) {
-      setError('导出失败：' + (err.response?.data?.detail || err.message));
+      logger.error('导出试卷失败', err);
+      setError(err.response?.data?.detail || err.message || '导出试卷失败');
     }
   };
 
-  // 载入本地存储的智能组卷
   const handleRegenerateFailedQuestions = async () => {
     if (!paperData?.paper_id) return;
 
@@ -295,37 +382,33 @@ function Quiz() {
     ];
 
     if (failedQuestionIds.length === 0) {
-      setStatusMessage('当前没有需要重生的不合格题目。');
-      setTimeout(() => setStatusMessage(''), 3000);
+      setStatusMessage('当前没有需要重生的题目。');
       return;
     }
 
     try {
       setRegenerating(true);
       setError('');
-      setStatusMessage('正在重生不合格题目，请稍候...');
-      const userId = getUserId();
+      setStatusMessage('正在重生审核不通过的题目...');
       const response = await requestRegeneratePaperQuestions(paperData.paper_id, {
-        user_id: userId,
+        user_id: getUserId(),
         question_ids: failedQuestionIds,
       });
 
-      if (response.data.success) {
-        setPaperData(response.data);
-        setQuestions(response.data.questions || []);
-        setStatusMessage(
-          response.data.regenerated_question_ids?.length > 0
-            ? `已重生题目：${response.data.regenerated_question_ids.join('、')}`
-            : '未检测到可重生题目，已刷新审核结果。'
-        );
-        setTimeout(() => setStatusMessage(''), 5000);
-      } else {
-        setError(response.data.message || '重生不合格题目失败');
-        setStatusMessage('');
+      if (!response.data.success) {
+        throw new Error(response.data.message || '重生题目失败');
       }
+
+      setPaperData(response.data);
+      setQuestions(response.data.questions || []);
+      setStatusMessage(
+        response.data.regenerated_question_ids?.length
+          ? `已重生题目：${response.data.regenerated_question_ids.join('、')}`
+          : '审核结果已刷新。'
+      );
     } catch (err) {
-      logger.error('重生不合格题目失败', err);
-      setError(err.response?.data?.detail || err.message || '重生不合格题目失败');
+      logger.error('重生题目失败', err);
+      setError(err.response?.data?.detail || err.response?.data?.message || err.message || '重生题目失败');
       setStatusMessage('');
     } finally {
       setRegenerating(false);
@@ -333,42 +416,56 @@ function Quiz() {
   };
 
   useEffect(() => {
-    const cached = sessionStorage.getItem(PAPER_STORAGE_KEY);
-    if (cached) {
+    const cachedPaper = sessionStorage.getItem(PAPER_STORAGE_KEY);
+    if (cachedPaper) {
       try {
-        const parsed = JSON.parse(cached);
-        if (parsed && parsed.questions) {
+        const parsed = JSON.parse(cachedPaper);
+        if (parsed?.questions) {
           setPaperData(parsed);
-          setQuestions(parsed.questions);
-          setAnswers(new Array(parsed.questions.length).fill(''));
+          const normalizedQuestions = normalizeQuizQuestions(parsed.questions);
+          setQuestions(normalizedQuestions);
+          setAnswers(new Array(normalizedQuestions.length).fill(''));
           setMode('custom');
+          return;
         }
-      } catch (error) {
-        logger.warn('加载缓存试卷失败', error);
+      } catch (err) {
+        logger.warn('加载缓存试卷失败', err);
         sessionStorage.removeItem(PAPER_STORAGE_KEY);
       }
     }
 
-    // 载入答题进度
     const savedProgress = sessionStorage.getItem(ANSWER_STORAGE_KEY);
-    if (savedProgress && !cached) {
-      try {
-        const { topic: savedTopic, questions: savedQuestions, answers: savedAnswers, startTime: savedStartTime } = JSON.parse(savedProgress);
-        if (savedQuestions && savedAnswers) {
-          setTopic(savedTopic);
-          setQuestions(savedQuestions);
-          setAnswers(savedAnswers);
-          setStartTime(savedStartTime);
-          setMode('regular');
+    if (!savedProgress) return;
+
+    try {
+      const parsed = JSON.parse(savedProgress);
+      if (parsed?.questions?.length) {
+        const normalizedQuestions = normalizeQuizQuestions(parsed.questions || []);
+        const hasInvalidChoiceOptions = normalizedQuestions.some(
+          (question) =>
+            ['choice', 'multiple_choice'].includes(question?.type) &&
+            (!Array.isArray(question.options) || question.options.length === 0)
+        );
+
+        if (hasInvalidChoiceOptions) {
+          sessionStorage.removeItem(ANSWER_STORAGE_KEY);
+          setStatusMessage('检测到旧试题缓存不可继续作答，请重新生成本次测评。');
+          return;
         }
-      } catch (error) {
-        // warn silenced
-        sessionStorage.removeItem(ANSWER_STORAGE_KEY);
+
+        setMode('regular');
+        setTopic(parsed.topic || '');
+        setQuestions(normalizedQuestions);
+        setAnswers(parsed.answers || new Array(normalizedQuestions.length).fill(''));
+        setStartTime(parsed.startTime || Date.now());
+        setCurrentQuestionIndex(Math.min(parsed.currentQuestionIndex || 0, Math.max(normalizedQuestions.length - 1, 0)));
       }
+    } catch (err) {
+      logger.warn('加载答题进度失败', err);
+      sessionStorage.removeItem(ANSWER_STORAGE_KEY);
     }
   }, []);
 
-  // 同步缓存
   useEffect(() => {
     if (paperData) {
       sessionStorage.setItem(PAPER_STORAGE_KEY, JSON.stringify(paperData));
@@ -377,374 +474,503 @@ function Quiz() {
     }
   }, [paperData]);
 
+  useEffect(() => {
+    if (!isRegularExamView || !startTime) return undefined;
+
+    setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [isRegularExamView, startTime]);
+
+  useEffect(() => {
+    if (!isRegularExamView) return;
+    syncProgress(answers);
+  }, [currentQuestionIndex]);
+
+  const renderQuestionInput = (question, index) => {
+    if (!question) return null;
+    const normalizedQuestion = normalizeQuizQuestion(question);
+
+    if (
+      ['choice', 'multiple_choice'].includes(normalizedQuestion.type) &&
+      (!Array.isArray(normalizedQuestion.options) || normalizedQuestion.options.length === 0)
+    ) {
+      return (
+        <div className={`rounded-md border px-4 py-4 text-sm leading-7 ${palette.warning}`}>
+          这道题的选项未能正常加载，请返回测评首页重新生成本次测评。
+        </div>
+      );
+    }
+
+    if (normalizedQuestion.type === 'choice') {
+      return (
+        <div className="space-y-3">
+          {(normalizedQuestion.options || []).map((option, optionIndex) => {
+            const optionValue = getOptionValue(option, optionIndex);
+            const active = answers[index] === optionValue;
+            return (
+              <button
+                key={`${optionValue}-${optionIndex}`}
+                type="button"
+                onClick={() => handleAnswerChange(index, optionValue)}
+                className={`flex w-full items-start gap-3 rounded-md border px-4 py-4 text-left transition ${active ? palette.optionActive : palette.optionIdle}`}
+              >
+                <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-current text-sm font-semibold">
+                  {optionValue}
+                </span>
+                <span className="text-sm leading-7">{getOptionLabel(option, optionIndex)}</span>
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    if (normalizedQuestion.type === 'multiple_choice') {
+      const selectedValues = new Set(parseMultipleChoiceAnswer(answers[index]));
+      return (
+        <div className="space-y-3">
+          {(normalizedQuestion.options || []).map((option, optionIndex) => {
+            const optionValue = getOptionValue(option, optionIndex);
+            const active = selectedValues.has(optionValue);
+            return (
+              <button
+                key={`${optionValue}-${optionIndex}`}
+                type="button"
+                onClick={() => handleToggleMultipleChoice(index, optionValue)}
+                className={`flex w-full items-start gap-3 rounded-md border px-4 py-4 text-left transition ${active ? palette.optionActive : palette.optionIdle}`}
+              >
+                <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-current text-sm font-semibold">
+                  {optionValue}
+                </span>
+                <span className="text-sm leading-7">{getOptionLabel(option, optionIndex)}</span>
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    if (normalizedQuestion.type === 'judge') {
+      return (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {['正确', '错误'].map((value) => {
+            const active = answers[index] === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => handleAnswerChange(index, value)}
+                className={`rounded-md border px-4 py-4 text-left text-sm font-semibold transition ${active ? palette.optionActive : palette.optionIdle}`}
+              >
+                {value}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    const isLongForm = ['essay', 'calculation', 'comprehensive', 'composition'].includes(normalizedQuestion.type);
+    return isLongForm ? (
+      <textarea
+        value={answers[index] || ''}
+        onChange={(event) => handleAnswerChange(index, event.target.value)}
+        rows={8}
+        placeholder="请输入你的答案"
+        className={`${palette.input} resize-y`}
+      />
+    ) : (
+      <input
+        type="text"
+        value={answers[index] || ''}
+        onChange={(event) => handleAnswerChange(index, event.target.value)}
+        placeholder="请输入你的答案"
+        className={palette.input}
+      />
+    );
+  };
+
   return (
-    <div className={`${palette.page} py-10`}>
-      <div className="max-w-4xl mx-auto px-4">
-        <div className={`${palette.card} p-8`}>
-        <h1 className="text-3xl font-bold mb-6">智学伴 · AI智能测评</h1>
-        
-        {/* 模式切换 */}
-        {questions.length === 0 && !paperData && (
-          <div className="flex gap-2 mb-6">
-            <button
-              onClick={() => setMode('regular')}
-              className={`px-6 py-2 rounded-lg transition ${
-                mode === 'regular'
-                  ? isDark
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-blue-600 text-white'
-                  : isDark
-                  ? 'bg-gray-700 text-white/60 hover:text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              常规测评
-            </button>
-            <button
-              onClick={() => setMode('custom')}
-              className={`px-6 py-2 rounded-lg transition ${
-                mode === 'custom'
-                  ? isDark
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-blue-600 text-white'
-                  : isDark
-                  ? 'bg-gray-700 text-white/60 hover:text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              智能组卷
-            </button>
-          </div>
-        )}
-        
-        {/* 智能组卷模式 */}
-        {mode === 'custom' && questions.length === 0 && !paperData && (
-          <PaperGenerator
-            onPaperGenerated={handlePaperGenerated}
-            onCancel={() => setMode('regular')}
-          />
-        )}
-
-        {/* 常规测评模式 - 生成题目区域 */}
-        {mode === 'regular' && questions.length === 0 && !paperData && (
-          <div className="mb-6 space-y-4">
-            <div>
-              <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white/80' : 'text-gray-700'}`}>
-                请输入测验主题
-              </label>
-              <div className="flex gap-3">
-                <input
-                  type="text"
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  placeholder="例如：Python基础语法、JavaScript函数、数据结构与算法"
-                  className={palette.input}
-                  onKeyPress={(e) => e.key === 'Enter' && handleGenerate()}
-                />
-                <button
-                  onClick={handleGenerate}
-                  disabled={loading || !topic.trim()}
-                  className={palette.gradientButton}
-                >
-                  {loading ? '生成中...' : '生成测验'}
+    <div className={`${palette.page} py-6 sm:py-10`}>
+      <div className="mx-auto max-w-7xl px-4">
+        <div className={`${palette.shell} overflow-hidden p-4 sm:p-6 lg:p-8`}>
+          <div className="mb-6 flex flex-wrap items-center gap-3">
+            {questions.length === 0 && !paperData ? (
+              <>
+                <button type="button" onClick={() => setMode('regular')} className={mode === 'regular' ? palette.primary : palette.secondary}>
+                  常规测评
                 </button>
-              </div>
-            </div>
-            
-            {/* 基础配置 */}
-            <div>
-              <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white/80' : 'text-gray-700'}`}>
-                题目数量：{numQuestions} 道
-              </label>
-              <input
-                type="range"
-                value={numQuestions}
-                onChange={(e) => handleNumQuestionsChange(e.target.value)}
-                min="3"
-                max="30"
-                className="w-full"
-              />
-              <div className="flex justify-between text-xs text-gray-500 mt-1">
-                <span>3</span>
-                <span>30</span>
-              </div>
-            </div>
-
-            {/* 题型配置 */}
-            <div>
-              <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-white/80' : 'text-gray-700'}`}>
-                选择题占比：{choicePercent}%（{questionTypeDistribution.choice} 道选择题 + {questionTypeDistribution.fill} 道填空题）
-              </label>
-              <input
-                type="range"
-                value={choicePercent}
-                onChange={(e) => handleChoicePercentChange(e.target.value)}
-                min="0"
-                max="100"
-                step="10"
-                className="w-full"
-              />
-              <div className="flex justify-between text-xs text-gray-500 mt-1">
-                <span>0%</span>
-                <span>50%</span>
-                <span>100%</span>
-              </div>
-            </div>
+                <button type="button" onClick={() => setMode('custom')} className={mode === 'custom' ? palette.primary : palette.secondary}>
+                  智能组卷
+                </button>
+              </>
+            ) : (
+              <button type="button" onClick={handleReset} className={palette.secondary}>
+                返回测评首页
+              </button>
+            )}
           </div>
-        )}
 
-        {/* 状态提示 */}
-        {statusMessage && (
-          <div
-            className={`mb-6 p-4 rounded-2xl border ${
-              isDark
-                ? 'bg-blue-500/10 border-blue-500/40 text-blue-100'
-                : 'bg-blue-50 border-blue-200 text-blue-800'
-            }`}
-          >
-            <p className="text-sm">{statusMessage}</p>
-          </div>
-        )}
+          {statusMessage ? <div className={`mb-5 rounded-md border px-4 py-3 text-sm ${palette.info}`}>{statusMessage}</div> : null}
+          {error ? <div className={`mb-5 rounded-md border px-4 py-3 text-sm ${palette.error}`}>{error}</div> : null}
 
-        {/* 错误提示 */}
-        {error && (
-          <div className={`${palette.alert}`}>
-            <p className="text-sm">{error}</p>
-          </div>
-        )}
+          {mode === 'custom' && questions.length === 0 && !paperData ? (
+            <PaperGenerator onPaperGenerated={handlePaperGenerated} onCancel={() => setMode('regular')} />
+          ) : null}
 
-        {paperData && (paperData.blueprint || paperData.quality_report) && (
-          <div className={`${palette.questionCard} p-6 mb-6`}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {paperData.blueprint && (
-                <div>
-                  <h2 className="text-lg font-semibold mb-3">蓝图预览</h2>
-                  <div className={`space-y-2 text-sm ${palette.textMuted}`}>
-                    <p>模式：{paperData.blueprint.mode}</p>
-                    <p>来源策略：{paperData.blueprint.source_policy}</p>
-                    <p>审核级别：{paperData.blueprint.review_level}</p>
-                    <p>总题数：{paperData.blueprint.total_questions}</p>
-                    <p>总分：{paperData.blueprint.total_score}</p>
-                    <p>时长：{paperData.blueprint.time_limit} 分钟</p>
-                    <p>知识点：{(paperData.blueprint.knowledge_points || []).join('、') || '未指定'}</p>
+          {isRegularSetupView ? (
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_360px]">
+              <section className={`${palette.soft} p-5 sm:p-7`}>
+                <div className="max-w-2xl">
+                  <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${palette.muted}`}>常规测评</div>
+                  <h1 className={`mt-3 text-3xl font-bold sm:text-4xl ${palette.title}`}>开始测评</h1>
+                  <p className={`mt-4 text-sm leading-7 sm:text-base ${palette.text}`}>
+                    输入练习主题后生成试题，完成作答即可查看结果与解析。
+                  </p>
+                </div>
+
+                <div className="mt-6 space-y-5">
+                  <div>
+                    <label className={`mb-2 block text-sm font-medium ${palette.title}`}>测评主题</label>
+                    <input
+                      type="text"
+                      value={topic}
+                      onChange={(event) => setTopic(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          void handleGenerate();
+                        }
+                      }}
+                      placeholder="例如：高一函数基础、Python 面向对象、英语时态综合训练"
+                      className={palette.input}
+                    />
+                  </div>
+
+                  <div className={`${palette.mutedSoft} p-4 sm:p-5`}>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className={palette.title}>题目数量</span>
+                      <span className="font-semibold">{numQuestions} 题</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="5"
+                      max="20"
+                      value={numQuestions}
+                      onChange={(event) => setNumQuestions(parseInt(event.target.value, 10) || 8)}
+                      className="mt-3 w-full"
+                    />
+                  </div>
+
+                  <div className={`${palette.mutedSoft} p-4 sm:p-5`}>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className={palette.title}>选择题占比</span>
+                      <span className="font-semibold">{choicePercent}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="20"
+                      max="100"
+                      step="10"
+                      value={choicePercent}
+                      onChange={(event) => setChoicePercent(parseInt(event.target.value, 10) || 60)}
+                      className="mt-3 w-full"
+                    />
+                    <p className={`mt-3 text-xs ${palette.text}`}>
+                      当前结构：单选题 {regularDistribution.choice} 道，填空/主观题 {regularDistribution.fill} 道。
+                    </p>
+                  </div>
+
+                  <button type="button" onClick={handleGenerate} disabled={loading || !topic.trim()} className={palette.primary}>
+                    {loading ? '正在生成测评...' : '开始测评'}
+                  </button>
+                </div>
+              </section>
+
+              <aside className={`${palette.mutedSoft} p-5 sm:p-6`}>
+                <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${palette.muted}`}>完成后可查看</div>
+                <div className="mt-4 space-y-4">
+                  {[
+                    { title: '测评得分', desc: '包含正确率与用时' },
+                    { title: '错题解析', desc: '逐题查看答案与讲解' },
+                    { title: '学习建议', desc: '根据表现生成复习方向' },
+                  ].map((item, index) => (
+                    <div key={item.title} className={`${palette.soft} flex items-start gap-3 p-4`}>
+                      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white">{index + 1}</span>
+                      <div>
+                        <div className={`text-sm font-semibold ${palette.title}`}>{item.title}</div>
+                        <p className={`mt-1 text-xs leading-6 ${palette.text}`}>{item.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </aside>
+            </div>
+          ) : null}
+
+          {isRegularExamView ? (
+            <div className="space-y-5">
+              <section className={`${palette.soft} p-4 sm:p-5`}>
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                  <div>
+                    <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${palette.muted}`}>考试进行中</div>
+                    <h2 className={`mt-2 text-2xl font-bold ${palette.title}`}>{topic}</h2>
+                    <p className={`mt-2 text-sm ${palette.text}`}>已完成 {answeredCount}/{questions.length} 题，当前第 {currentQuestionIndex + 1} 题。</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[420px]">
+                    <div className={`${palette.mutedSoft} p-3`}>
+                      <div className={`text-xs ${palette.muted}`}>完成进度</div>
+                      <div className={`mt-1 text-lg font-semibold ${palette.title}`}>{Math.round((answeredCount / questions.length) * 100) || 0}%</div>
+                    </div>
+                    <div className={`${palette.mutedSoft} p-3`}>
+                      <div className={`text-xs ${palette.muted}`}>已用时间</div>
+                      <div className={`mt-1 text-lg font-semibold ${palette.title}`}>{formatDuration(elapsedSeconds)}</div>
+                    </div>
+                    <div className={`${palette.mutedSoft} p-3`}>
+                      <div className={`text-xs ${palette.muted}`}>未作答</div>
+                      <div className={`mt-1 text-lg font-semibold ${palette.title}`}>{unansweredCount} 题</div>
+                    </div>
                   </div>
                 </div>
-              )}
 
-              {paperData.quality_report && (
-                <div>
-                  <h2 className="text-lg font-semibold mb-3">审核结果</h2>
-                  <div className={`space-y-2 text-sm ${palette.textMuted}`}>
-                    <p>质量状态：{paperData.quality_report.quality_status}</p>
-                    <p>质量分：{paperData.quality_report.score}</p>
-                    <p>重复率：{paperData.quality_report.duplicate_rate}</p>
-                    <p>覆盖知识点：{(paperData.quality_report.coverage_knowledge_points || []).join('、') || '暂无'}</p>
-                    {paperData.regenerated_question_ids?.length > 0 && (
-                      <p>已重生题目：{paperData.regenerated_question_ids.join('、')}</p>
-                    )}
+                <div className={`mt-4 h-2 overflow-hidden rounded-full ${palette.progressTrack}`}>
+                  <div className={`h-full rounded-full ${palette.progressBar}`} style={{ width: `${(answeredCount / questions.length) * 100 || 0}%` }} />
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button type="button" onClick={() => setShowQuestionOverview((prev) => !prev)} className={`${palette.secondary} lg:hidden`}>
+                    {showQuestionOverview ? '收起题号面板' : '查看题号面板'}
+                  </button>
+                  <button type="button" onClick={handleSubmit} disabled={submitting} className={palette.primary}>
+                    {submitting ? '正在交卷...' : '提交并生成复盘'}
+                  </button>
+                </div>
+              </section>
+
+              {showQuestionOverview ? (
+                <section className={`${palette.mutedSoft} p-4 lg:hidden`}>
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className={`text-sm font-semibold ${palette.title}`}>题号导航</div>
+                    <div className={`text-xs ${palette.text}`}>已答题会高亮</div>
                   </div>
-                  {paperData.quality_report.warnings?.length > 0 && (
-                    <div className="mt-3 space-y-2">
-                      {paperData.quality_report.warnings.slice(0, 6).map((warning, index) => (
-                        <div
-                          key={`${warning.code || index}-${index}`}
-                          className={`text-xs rounded-lg p-2 ${
-                            isDark ? 'bg-amber-900/20 text-amber-200 border border-amber-800' : 'bg-amber-50 text-amber-800 border border-amber-200'
-                          }`}
+                  <div className="grid grid-cols-5 gap-2">
+                    {questions.map((question, index) => {
+                      const answered = isQuestionAnswered(question, answers[index]);
+                      const activeClass = index === currentQuestionIndex ? palette.navCurrent : answered ? palette.navDone : palette.navIdle;
+                      return (
+                        <button
+                          key={`mobile-nav-${index}`}
+                          type="button"
+                          onClick={() => {
+                            setCurrentQuestionIndex(index);
+                            setShowQuestionOverview(false);
+                          }}
+                          className={`rounded-sm border px-3 py-3 text-sm font-semibold transition ${activeClass}`}
                         >
+                          {index + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+                <section className={`${palette.soft} p-5 sm:p-7`}>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className={`rounded-sm border px-3 py-1 text-xs font-semibold ${palette.info}`}>{QUESTION_TYPE_LABELS[currentQuestion?.type] || '题目'}</span>
+                    <span className={`text-sm ${palette.text}`}>第 {currentQuestionIndex + 1} / {questions.length} 题</span>
+                  </div>
+
+                  <div className={`mt-5 text-xl font-semibold leading-9 sm:text-2xl ${palette.title}`}>
+                    {currentQuestion?.question || currentQuestion?.stem || '题目加载中'}
+                  </div>
+
+                  <div className="mt-6">{renderQuestionInput(currentQuestion, currentQuestionIndex)}</div>
+
+                  <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentQuestionIndex((prev) => Math.max(prev - 1, 0))}
+                      disabled={currentQuestionIndex === 0}
+                      className={palette.secondary}
+                    >
+                      上一题
+                    </button>
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                      <button type="button" onClick={handleSubmit} disabled={submitting} className={palette.secondary}>
+                        {submitting ? '交卷中...' : '现在交卷'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (currentQuestionIndex === questions.length - 1) {
+                            void handleSubmit();
+                            return;
+                          }
+                          setCurrentQuestionIndex((prev) => Math.min(prev + 1, questions.length - 1));
+                        }}
+                        className={palette.primary}
+                      >
+                        {currentQuestionIndex === questions.length - 1 ? '完成并交卷' : '下一题'}
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <aside className={`${palette.mutedSoft} hidden h-fit p-4 lg:block lg:sticky lg:top-6`}>
+                  <div className={`text-sm font-semibold ${palette.title}`}>题号导航</div>
+                  <p className={`mt-1 text-xs leading-6 ${palette.text}`}>点击题号可直接切换到对应题目。</p>
+                  <div className="mt-4 grid grid-cols-4 gap-2">
+                    {questions.map((question, index) => {
+                      const answered = isQuestionAnswered(question, answers[index]);
+                      const activeClass = index === currentQuestionIndex ? palette.navCurrent : answered ? palette.navDone : palette.navIdle;
+                      return (
+                        <button
+                          key={`desktop-nav-${index}`}
+                          type="button"
+                          onClick={() => setCurrentQuestionIndex(index)}
+                          className={`rounded-sm border px-3 py-3 text-sm font-semibold transition ${activeClass}`}
+                        >
+                          {index + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </aside>
+              </div>
+            </div>
+          ) : null}
+
+          {paperData ? (
+            <div className="space-y-5">
+              <section className={`${palette.soft} p-5 sm:p-6`}>
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${palette.muted}`}>智能组卷工作台</div>
+                    <h2 className={`mt-2 text-2xl font-bold ${palette.title}`}>{paperData.title || '试卷预览'}</h2>
+                    <p className={`mt-2 text-sm ${palette.text}`}>{paperData.total_questions || questions.length} 道题 · 总分 {paperData.total_score || '--'} 分</p>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <button type="button" onClick={() => handleExportPaper('pdf')} className={palette.primary}>
+                      导出 PDF
+                    </button>
+                    <button type="button" onClick={() => handleExportPaper('word')} className={palette.secondary}>
+                      导出 Word
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              {paperData.blueprint ? (
+                <section className={`${palette.mutedSoft} p-5 sm:p-6`}>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div>
+                      <div className={`text-xs ${palette.muted}`}>组卷模式</div>
+                      <div className={`mt-1 text-xl font-semibold ${palette.title}`}>{paperData.blueprint.mode || '--'}</div>
+                    </div>
+                    <div>
+                      <div className={`text-xs ${palette.muted}`}>来源策略</div>
+                      <div className={`mt-1 text-xl font-semibold ${palette.title}`}>{paperData.blueprint.source_policy || '--'}</div>
+                    </div>
+                    <div>
+                      <div className={`text-xs ${palette.muted}`}>考试时长</div>
+                      <div className={`mt-1 text-xl font-semibold ${palette.title}`}>{paperData.blueprint.time_limit || '--'} 分钟</div>
+                    </div>
+                  </div>
+                  {paperData.blueprint.knowledge_points?.length ? (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {paperData.blueprint.knowledge_points.map((item, index) => (
+                        <span key={`${item}-${index}`} className={`rounded-sm border px-3 py-1.5 text-sm ${palette.info}`}>
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+
+              {paperData.quality_report ? (
+                <section className={`${palette.mutedSoft} p-5 sm:p-6`}>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div>
+                      <div className={`text-xs ${palette.muted}`}>质量状态</div>
+                      <div className={`mt-1 text-xl font-semibold ${palette.title}`}>{paperData.quality_report.quality_status || '待审核'}</div>
+                    </div>
+                    <div>
+                      <div className={`text-xs ${palette.muted}`}>质量分</div>
+                      <div className={`mt-1 text-xl font-semibold ${palette.title}`}>{paperData.quality_report.score ?? '--'}</div>
+                    </div>
+                    <div>
+                      <div className={`text-xs ${palette.muted}`}>重复率</div>
+                      <div className={`mt-1 text-xl font-semibold ${palette.title}`}>{paperData.quality_report.duplicate_rate ?? '--'}</div>
+                    </div>
+                  </div>
+
+                  {paperData.quality_report.warnings?.length ? (
+                    <div className="mt-4 space-y-2">
+                      {paperData.quality_report.warnings.slice(0, 6).map((warning, index) => (
+                        <div key={`warning-${index}`} className={`rounded-md border px-4 py-3 text-sm ${palette.warning}`}>
                           {warning.question_id ? `[${warning.question_id}] ` : ''}
                           {warning.message}
                         </div>
                       ))}
                     </div>
-                  )}
-                  {paperData.paper_id && paperData.quality_report?.warnings?.some((warning) => warning.question_id) && (
-                    <button
-                      onClick={handleRegenerateFailedQuestions}
-                      disabled={regenerating}
-                      className={`mt-4 px-4 py-2 rounded-lg text-sm transition ${
-                        regenerating
-                          ? 'bg-gray-400 text-white cursor-not-allowed'
-                          : isDark
-                          ? 'bg-amber-600 hover:bg-amber-500 text-white'
-                          : 'bg-amber-500 hover:bg-amber-600 text-white'
-                      }`}
-                    >
+                  ) : null}
+
+                  {paperData.quality_report?.warnings?.some((warning) => warning.question_id) ? (
+                    <button type="button" onClick={handleRegenerateFailedQuestions} disabled={regenerating} className={`mt-4 ${palette.primary}`}>
                       {regenerating ? '重生中...' : '重生不合格题目'}
                     </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+                  ) : null}
+                </section>
+              ) : null}
 
-        {/* 题目列表 */}
-        {questions.length > 0 && (
-          <div className="mb-6">
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <h2 className="text-xl font-semibold">
-                  {paperData ? paperData.title : `测验主题：${topic}`}
-                </h2>
-                {paperData ? (
-                  <p className={`text-sm ${palette.textMuted} mt-1`}>
-                    {paperData.total_questions}道题 · 总分{paperData.total_score}分
-                  </p>
-                ) : (
-                  <p className={`text-sm ${palette.textMuted} mt-1`}>
-                    答题进度：{answeredCount}/{questions.length}
-                  </p>
-                )}
-              </div>
-              <div className="flex gap-2">
-                {paperData && (
-                  <>
-                    <button
-                      onClick={() => handleExportPaper('pdf')}
-                      className={`px-4 py-2 rounded-lg text-sm ${
-                        isDark
-                          ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                          : 'bg-blue-500 hover:bg-blue-600 text-white'
-                      }`}
-                    >
-                      导出PDF
-                    </button>
-                    <button
-                      onClick={() => handleExportPaper('word')}
-                      className={`px-4 py-2 rounded-lg text-sm ${
-                        isDark
-                          ? 'bg-green-600 hover:bg-green-700 text-white'
-                          : 'bg-green-500 hover:bg-green-600 text-white'
-                      }`}
-                    >
-                      导出Word
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={handleReset}
-                  className={palette.secondaryButton}
-                >
-                  {paperData ? '返回' : '重新生成'}
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-6">
-              {questions.map((q, i) => (
-                <div
-                  key={i}
-                  className={`${palette.questionCard} p-6 shadow-md`}
-                >
-                  <p className="font-semibold text-lg mb-4">
-                    {i + 1}. {q.question || q.stem}
-                    <span className={`ml-2 text-sm ${palette.textMuted}`}>
-                      ({({
-                        choice: '选择题',
-                        multiple_choice: '多选题',
-                        fill: '填空题',
-                        judge: '判断题',
-                        essay: '简答题',
-                        calculation: '计算题',
-                        comprehensive: '综合题'
-                      })[q.type] || '其他题型'})
-                    </span>
-                    {q.points && (
-                      <span className={`ml-2 text-sm ${palette.textMuted}`}>
-                        ({q.points}分)
-                      </span>
-                    )}
-                  </p>
-
-                  {/* 智能组卷模式：只显示预览，不显示答题选项 */}
-                  {paperData && mode === 'custom' ? (
-                    <div className={`space-y-2 ${isDark ? 'text-white/80' : 'text-gray-600'}`}>
-                      {q.type === 'choice' && q.options ? (
-                        <div className="space-y-2">
-                          {q.options.map((opt, optIdx) => (
-                            <div
-                              key={optIdx}
-                              className={`p-3 rounded-lg ${isDark ? 'bg-[#0f172a] border border-white/10' : 'bg-gray-50 border border-gray-200'}`}
-                            >
-                              <span className={isDark ? 'text-white' : 'text-gray-700'}>
-                                {typeof opt === 'string' ? opt : opt}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : q.type === 'fill' ? (
-                        <div className={`p-3 rounded-lg ${isDark ? 'bg-[#0f172a] border border-white/10' : 'bg-gray-50 border border-gray-200'}`}>
-                          <span className={isDark ? 'text-white/60' : 'text-gray-500'}>填空题</span>
-                        </div>
-                      ) : (
-                        <div className={`p-3 rounded-lg ${isDark ? 'bg-[#0f172a] border border-white/10' : 'bg-gray-50 border border-gray-200'}`}>
-                          <span className={isDark ? 'text-white/60' : 'text-gray-500'}>其他题型</span>
-                        </div>
-                      )}
+              {questions.length ? (
+                <section className={`${palette.soft} p-5 sm:p-6`}>
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <div className={`text-lg font-semibold ${palette.title}`}>试卷题目预览</div>
+                      <p className={`mt-1 text-sm ${palette.text}`}>保留题目浏览，方便你检查结构、题型和导出前的整体观感。</p>
                     </div>
-                  ) : (
-                    /* 常规测评模式：显示答题选项 */
-                    <>
-                      {q.type === 'choice' ? (
-                        <div className="space-y-2">
-                          {q.options && q.options.map((opt, optIdx) => (
-                            <label
-                              key={optIdx}
-                              className={`${palette.choice} ${
-                                answers[i] === opt[0] ? palette.choiceActive : palette.choiceInactive
-                              }`}
-                            >
-                              <input
-                                type="radio"
-                                name={`q${i}`}
-                                value={opt[0]}
-                                checked={answers[i] === opt[0]}
-                                onChange={() => handleAnswerChange(i, opt[0])}
-                                className="mr-3"
-                              />
-                              <span className={isDark ? 'text-white' : 'text-gray-700'}>{opt}</span>
-                            </label>
-                          ))}
-                        </div>
-                      ) : (
-                        <input
-                          type="text"
-                          value={answers[i] || ''}
-                          onChange={(e) => handleAnswerChange(i, e.target.value)}
-                          placeholder="请输入答案"
-                          className={palette.inputSmall}
-                        />
-                      )}
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
+                  </div>
 
-            {/* 提交按钮 - 只在常规测评模式显示 */}
-            {!paperData || mode === 'regular' ? (
-              <div className="mt-8 flex justify-end">
-                <button
-                  onClick={handleSubmit}
-                  disabled={submitting || answeredCount < questions.length}
-                  className={`px-8 py-3 rounded-xl shadow-lg font-medium transition ${
-                    submitting || answeredCount < questions.length
-                      ? 'bg-gray-400 cursor-not-allowed text-white'
-                      : 'bg-green-600 hover:bg-green-700 text-white'
-                  }`}
-                >
-                  {submitting ? '提交中...' : `提交测验 (${answeredCount}/${questions.length})`}
-                </button>
-              </div>
-            ) : null}
-          </div>
-        )}
-      </div>
+                  <div className="space-y-3">
+                    {questions.map((question, index) => (
+                      <div key={`paper-question-${index}`} className={`${palette.mutedSoft} p-4`}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`rounded-sm border px-3 py-1 text-xs font-semibold ${palette.info}`}>
+                            {QUESTION_TYPE_LABELS[question.type] || '题目'}
+                          </span>
+                          {question.points ? <span className={`text-xs ${palette.text}`}>{question.points} 分</span> : null}
+                        </div>
+                        <div className={`mt-3 text-sm font-semibold leading-7 ${palette.title}`}>
+                          {index + 1}. {question.question || question.stem || '题目'}
+                        </div>
+                        {question.options?.length ? (
+                          <div className="mt-3 grid gap-2">
+                            {question.options.map((option, optionIndex) => (
+                              <div key={`paper-option-${index}-${optionIndex}`} className={`rounded-sm border px-4 py-3 text-sm ${palette.info}`}>
+                                {getOptionLabel(option, optionIndex)}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
 }
 
 export default Quiz;
-
