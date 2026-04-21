@@ -26,6 +26,90 @@ const DEFAULT_FORM = {
   extra_headers: {},
 };
 
+const ADMIN_PROVIDER_ORDER = ['siliconflow', 'zhipu', 'moonshot', 'openrouter'];
+
+const FALLBACK_PROVIDER_TEMPLATES = [
+  {
+    key: 'siliconflow',
+    display_name: '硅基流动',
+    default_base_url: 'https://api.siliconflow.cn/v1',
+    default_model: 'Qwen/Qwen2.5-7B-Instruct',
+    default_max_tokens: DEFAULT_AI_MAX_TOKENS,
+    available_models: [
+      'Qwen/Qwen2.5-7B-Instruct',
+      'Qwen/Qwen2.5-72B-Instruct',
+      'deepseek-ai/DeepSeek-V3',
+      'deepseek-ai/DeepSeek-R1',
+    ],
+    requires_extra_headers: false,
+    extra_header_keys: [],
+    capabilities: {
+      streaming: true,
+      tool_calling: true,
+      reasoning: true,
+      long_output: true,
+    },
+  },
+  {
+    key: 'zhipu',
+    display_name: '智谱AI',
+    default_base_url: 'https://open.bigmodel.cn/api/paas/v4',
+    default_model: 'glm-4-flash',
+    default_max_tokens: DEFAULT_AI_MAX_TOKENS,
+    available_models: ['glm-4.7-flash', 'glm-4-flash', 'glm-4-air', 'glm-4', 'glm-z1-flash'],
+    requires_extra_headers: false,
+    extra_header_keys: [],
+    capabilities: {
+      streaming: true,
+      tool_calling: true,
+      reasoning: true,
+      long_output: true,
+    },
+  },
+  {
+    key: 'moonshot',
+    display_name: '月之暗面',
+    default_base_url: 'https://api.moonshot.cn/v1',
+    default_model: 'moonshot-v1-32k',
+    default_max_tokens: DEFAULT_AI_MAX_TOKENS,
+    available_models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
+    requires_extra_headers: false,
+    extra_header_keys: [],
+    capabilities: {
+      streaming: true,
+      tool_calling: false,
+      reasoning: true,
+      long_output: true,
+    },
+  },
+  {
+    key: 'openrouter',
+    display_name: 'OpenRouter',
+    default_base_url: 'https://openrouter.ai/api/v1',
+    default_model: '',
+    default_max_tokens: DEFAULT_AI_MAX_TOKENS,
+    available_models: [],
+    requires_extra_headers: true,
+    extra_header_keys: ['HTTP-Referer', 'X-Title'],
+    capabilities: {
+      streaming: true,
+      tool_calling: true,
+      reasoning: true,
+      long_output: true,
+    },
+  },
+];
+
+const normalizeProviderTemplates = (templates = []) => {
+  const templateMap = new Map();
+  [...FALLBACK_PROVIDER_TEMPLATES, ...(Array.isArray(templates) ? templates : [])].forEach((template) => {
+    if (template?.key && ADMIN_PROVIDER_ORDER.includes(template.key)) {
+      templateMap.set(template.key, template);
+    }
+  });
+  return ADMIN_PROVIDER_ORDER.map(key => templateMap.get(key)).filter(Boolean);
+};
+
 // ─── 滑块组件 ───────────────────────────────────────────────────────────────────
 const Slider = ({ label, value, min, max, step, onChange, isDark }) => (
   <div className="flex items-center gap-3">
@@ -105,8 +189,9 @@ const ModelManagement = () => {
   const fetchTemplates = async () => {
     try {
       const res = await api.get('/api/v1/admin/models/templates');
-      setTemplates(res.data);
+      setTemplates(normalizeProviderTemplates(res.data));
     } catch (err) {
+      setTemplates(FALLBACK_PROVIDER_TEMPLATES);
       logger.error('获取提供商模板失败', err);
     }
   };

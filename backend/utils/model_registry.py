@@ -293,7 +293,7 @@ PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
         reasoning=True,
     ),
     "zhipu": _provider_template(
-        display_name="Zhipu AI (GLM)",
+        display_name="智谱AI",
         default_base_url="https://open.bigmodel.cn/api/paas/v4",
         default_model="glm-4-flash",
         available_models=["glm-4.7-flash", "glm-4-flash", "glm-4-air", "glm-4", "glm-4-long", "glm-z1-flash", "glm-z1-air"],
@@ -322,7 +322,7 @@ PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
         reasoning=True,
     ),
     "moonshot": _provider_template(
-        display_name="Kimi (Moonshot)",
+        display_name="月之暗面",
         default_base_url="https://api.moonshot.cn/v1",
         default_model="moonshot-v1-32k",
         available_models=["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
@@ -330,7 +330,7 @@ PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
         long_output=True,
     ),
     "siliconflow": _provider_template(
-        display_name="SiliconFlow (硅基流动)",
+        display_name="硅基流动",
         default_base_url="https://api.siliconflow.cn/v1",
         default_model="Qwen/Qwen2.5-7B-Instruct",
         available_models=[

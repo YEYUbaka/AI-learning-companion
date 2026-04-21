@@ -36,7 +36,7 @@ def test_build_provider_from_config_uses_default_max_tokens(monkeypatch):
     assert isinstance(provider, OpenAICompatProvider)
     assert provider.base_url == "https://api.deepseek.com/v1"
     assert provider.model_name == "deepseek-chat"
-    assert provider.max_tokens == settings.AI_DEFAULT_MAX_TOKENS
+    assert provider.max_tokens == PROVIDER_TEMPLATES["deepseek"]["default_max_tokens"]
 
 
 def test_build_provider_from_config_preserves_explicit_max_tokens(monkeypatch):
@@ -64,11 +64,22 @@ def test_provider_templates_expose_default_token_budget_and_capabilities():
     deepseek_template = PROVIDER_TEMPLATES["deepseek"]
     openrouter_template = PROVIDER_TEMPLATES["openrouter"]
 
-    assert deepseek_template["default_max_tokens"] == settings.AI_DEFAULT_MAX_TOKENS
+    assert deepseek_template["default_max_tokens"] == 8192
     assert deepseek_template["capabilities"]["streaming"] is True
     assert deepseek_template["capabilities"]["tool_calling"] is True
     assert openrouter_template["capabilities"]["streaming"] is True
     assert openrouter_template["capabilities"]["long_output"] is True
+
+
+def test_preferred_admin_provider_templates_match_expected_base_urls():
+    assert PROVIDER_TEMPLATES["siliconflow"]["display_name"] == "硅基流动"
+    assert PROVIDER_TEMPLATES["siliconflow"]["default_base_url"] == "https://api.siliconflow.cn/v1"
+    assert PROVIDER_TEMPLATES["zhipu"]["display_name"] == "智谱AI"
+    assert PROVIDER_TEMPLATES["zhipu"]["default_base_url"] == "https://open.bigmodel.cn/api/paas/v4"
+    assert PROVIDER_TEMPLATES["moonshot"]["display_name"] == "月之暗面"
+    assert PROVIDER_TEMPLATES["moonshot"]["default_base_url"] == "https://api.moonshot.cn/v1"
+    assert PROVIDER_TEMPLATES["openrouter"]["display_name"] == "OpenRouter"
+    assert PROVIDER_TEMPLATES["openrouter"]["default_base_url"] == "https://openrouter.ai/api/v1"
 
 
 def test_registry_call_with_fallback_merges_registered_default_params():
