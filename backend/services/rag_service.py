@@ -56,6 +56,18 @@ class RAGService:
         "数据结构",
         "面试",
     )
+    K12_SUBJECT_ALIASES = {
+        "数学": ("数学", "函数", "方程", "几何", "代数", "三角函数", "概率", "统计"),
+        "语文": ("语文", "作文", "阅读理解", "文言文"),
+        "英语": ("英语", "英文", "完形填空", "阅读理解", "语法", "听力"),
+        "物理": ("物理", "力学", "电学", "光学", "热学"),
+        "化学": ("化学", "化学式", "离子", "化学方程式", "酸碱盐"),
+        "生物": ("生物", "细胞", "遗传", "生态"),
+        "历史": ("历史", "朝代", "近代史"),
+        "地理": ("地理", "气候", "经纬网", "地图"),
+        "政治": ("政治", "思想品德", "思政"),
+        "道德与法治": ("道德与法治", "道法", "法治"),
+    }
     _client = None
     _collection = None
     _embedding_fn = None
@@ -70,10 +82,64 @@ class RAGService:
         return matched_terms
 
     @classmethod
+    def infer_grade_level_from_query(cls, query: str) -> Optional[str]:
+        query_text = (query or "").strip()
+        if not query_text:
+            return None
+
+        if any(term in query_text for term in ("小学", "小升初", "一至六年级", "1-6年级")):
+            return "小学"
+        if any(term in query_text for term in ("初中", "中考", "七年级", "八年级", "九年级", "初一", "初二", "初三")):
+            return "初中"
+        if any(term in query_text for term in ("高中", "高考", "高一", "高二", "高三")):
+            return "高中"
+        return None
+
+    @classmethod
+    def infer_subject_from_query(cls, query: str) -> Optional[str]:
+        query_text = (query or "").strip()
+        if not query_text:
+            return None
+
+        for subject, aliases in cls.K12_SUBJECT_ALIASES.items():
+            if any(alias in query_text for alias in aliases):
+                return subject
+        return None
+
+    @classmethod
     def _is_k12_metadata(cls, metadata: Dict[str, Any]) -> bool:
         grade_level = (metadata.get("grade_level") or "").strip()
         subject = (metadata.get("subject") or "").strip()
         return grade_level in cls.K12_GRADE_LEVELS or subject in cls.K12_SUBJECTS
+
+    @classmethod
+    def _matches_query_subject(
+        cls,
+        query: str,
+        metadata: Dict[str, Any],
+        doc_text: str,
+        expected_subject: Optional[str] = None,
+    ) -> bool:
+        subject = expected_subject or cls.infer_subject_from_query(query)
+        if not subject:
+            return True
+
+        metadata_subject = (metadata.get("subject") or "").strip()
+        if metadata_subject:
+            return metadata_subject == subject
+
+        haystack = " ".join(
+            [
+                str(metadata.get("title") or ""),
+                str(metadata.get("topic") or ""),
+                str(metadata.get("section_title") or ""),
+                doc_text[:400],
+            ]
+        )
+        if any(alias in haystack for alias in cls.K12_SUBJECT_ALIASES.get(subject, ())):
+            return True
+
+        return not cls._is_k12_metadata(metadata)
 
     @classmethod
     def _matches_query_domain(cls, query: str, metadata: Dict[str, Any], doc_text: str) -> bool:
@@ -319,13 +385,15 @@ class RAGService:
             return []
 
         try:
+            effective_grade_level = grade_level or cls.infer_grade_level_from_query(query)
+            effective_subject = subject or cls.infer_subject_from_query(query)
             # 构造过滤条件
             where = None
             filters = []
-            if grade_level:
-                filters.append({"grade_level": {"$eq": grade_level}})
-            if subject:
-                filters.append({"subject": {"$eq": subject}})
+            if effective_grade_level:
+                filters.append({"grade_level": {"$eq": effective_grade_level}})
+            if effective_subject:
+                filters.append({"subject": {"$eq": effective_subject}})
 
             if len(filters) == 1:
                 where = filters[0]
@@ -354,6 +422,13 @@ class RAGService:
                 # Vector recall may bring back K12 content for technical queries,
                 # so run one more lightweight domain filter before returning hits.
                 if not cls._matches_query_domain(query, metadata, doc_text):
+                    continue
+                if not cls._matches_query_subject(
+                    query,
+                    metadata,
+                    doc_text,
+                    expected_subject=effective_subject,
+                ):
                     continue
 
                 image_paths = []

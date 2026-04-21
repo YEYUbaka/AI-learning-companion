@@ -415,6 +415,12 @@ class SearchKnowledgeTool(BaseTool):
         "\u5e76\u53d1",
         "\u7f51\u7edc",
         "\u6570\u636e\u5e93",
+        "\u77e5\u8bc6\u70b9",
+        "\u6982\u5ff5",
+        "\u5b9a\u4e49",
+        "\u516c\u5f0f",
+        "\u539f\u7406",
+        "\u8003\u70b9",
         "\u4f8b\u9898",
         "\u771f\u9898",
         "\u9898\u578b",
@@ -565,16 +571,19 @@ class SearchKnowledgeTool(BaseTool):
     async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
         params = self.validate_params(kwargs)
         raw_query = params["query"]
-        query_candidates = self.build_query_candidates(
-            raw_query,
-            grade_level=params.get("grade_level"),
-            subject=params.get("subject"),
-        )
-        if not query_candidates and raw_query:
-            query_candidates = [raw_query]
 
         try:
             from services.rag_service import RAGService
+
+            effective_grade_level = params.get("grade_level") or RAGService.infer_grade_level_from_query(raw_query)
+            effective_subject = params.get("subject") or RAGService.infer_subject_from_query(raw_query)
+            query_candidates = self.build_query_candidates(
+                raw_query,
+                grade_level=effective_grade_level,
+                subject=effective_subject,
+            )
+            if not query_candidates and raw_query:
+                query_candidates = [raw_query]
 
             results = []
             query_used = query_candidates[0] if query_candidates else raw_query
@@ -583,8 +592,8 @@ class SearchKnowledgeTool(BaseTool):
                 results = RAGService.search(
                     query=candidate,
                     n_results=params.get("limit", 5),
-                    grade_level=params.get("grade_level"),
-                    subject=params.get("subject"),
+                    grade_level=effective_grade_level,
+                    subject=effective_subject,
                 )
                 if results:
                     break
@@ -597,6 +606,8 @@ class SearchKnowledgeTool(BaseTool):
                         "query": raw_query,
                         "query_used": query_used,
                         "query_candidates": query_candidates,
+                        "grade_level_used": effective_grade_level,
+                        "subject_used": effective_subject,
                         "results": [],
                         "text": "\u77e5\u8bc6\u5e93\u6682\u65f6\u65e0\u5339\u914d\u8bc1\u636e\u3002",
                     },
@@ -641,6 +652,8 @@ class SearchKnowledgeTool(BaseTool):
                     "query": raw_query,
                     "query_used": query_used,
                     "query_candidates": query_candidates,
+                    "grade_level_used": effective_grade_level,
+                    "subject_used": effective_subject,
                     "results": serialized,
                     "count": len(serialized),
                     "text": "\n\n".join(item["text_preview"] for item in serialized),
@@ -656,7 +669,7 @@ class SearchKnowledgeTool(BaseTool):
                 payload={
                     "query": raw_query,
                     "query_used": raw_query,
-                    "query_candidates": query_candidates,
+                    "query_candidates": [raw_query] if raw_query else [],
                     "results": [],
                     "text": "RAG \u672a\u542f\u7528\uff0c\u5f53\u524d\u65e0\u6cd5\u63d0\u4f9b\u77e5\u8bc6\u5e93\u8bc1\u636e\u3002",
                 },
