@@ -148,6 +148,7 @@ temp-*.txt
 AGENTS.md
 _server_apiClient.js
 agent-stream-test.png
+.claude/settings.local.json
 
 # 前端构建压缩包
 frontend/dist.tar.gz

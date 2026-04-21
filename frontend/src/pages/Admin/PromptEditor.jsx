@@ -473,14 +473,14 @@ const PromptEditor = () => {
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[340px_280px_minmax(0,1fr)]">
-          <div className={`rounded-md ${palette.card}`}>
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[340px_280px_minmax(0,1fr)] xl:items-start">
+          <div className={`flex flex-col rounded-md ${palette.card}`}>
             <div className={`border-b px-4 py-4 ${palette.divider}`}>
               <h3 className="font-semibold">功能清单</h3>
               <p className={`mt-1 text-sm ${palette.pageNote}`}>按系统归类查看当前已管理的提示词</p>
             </div>
 
-            <div className="max-h-[42rem] space-y-5 overflow-y-auto p-4">
+            <div className="space-y-5 p-4">
               {loading ? (
                 <div className={`py-8 text-center ${palette.empty}`}>加载中...</div>
               ) : error ? (

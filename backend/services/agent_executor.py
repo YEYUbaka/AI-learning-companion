@@ -28,6 +28,60 @@ EDUCATION_EVIDENCE_KEYWORDS = [
     "考点",
 ]
 
+CURRENT_EVENTS_KEYWORDS = [
+    "最新",
+    "最近",
+    "近期",
+    "今天",
+    "新闻",
+    "资讯",
+    "动态",
+    "热点",
+    "趋势",
+    "进展",
+    "快讯",
+    "大事件",
+    "重大事件",
+    "发生了什么",
+]
+
+CURRENT_EVENTS_KEYWORDS_EN = [
+    "latest",
+    "recent",
+    "today",
+    "news",
+    "update",
+    "updates",
+    "trend",
+    "trends",
+    "headline",
+    "headlines",
+]
+
+SEARCH_INTENT_KEYWORDS = [
+    "搜索",
+    "查找",
+    "搜一下",
+    "搜一搜",
+    "查一下",
+    "帮我找",
+    "看看",
+]
+
+SEARCH_INTENT_KEYWORDS_EN = [
+    "search",
+    "find",
+    "look up",
+]
+
+META_EVIDENCE_MARKERS = [
+    "本地知识库未命中",
+    "知识库未命中",
+    "知识库暂无匹配",
+    "RAG 未启用",
+    "网络搜索暂不可用",
+]
+
 
 class AgentPlanner:
     """结构化规划器"""
@@ -35,6 +89,40 @@ class AgentPlanner:
     def __init__(self, tool_registry: ToolRegistry):
         self.tool_registry = tool_registry
 
+    @staticmethod
+    def _contains_any_keyword(
+        goal_text: str,
+        lower_goal: str,
+        chinese_keywords: List[str],
+        english_keywords: List[str] = None,
+    ) -> bool:
+        if any(keyword in goal_text for keyword in chinese_keywords):
+            return True
+        if english_keywords and any(keyword in lower_goal for keyword in english_keywords):
+            return True
+        return False
+
+    @classmethod
+    def _is_current_events_query(cls, goal_text: str, lower_goal: str) -> bool:
+        return cls._contains_any_keyword(
+            goal_text,
+            lower_goal,
+            CURRENT_EVENTS_KEYWORDS,
+            CURRENT_EVENTS_KEYWORDS_EN,
+        )
+
+    @classmethod
+    def _is_search_intent(cls, goal_text: str, lower_goal: str) -> bool:
+        return cls._contains_any_keyword(
+            goal_text,
+            lower_goal,
+            SEARCH_INTENT_KEYWORDS,
+            SEARCH_INTENT_KEYWORDS_EN,
+        ) or cls._is_current_events_query(goal_text, lower_goal)
+
+    # AI-assisted: ChatGPT-4o 2026-01 — ReAct模式Thought-Action-Observation循环框架
+    # Prompt: "请为教育AI平台设计一个ReAct模式的Agent执行引擎..."
+    # 修改: 关键词检测数组、SSE推送格式、多工具意图路由逻辑由开发者大幅重写
     def plan(self, goal: str) -> Dict[str, Any]:
         goal_text = (goal or "").strip()
         lower_goal = goal_text.lower()
@@ -83,6 +171,16 @@ class AgentPlanner:
                 )
             rationale = "检测到知识图谱/导图意图，优先生成结构图，再按需导出。"
             confidence = 0.9
+        elif self._is_current_events_query(goal_text, lower_goal):
+            tool_steps = [
+                {
+                    "tool_name": "web_search",
+                    "tool_input": {"query": goal_text, "max_results": 8},
+                    "reason": "当前问题涉及近期/最新动态，优先联网搜索。",
+                }
+            ]
+            rationale = "检测到近期/最新资讯类诉求，优先联网搜索，再由 AI 整理为正式回答。"
+            confidence = 0.88
         elif any(keyword in goal_text for keyword in EDUCATION_EVIDENCE_KEYWORDS):
             tool_steps.append(
                 {
@@ -111,7 +209,7 @@ class AgentPlanner:
             ]
             rationale = "检测到学习计划意图，直接生成学习计划。"
             confidence = 0.82
-        elif any(keyword in goal_text for keyword in ["搜索", "查找", "搜一下", "最新"]):
+        elif self._is_search_intent(goal_text, lower_goal):
             tool_steps = [
                 {
                     "tool_name": "web_search",
@@ -231,6 +329,7 @@ class AgentExecutor:
         self.planner = AgentPlanner(self.tool_registry)
         self.reviewer = AgentReviewer()
         self.agent_provider = FeatureModelConfigService.get_provider_for_feature(db, "agent")
+        self.final_answer_fallback_used = False
 
     def _record_step(self, step_number: int, step_type: str, content: Any, extra_data: Dict[str, Any]) -> None:
         content_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
@@ -243,6 +342,21 @@ class AgentExecutor:
             extra_data=extra_data,
         )
 
+    @staticmethod
+    def _dedupe_lines(lines: List[str]) -> List[str]:
+        unique_lines: List[str] = []
+        seen = set()
+        for line in lines:
+            normalized = re.sub(r"\s+", " ", (line or "").strip())
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_lines.append(normalized)
+        return unique_lines
+
     def _resolve_dynamic_input(self, tool_input: Dict[str, Any], previous_output: Dict[str, Any]) -> Dict[str, Any]:
         resolved = {}
         for key, value in tool_input.items():
@@ -251,6 +365,39 @@ class AgentExecutor:
             else:
                 resolved[key] = value
         return resolved
+
+    @staticmethod
+    def _goal_prefers_live_search(goal: str) -> bool:
+        goal_text = (goal or "").strip()
+        return AgentPlanner._is_current_events_query(goal_text, goal_text.lower())
+
+    @staticmethod
+    def _observation_has_useful_results(observation: Dict[str, Any]) -> bool:
+        if observation.get("evidence"):
+            return True
+        if observation.get("results"):
+            return True
+        if observation.get("count", 0):
+            return True
+
+        text = (observation.get("text") or "").strip()
+        if not text:
+            return False
+        return not any(marker in text for marker in META_EVIDENCE_MARKERS)
+
+    def _should_add_supplemental_web_search(
+        self,
+        goal: str,
+        observation: Dict[str, Any],
+        previous_observations: List[Dict[str, Any]],
+    ) -> bool:
+        if observation.get("tool_name") != "search_knowledge":
+            return False
+        if not self._goal_prefers_live_search(goal):
+            return False
+        if any(item.get("tool_name") == "web_search" for item in previous_observations):
+            return False
+        return not self._observation_has_useful_results(observation)
 
     async def _execute_tool_step(
         self,
@@ -319,15 +466,16 @@ class AgentExecutor:
         return wrapped
 
     def _build_final_answer_fallback(self, goal: str, plan: Dict[str, Any], observations: List[Dict[str, Any]], review: Dict[str, Any]) -> str:
-        sections = [f"## 任务目标\n{goal}"]
+        sections: List[str] = []
 
         if observations and observations[-1].get("blueprint"):
             blueprint = observations[-1]["blueprint"]
             sections.append(
-                "## 试卷蓝图\n"
-                f"- 模式：{blueprint['mode']}\n"
+                "## 正式回答\n"
+                "我已经根据你的要求完成试卷蓝图设计，关键信息如下：\n"
+                f"- 组卷模式：{blueprint['mode']}\n"
                 f"- 总题数：{blueprint['total_questions']}\n"
-                f"- 知识点：{', '.join(blueprint.get('knowledge_points') or ['综合能力'])}"
+                f"- 覆盖知识点：{', '.join(blueprint.get('knowledge_points') or ['综合能力'])}"
             )
 
         generated_questions = None
@@ -340,8 +488,8 @@ class AgentExecutor:
 
         if quality_report:
             sections.append(
-                "## 审核结果\n"
-                f"- 质量状态：{quality_report.get('quality_status')}\n"
+                "### 关键结果\n"
+                f"- 审核状态：{quality_report.get('quality_status')}\n"
                 f"- 质量分：{quality_report.get('score')}\n"
                 f"- 重复率：{quality_report.get('duplicate_rate')}\n"
                 f"- 覆盖知识点：{', '.join(quality_report.get('coverage_knowledge_points') or [])}"
@@ -350,21 +498,28 @@ class AgentExecutor:
             preview = []
             for question in generated_questions[:3]:
                 preview.append(f"- {question.get('question_id')}: {question.get('stem')}")
-            sections.append("## 题目预览\n" + "\n".join(preview))
+            sections.append(
+                "## 正式回答\n"
+                "我已经根据你的要求生成了题目，先给你一个简短预览：\n"
+                + "\n".join(preview)
+            )
         else:
             evidence_lines = []
             for evidence in review.get("evidence", [])[:5]:
                 line = evidence.get("summary") or evidence.get("excerpt") or "证据"
-                evidence_lines.append(f"- {line}")
+                evidence_lines.append(line)
+            evidence_lines = self._dedupe_lines(evidence_lines)
             if evidence_lines:
-                sections.append("## 证据摘要\n" + "\n".join(evidence_lines))
-
-        sections.append(
-            "## 质量标记\n"
-            f"- quality_status: {review.get('quality_status')}\n"
-            f"- confidence: {round(review.get('confidence', 0), 2)}\n"
-            f"- fallback_used: {'是' if review.get('fallback_used') else '否'}"
-        )
+                sections.append(
+                    "## 正式回答\n"
+                    "我根据当前检索到的结果，先给你一个简短总结：\n"
+                    + "\n".join(f"- {line}" for line in evidence_lines[:4])
+                )
+            else:
+                sections.append(
+                    "## 正式回答\n"
+                    "我已经完成当前任务，但最终整理步骤暂时不可用。你可以先参考上方执行过程中的工具结果，我也可以继续为你重新整理成正式答复。"
+                )
         return "\n\n".join(sections)
 
     def _build_final_answer_prompt(
@@ -379,7 +534,15 @@ class AgentExecutor:
             for item in review.get("evidence", [])[:8]
         )
         return f"""
-你是智学伴的结构化教育助手。请基于工具证据生成最终回答。
+你是智学伴的正式答复撰写助手。请基于工具证据，直接生成一份给用户看的最终回答。
+
+输出要求：
+1. 第一段必须直接回答用户，不要复述“任务目标”。
+2. 不要输出 trace_id、quality_status、confidence、fallback_used、证据摘要 这类内部字段名。
+3. 如果是检索/资讯类任务，优先给 2-4 条简明总结，再补一句结论。
+4. 如果是学习计划/组卷/导图类任务，先明确“已完成什么”，再给关键结果。
+5. 允许使用 Markdown，建议以“## 正式回答”开头，但不要堆砌技术性标题。
+6. 语言自然、明确、像最终交付给用户的正式回复。
 
 目标：{goal}
 规划理由：{plan.get('rationale')}
@@ -395,6 +558,7 @@ class AgentExecutor:
 
     def _build_final_answer(self, goal: str, plan: Dict[str, Any], observations: List[Dict[str, Any]], review: Dict[str, Any]) -> str:
         prompt = self._build_final_answer_prompt(goal, plan, observations, review)
+        self.final_answer_fallback_used = False
         try:
             result = AIService.call_ai(
                 db=self.db,
@@ -409,6 +573,7 @@ class AgentExecutor:
                 return text
         except Exception as exc:
             logger.warning("最终答案 AI 生成失败，回退到模板拼装: %s", exc)
+        self.final_answer_fallback_used = True
         return self._build_final_answer_fallback(goal, plan, observations, review)
 
     async def _build_final_answer_async(
@@ -419,6 +584,7 @@ class AgentExecutor:
         review: Dict[str, Any],
     ) -> str:
         prompt = self._build_final_answer_prompt(goal, plan, observations, review)
+        self.final_answer_fallback_used = False
         try:
             result = await AIService.call_ai_async(
                 user_prompt=prompt,
@@ -432,6 +598,7 @@ class AgentExecutor:
                 return text
         except Exception as exc:
             logger.warning("最终答案 AI 生成失败，回退到模板拼装: %s", exc)
+        self.final_answer_fallback_used = True
         return self._build_final_answer_fallback(goal, plan, observations, review)
 
     async def execute_react(self, goal: str) -> Dict[str, Any]:
@@ -470,6 +637,7 @@ class AgentExecutor:
 
             review = self.reviewer.review(plan, observations)
             final_answer = await self._build_final_answer_async(goal, plan, observations, review)
+            review["fallback_used"] = review.get("fallback_used", False) or self.final_answer_fallback_used
             self._record_step(
                 step_number,
                 "final_answer",
@@ -550,6 +718,7 @@ class AgentExecutor:
 
         review = self.reviewer.review(plan, observations)
         final_answer = await self._build_final_answer_async(goal, plan, observations, review)
+        review["fallback_used"] = review.get("fallback_used", False) or self.final_answer_fallback_used
         self._record_step(
             step_number + 1,
             "final_answer",
@@ -739,6 +908,7 @@ class AgentExecutor:
             review = self.reviewer.review(plan, observations)
             review["fallback_used"] = review.get("fallback_used", False) or native_result.get("fallback_used", False)
             final_answer = await self._build_final_answer_async(goal, plan, observations, review)
+            review["fallback_used"] = review.get("fallback_used", False) or self.final_answer_fallback_used
             self._record_step(
                 step_number,
                 "final_answer",

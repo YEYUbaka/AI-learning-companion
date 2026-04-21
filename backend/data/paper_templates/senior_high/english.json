@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0",
+  "grade_level": "高中",
+  "subject": "英语",
+  "display_name": "高中英语试卷模板库",
+  "default_template_id": "high-english-unit-test",
+  "templates": [
+    {
+      "template_id": "high-english-unit-test",
+      "paper_type": "unit_test",
+      "paper_type_label": "单元检测卷",
+      "match_keywords": ["单元", "章节", "同步", "模块", "课时"],
+      "description": "适合词汇、语法、阅读或写作模块学习后的阶段性检测。",
+      "total_questions": 24,
+      "time_limit": 90,
+      "total_score": 120,
+      "difficulty_distribution": { "easy": 35, "medium": 45, "hard": 20 },
+      "question_type_distribution": {
+        "choice": 12,
+        "fill": 6,
+        "essay": 4,
+        "composition": 1,
+        "comprehensive": 1
+      },
+      "question_buckets": [
+        { "category_key": "listening_choice", "category_name": "听力题", "mapped_type": "choice", "count": 4, "score_per_question": 2 },
+        { "category_key": "reading_choice", "category_name": "阅读理解题", "mapped_type": "choice", "count": 6, "score_per_question": 2 },
+        { "category_key": "cloze_choice", "category_name": "完形填空题", "mapped_type": "choice", "count": 2, "score_per_question": 2 },
+        { "category_key": "word_choice", "category_name": "选词填空题", "mapped_type": "fill", "count": 3, "score_per_question": 3 },
+        { "category_key": "grammar_fill", "category_name": "语法填空题", "mapped_type": "fill", "count": 3, "score_per_question": 3 },
+        { "category_key": "reading_answer", "category_name": "阅读表达题", "mapped_type": "essay", "count": 2, "score_per_question": 6 },
+        { "category_key": "translation", "category_name": "翻译题", "mapped_type": "essay", "count": 2, "score_per_question": 6 },
+        { "category_key": "writing_task", "category_name": "应用写作题", "mapped_type": "comprehensive", "count": 1, "score_per_question": 12 },
+        { "category_key": "composition", "category_name": "作文题", "mapped_type": "composition", "count": 1, "score_per_question": 20 }
+      ],
+      "knowledge_focus": ["词汇语法", "阅读速度", "书面表达"]
+    },
+    {
+      "template_id": "high-english-comprehensive-review",
+      "paper_type": "comprehensive_review",
+      "paper_type_label": "综合复习卷",
+      "match_keywords": ["综合", "复习", "专题", "总复习"],
+      "description": "覆盖听力、阅读、语法、翻译和写作，适合阶段复习。",
+      "total_questions": 30,
+      "time_limit": 110,
+      "total_score": 150,
+      "difficulty_distribution": { "easy": 30, "medium": 50, "hard": 20 },
+      "question_type_distribution": {
+        "choice": 16,
+        "fill": 7,
+        "essay": 4,
+        "composition": 1,
+        "comprehensive": 2
+      },
+      "question_buckets": [
+        { "category_key": "listening_choice", "category_name": "听力题", "mapped_type": "choice", "count": 6, "score_per_question": 2 },
+        { "category_key": "reading_choice", "category_name": "阅读理解题", "mapped_type": "choice", "count": 8, "score_per_question": 2 },
+        { "category_key": "cloze_choice", "category_name": "完形填空题", "mapped_type": "choice", "count": 2, "score_per_question": 2 },
+        { "category_key": "word_choice", "category_name": "选词填空题", "mapped_type": "fill", "count": 3, "score_per_question": 3 },
+        { "category_key": "grammar_fill", "category_name": "语法填空题", "mapped_type": "fill", "count": 4, "score_per_question": 3 },
+        { "category_key": "reading_answer", "category_name": "阅读表达题", "mapped_type": "essay", "count": 2, "score_per_question": 8 },
+        { "category_key": "translation", "category_name": "翻译题", "mapped_type": "essay", "count": 2, "score_per_question": 8 },
+        { "category_key": "practical_writing", "category_name": "应用文写作题", "mapped_type": "comprehensive", "count": 2, "score_per_question": 10 },
+        { "category_key": "composition", "category_name": "作文题", "mapped_type": "composition", "count": 1, "score_per_question": 25 }
+      ],
+      "knowledge_focus": ["听读联动", "语法运用", "书面表达完整性"]
+    }
+  ]
+}

@@ -10,6 +10,7 @@ import time
 import httpx
 from typing import Optional, Dict, Any, List, Tuple, Generator
 from abc import ABC, abstractmethod
+from core.exceptions import UpstreamServiceError
 from core.logger import logger
 from core.config import settings
 from core.security import decrypt_api_key
@@ -274,6 +275,9 @@ def _provider_template(
     }
 
 
+# AI-assisted: DeepSeek-V3 2025-12 — Provider注册工厂结构与httpx请求实现
+# Prompt: "我正在开发一个支持多AI提供商的学习平台，需要一个统一的Provider注册工厂..."
+# 修改: 增加了PROVIDER_ALIASES别名反向查找、call_with_fallback()容错逻辑、加密密钥解密集成
 PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
     "deepseek": _provider_template(
         display_name="DeepSeek",
@@ -393,6 +397,7 @@ class ModelRegistry:
     _instance = None
     _providers: Dict[str, AIProvider] = {}
     _provider_params: Dict[str, Dict[str, Any]] = {}
+    _provider_aliases: Dict[str, str] = {}
     _cache: Dict[str, Any] = {}
     _cache_ttl: int = 300  # 5分钟
 
@@ -401,27 +406,55 @@ class ModelRegistry:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def register_provider(self, name: str, provider: AIProvider, params: Optional[Dict[str, Any]] = None):
+    def register_provider(
+        self,
+        name: str,
+        provider: AIProvider,
+        params: Optional[Dict[str, Any]] = None,
+        aliases: Optional[List[str]] = None,
+    ):
         """注册提供商"""
-        self._providers[name] = provider
-        self._provider_params[name] = params or {}
-        logger.info(f"已注册AI提供商: {name}")
+        canonical_name = self._normalize_provider_name(name)
+        self._providers[canonical_name] = provider
+        self._provider_params[canonical_name] = params or {}
+        self._provider_aliases[canonical_name] = canonical_name
+
+        raw_name = (name or "").strip()
+        if raw_name:
+            self._provider_aliases[raw_name] = canonical_name
+
+        for alias in aliases or []:
+            alias_name = (str(alias) if alias is not None else "").strip()
+            if not alias_name:
+                continue
+            self._provider_aliases[alias_name] = canonical_name
+            normalized_alias = self._normalize_provider_name(alias_name)
+            self._provider_aliases[normalized_alias] = canonical_name
+
+        logger.info(f"已注册AI提供商: {canonical_name}")
 
     def get_provider(self, name: str) -> Optional[AIProvider]:
         """获取提供商"""
-        return self._providers.get(name)
+        resolved_name = self._resolve_provider_name(name)
+        return self._providers.get(resolved_name)
 
     def load_from_db(self, db: Session):
         """从数据库加载配置"""
         configs = ModelConfigRepository.get_all_enabled(db)
         self._providers.clear()
         self._provider_params.clear()
+        self._provider_aliases.clear()
 
         for config in configs:
             try:
                 provider = self.build_provider_from_config(config)
                 if provider:
-                    self.register_provider(str(config.id), provider)
+                    normalized_name = self._normalize_provider_name(config.provider_name)
+                    self.register_provider(
+                        normalized_name,
+                        provider,
+                        aliases=[str(config.id), config.provider_name],
+                    )
                     logger.info("从数据库加载提供商: %s (id=%s)", config.provider_name, config.id)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error("加载提供商 %s 失败: %s", config.provider_name, e)
@@ -438,6 +471,7 @@ class ModelRegistry:
         providers = list(self._providers.keys())
 
         if preferred_provider:
+            preferred_provider = self._resolve_provider_name(preferred_provider)
             if preferred_provider not in providers:
                 raise ValueError(f"未启用的模型: {preferred_provider}")
             providers = [preferred_provider] + [p for p in providers if p != preferred_provider]
@@ -464,63 +498,173 @@ class ModelRegistry:
                 return result
             except httpx.HTTPStatusError as e:
                 status_code = e.response.status_code
-                error_msg = self._parse_http_error(provider_name, status_code, e.response)
-                error_details.append({"provider": provider_name, "error": error_msg})
+                error_msg, category = self._parse_http_error(
+                    provider_name, status_code, e.response
+                )
+                error_details.append(
+                    {
+                        "provider": provider_name,
+                        "error": error_msg,
+                        "status_code": status_code,
+                        "category": category,
+                    }
+                )
                 last_error = error_msg
                 logger.warning(f"AI调用失败: {provider_name}, 错误: {error_msg}")
                 continue
             except httpx.HTTPError as e:
                 error_msg = f"{provider_name} 网络连接失败，请检查网络或稍后重试"
-                error_details.append({"provider": provider_name, "error": error_msg})
+                error_details.append(
+                    {
+                        "provider": provider_name,
+                        "error": error_msg,
+                        "status_code": None,
+                        "category": "network",
+                    }
+                )
                 last_error = error_msg
                 logger.warning(f"AI调用失败: {provider_name}, 网络错误: {e}")
                 continue
             except Exception as e:
-                error_str = str(e)
-                if "400" in error_str or "Bad Request" in error_str:
-                    error_msg = f"{provider_name} API 密钥无效或请求参数错误"
-                elif "401" in error_str or "Unauthorized" in error_str:
-                    error_msg = f"{provider_name} 认证失败，请检查 API 密钥"
-                elif "429" in error_str or "Too Many Requests" in error_str:
-                    error_msg = f"{provider_name} 请求过于频繁，请稍后重试"
-                elif "500" in error_str or "Internal Server Error" in error_str:
-                    error_msg = f"{provider_name} 服务器错误，请稍后重试"
-                elif "503" in error_str or "Service Unavailable" in error_str:
-                    error_msg = f"{provider_name} 服务暂时不可用"
-                else:
-                    error_msg = f"{provider_name} 调用失败: {error_str[:100]}"
-
-                error_details.append({"provider": provider_name, "error": error_msg})
+                error_msg, status_code, category = self._classify_generic_error(
+                    provider_name, str(e)
+                )
+                error_details.append(
+                    {
+                        "provider": provider_name,
+                        "error": error_msg,
+                        "status_code": status_code,
+                        "category": category,
+                    }
+                )
                 last_error = error_msg
                 logger.warning(f"AI调用失败: {provider_name}, 错误: {e}")
                 continue
 
-        raise Exception(self._build_friendly_error(error_details))
+        raise self._build_upstream_error(error_details)
 
-    def _parse_http_error(self, provider_name: str, status_code: int, response) -> str:
+    def _parse_http_error(
+        self, provider_name: str, status_code: int, response
+    ) -> Tuple[str, str]:
         """解析 HTTP 错误为友好提示"""
         try:
             error_data = response.json()
             detail = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
         except Exception:
             detail = ""
+        detail_lower = detail.lower()
 
         if status_code == 400:
-            if "invalid" in detail.lower() or "api" in detail.lower():
-                return f"{provider_name} API 密钥无效或已过期"
-            return f"{provider_name} 请求参数错误"
+            if any(token in detail_lower for token in ["invalid", "api", "key", "token"]):
+                return f"{provider_name} API 密钥无效或已过期", "auth"
+            return f"{provider_name} 请求参数错误", "bad_request"
         elif status_code == 401:
-            return f"{provider_name} 认证失败，请检查 API 密钥"
+            return f"{provider_name} 认证失败，请检查 API 密钥", "auth"
         elif status_code == 403:
-            return f"{provider_name} 无权限访问，请检查账户状态"
+            return f"{provider_name} 无权限访问，请检查账户状态", "auth"
         elif status_code == 429:
-            return f"{provider_name} 请求过于频繁，请稍后重试"
-        elif status_code == 500:
-            return f"{provider_name} 服务器错误，请稍后重试"
-        elif status_code == 503:
-            return f"{provider_name} 服务暂时不可用"
+            return f"{provider_name} 请求过于频繁，请稍后重试", "rate_limit"
+        elif status_code in (500, 502, 503, 504):
+            return f"{provider_name} 服务暂时不可用", "upstream_server"
         else:
-            return f"{provider_name} 调用失败 (HTTP {status_code})"
+            return f"{provider_name} 调用失败 (HTTP {status_code})", "other"
+
+    def _classify_generic_error(
+        self, provider_name: str, error_str: str
+    ) -> Tuple[str, Optional[int], str]:
+        """兜底解析非 HTTPStatusError 异常。"""
+        if "401" in error_str or "Unauthorized" in error_str:
+            return f"{provider_name} 认证失败，请检查 API 密钥", 401, "auth"
+        if "403" in error_str or "Forbidden" in error_str:
+            return f"{provider_name} 无权限访问，请检查账户状态", 403, "auth"
+        if "429" in error_str or "Too Many Requests" in error_str:
+            return f"{provider_name} 请求过于频繁，请稍后重试", 429, "rate_limit"
+        if "503" in error_str or "Service Unavailable" in error_str:
+            return f"{provider_name} 服务暂时不可用", 503, "upstream_server"
+        if "500" in error_str or "502" in error_str or "504" in error_str:
+            return f"{provider_name} 服务暂时不可用", 500, "upstream_server"
+        if "400" in error_str or "Bad Request" in error_str:
+            return f"{provider_name} 请求参数错误", 400, "bad_request"
+        return f"{provider_name} 调用失败: {error_str[:100]}", None, "other"
+
+    def _build_upstream_error(self, error_details: List[Dict[str, Any]]) -> UpstreamServiceError:
+        """将上游错误聚合成可返回给路由层的异常。"""
+        if not error_details:
+            return UpstreamServiceError(
+                "AI 服务调用失败，请稍后重试",
+                http_status=503,
+            )
+
+        first_error = error_details[0]
+        auth_errors = [e for e in error_details if e.get("category") == "auth"]
+        rate_errors = [e for e in error_details if e.get("category") == "rate_limit"]
+        network_errors = [e for e in error_details if e.get("category") == "network"]
+        server_errors = [
+            e for e in error_details if e.get("category") == "upstream_server"
+        ]
+        bad_request_errors = [
+            e for e in error_details if e.get("category") == "bad_request"
+        ]
+
+        if auth_errors and len(auth_errors) == len(error_details):
+            upstream_status = self._first_status_code(auth_errors) or 401
+            return UpstreamServiceError(
+                f"AI 上游认证失败（上游 HTTP {upstream_status}），请检查管理后台 API Key 配置",
+                http_status=502,
+                upstream_status=upstream_status,
+                provider=auth_errors[0].get("provider"),
+            )
+
+        if rate_errors:
+            upstream_status = self._first_status_code(rate_errors) or 429
+            return UpstreamServiceError(
+                f"AI 上游限流（上游 HTTP {upstream_status}），请稍后重试",
+                http_status=503,
+                upstream_status=upstream_status,
+                provider=rate_errors[0].get("provider"),
+            )
+
+        if network_errors and len(network_errors) == len(error_details):
+            return UpstreamServiceError(
+                "AI 上游连接失败，请稍后重试",
+                http_status=503,
+                provider=network_errors[0].get("provider"),
+            )
+
+        if server_errors:
+            upstream_status = self._first_status_code(server_errors) or 503
+            http_status = 503 if upstream_status == 503 else 502
+            return UpstreamServiceError(
+                f"AI 上游服务异常（上游 HTTP {upstream_status}），请稍后重试",
+                http_status=http_status,
+                upstream_status=upstream_status,
+                provider=server_errors[0].get("provider"),
+            )
+
+        if bad_request_errors and len(bad_request_errors) == len(error_details):
+            upstream_status = self._first_status_code(bad_request_errors) or 400
+            return UpstreamServiceError(
+                f"AI 上游请求失败（上游 HTTP {upstream_status}），请检查模型配置或稍后重试",
+                http_status=502,
+                upstream_status=upstream_status,
+                provider=bad_request_errors[0].get("provider"),
+            )
+
+        upstream_status = first_error.get("status_code")
+        status_suffix = f"（上游 HTTP {upstream_status}）" if upstream_status else ""
+        return UpstreamServiceError(
+            f"AI 调用失败{status_suffix}：{first_error['error']}",
+            http_status=502,
+            upstream_status=upstream_status,
+            provider=first_error.get("provider"),
+        )
+
+    @staticmethod
+    def _first_status_code(error_details: List[Dict[str, Any]]) -> Optional[int]:
+        for detail in error_details:
+            if detail.get("status_code") is not None:
+                return int(detail["status_code"])
+        return None
 
     def _build_friendly_error(self, error_details: List[Dict]) -> str:
         """构建友好的错误提示"""
@@ -551,6 +695,9 @@ class ModelRegistry:
         fc_providers = ["deepseek", "zhipu", "qwen"]
 
         providers = list(self._providers.keys())
+
+        if preferred_provider:
+            preferred_provider = self._resolve_provider_name(preferred_provider)
 
         if preferred_provider and preferred_provider in providers:
             providers = [preferred_provider] + [p for p in providers if p != preferred_provider]
@@ -667,6 +814,22 @@ class ModelRegistry:
         raw = (name or "").strip()
         lower = raw.lower()
         return PROVIDER_ALIASES.get(raw, PROVIDER_ALIASES.get(lower, lower))
+
+    def _resolve_provider_name(self, name: Optional[str]) -> Optional[str]:
+        raw = (name or "").strip()
+        if not raw:
+            return raw
+        if raw in self._providers:
+            return raw
+        if raw in self._provider_aliases:
+            return self._provider_aliases[raw]
+
+        normalized = self._normalize_provider_name(raw)
+        if normalized in self._providers:
+            return normalized
+        if normalized in self._provider_aliases:
+            return self._provider_aliases[normalized]
+        return normalized
 
 
 # 全局注册表实例

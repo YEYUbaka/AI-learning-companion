@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "grade_level": "高中",
+  "subject": "数学",
+  "display_name": "高中数学试卷模板库",
+  "default_template_id": "high-math-unit-test",
+  "templates": [
+    {
+      "template_id": "high-math-unit-test",
+      "paper_type": "unit_test",
+      "paper_type_label": "单元检测卷",
+      "match_keywords": ["单元", "章节", "同步", "模块", "课时"],
+      "description": "适合函数、数列、立体几何等单元结束后的阶段性检测，结构偏紧凑，方便课堂或周测使用。",
+      "total_questions": 20,
+      "time_limit": 100,
+      "total_score": 120,
+      "difficulty_distribution": { "easy": 35, "medium": 45, "hard": 20 },
+      "question_type_distribution": {
+        "choice": 8,
+        "multiple_choice": 2,
+        "fill": 4,
+        "calculation": 4,
+        "comprehensive": 2
+      },
+      "question_buckets": [
+        { "category_key": "single_choice", "category_name": "单选题", "mapped_type": "choice", "count": 8, "score_per_question": 4 },
+        { "category_key": "multiple_choice", "category_name": "多选题", "mapped_type": "multiple_choice", "count": 2, "score_per_question": 5 },
+        { "category_key": "fill_blank", "category_name": "填空题", "mapped_type": "fill", "count": 4, "score_per_question": 5 },
+        { "category_key": "calculation", "category_name": "计算题", "mapped_type": "calculation", "count": 4, "score_per_question": 8 },
+        { "category_key": "application", "category_name": "应用题", "mapped_type": "comprehensive", "count": 2, "score_per_question": 12 }
+      ],
+      "knowledge_focus": ["基础概念", "公式应用", "运算准确性", "典型模型"]
+    },
+    {
+      "template_id": "high-math-comprehensive-review",
+      "paper_type": "comprehensive_review",
+      "paper_type_label": "综合复习卷",
+      "match_keywords": ["综合", "复习", "专题", "总复习"],
+      "description": "适合阶段复习或专题联练，兼顾基础题和压轴题，覆盖范围更完整。",
+      "total_questions": 22,
+      "time_limit": 120,
+      "total_score": 150,
+      "difficulty_distribution": { "easy": 25, "medium": 50, "hard": 25 },
+      "question_type_distribution": {
+        "choice": 8,
+        "multiple_choice": 4,
+        "fill": 4,
+        "calculation": 4,
+        "comprehensive": 2
+      },
+      "question_buckets": [
+        { "category_key": "single_choice", "category_name": "单选题", "mapped_type": "choice", "count": 8, "score_per_question": 5 },
+        { "category_key": "multiple_choice", "category_name": "多选题", "mapped_type": "multiple_choice", "count": 4, "score_per_question": 5 },
+        { "category_key": "fill_blank", "category_name": "填空题", "mapped_type": "fill", "count": 4, "score_per_question": 5 },
+        { "category_key": "calculation", "category_name": "计算题", "mapped_type": "calculation", "count": 4, "score_per_question": 10 },
+        { "category_key": "proof_application", "category_name": "综合应用题", "mapped_type": "comprehensive", "count": 2, "score_per_question": 15 }
+      ],
+      "knowledge_focus": ["主干知识串联", "多题型迁移", "压轴突破"]
+    },
+    {
+      "template_id": "high-math-mock-exam",
+      "paper_type": "mock_exam",
+      "paper_type_label": "模拟卷",
+      "match_keywords": ["月考", "联考", "模拟", "期中", "期末", "模考"],
+      "description": "更接近正式考试节奏，适合月考、期中期末和联考模拟。",
+      "total_questions": 22,
+      "time_limit": 120,
+      "total_score": 150,
+      "difficulty_distribution": { "easy": 20, "medium": 50, "hard": 30 },
+      "question_type_distribution": {
+        "choice": 8,
+        "multiple_choice": 3,
+        "fill": 4,
+        "calculation": 5,
+        "comprehensive": 2
+      },
+      "question_buckets": [
+        { "category_key": "single_choice", "category_name": "单选题", "mapped_type": "choice", "count": 8, "score_per_question": 5 },
+        { "category_key": "multiple_choice", "category_name": "多选题", "mapped_type": "multiple_choice", "count": 3, "score_per_question": 6 },
+        { "category_key": "fill_blank", "category_name": "填空题", "mapped_type": "fill", "count": 4, "score_per_question": 5 },
+        { "category_key": "calculation", "category_name": "计算题", "mapped_type": "calculation", "count": 5, "score_per_question": 10 },
+        { "category_key": "application", "category_name": "应用题", "mapped_type": "comprehensive", "count": 2, "score_per_question": 13 }
+      ],
+      "knowledge_focus": ["考试节奏", "规范书写", "压轴题分层得分"]
+    }
+  ]
+}

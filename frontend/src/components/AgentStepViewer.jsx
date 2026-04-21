@@ -17,6 +17,75 @@ const STATUS_MAP = {
 };
 
 const getStepExtraData = (step) => step?.extra_data || {};
+const FINAL_ANSWER_PRIMARY_TITLES = new Set(['正式回答', '最终回答', '简短总结', '总结', '结论', '回答']);
+const FINAL_ANSWER_TECHNICAL_TITLES = new Set(['任务目标', '证据摘要', '质量标记', '质量信息', '执行说明', '支持信息']);
+
+const cleanSectionTitle = (title = '') => title.replace(/[：:]\s*$/, '').trim();
+
+const rebuildMarkdownSection = (section) => {
+  if (!section?.body) return '';
+  return section.title ? `## ${section.title}\n${section.body}` : section.body;
+};
+
+const splitFinalAnswerContent = (content = '') => {
+  const normalized = normalizeMarkdownContent(content || '').trim();
+  if (!normalized) {
+    return { primary: '', supporting: '', isLegacyStructured: false };
+  }
+
+  const headingRegex = /^#{1,3}\s+(.+)$/gm;
+  const matches = [...normalized.matchAll(headingRegex)];
+  if (matches.length === 0) {
+    return { primary: normalized, supporting: '', isLegacyStructured: false };
+  }
+
+  const sections = [];
+  if (matches[0].index > 0) {
+    const intro = normalized.slice(0, matches[0].index).trim();
+    if (intro) {
+      sections.push({ title: '', body: intro });
+    }
+  }
+
+  matches.forEach((match, index) => {
+    const start = match.index ?? 0;
+    const bodyStart = start + match[0].length;
+    const nextStart = index + 1 < matches.length ? (matches[index + 1].index ?? normalized.length) : normalized.length;
+    sections.push({
+      title: cleanSectionTitle(match[1]),
+      body: normalized.slice(bodyStart, nextStart).trim(),
+    });
+  });
+
+  const primarySection =
+    sections.find((section) => FINAL_ANSWER_PRIMARY_TITLES.has(cleanSectionTitle(section.title)) && section.body) ||
+    sections.find((section) => section.body && !FINAL_ANSWER_TECHNICAL_TITLES.has(cleanSectionTitle(section.title)));
+
+  if (!primarySection) {
+    return {
+      primary: '',
+      supporting: normalized,
+      isLegacyStructured: true,
+    };
+  }
+
+  const supporting = sections
+    .filter((section) => section !== primarySection)
+    .map(rebuildMarkdownSection)
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+
+  const primary = FINAL_ANSWER_PRIMARY_TITLES.has(cleanSectionTitle(primarySection.title))
+    ? primarySection.body
+    : rebuildMarkdownSection(primarySection);
+
+  return {
+    primary: primary.trim(),
+    supporting,
+    isLegacyStructured: false,
+  };
+};
 
 const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
   const [expandedSteps, setExpandedSteps] = useState(new Set());
@@ -73,7 +142,8 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
     );
   };
 
-  const renderMeta = (step) => {
+  const renderMeta = (step, options = {}) => {
+    const { collapsible = false, summaryLabel = '证据与质量信息' } = options;
     const extra = getStepExtraData(step);
     const evidence = extra.evidence || [];
 
@@ -81,7 +151,7 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
       return null;
     }
 
-    return (
+    const panel = (
       <div className={`mt-3 rounded-lg border p-3 ${isDark ? 'border-slate-700 bg-slate-900/60' : 'border-gray-200 bg-gray-50'}`}>
         <div className="flex flex-wrap gap-2 items-center">
           {extra.quality_status ? renderStatusBadge(extra.quality_status) : null}
@@ -118,6 +188,28 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
           </div>
         ) : null}
       </div>
+    );
+
+    if (!collapsible) {
+      return panel;
+    }
+
+    return (
+      <details className="mt-4 group">
+        <summary
+          className={`flex cursor-pointer list-none items-center justify-between rounded-xl border px-4 py-3 text-sm font-medium transition-colors ${
+            isDark
+              ? 'border-slate-700 bg-slate-900/40 text-slate-200 hover:bg-slate-900/60'
+              : 'border-amber-200 bg-white/80 text-slate-700 hover:bg-amber-50'
+          }`}
+        >
+          <span>{summaryLabel}</span>
+          <span className={`text-xs transition-transform group-open:rotate-180 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            ▼
+          </span>
+        </summary>
+        {panel}
+      </details>
     );
   };
 
@@ -285,91 +377,172 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
       return renderObservationContent(step);
     }
     if (step.step_type === 'final_answer') {
+      const parsedAnswer = splitFinalAnswerContent(step.content);
+      const primaryContent = parsedAnswer.primary
+        || '这条结果仍是旧版结构化输出，正式回答没有被单独抽离。建议重新执行一次任务，以获得新版正文展示。';
+
       return (
-        <div className={`border rounded-lg p-4 overflow-hidden ${isDark ? 'bg-amber-900/20 border-amber-800' : 'bg-amber-50 border-amber-200'}`}>
-          <div className={`font-medium mb-2 text-sm ${isDark ? 'text-amber-300' : 'text-amber-800'}`}>
-            最终回答
+        <div
+          className={`overflow-hidden rounded-2xl border p-4 shadow-sm sm:p-5 ${
+            isDark
+              ? 'border-amber-700/70 bg-gradient-to-br from-amber-900/30 via-slate-900 to-slate-900'
+              : 'border-amber-300 bg-gradient-to-br from-amber-50 via-white to-orange-50 shadow-amber-100/70'
+          }`}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className={`mb-2 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] ${
+                isDark ? 'bg-amber-900/50 text-amber-200' : 'bg-amber-100 text-amber-700'
+              }`}>
+                Final
+              </div>
+              <div className={`text-lg font-semibold sm:text-xl ${isDark ? 'text-amber-100' : 'text-slate-900'}`}>
+                正式回答
+              </div>
+              <p className={`mt-1 text-xs sm:text-sm ${isDark ? 'text-amber-200/80' : 'text-slate-600'}`}>
+                这是本次任务最终交付给你的正文结果
+              </p>
+            </div>
+            {parsedAnswer.isLegacyStructured ? (
+              <span className={`rounded-full px-3 py-1 text-xs font-medium ${
+                isDark ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-500 border border-amber-200'
+              }`}>
+                旧版结果结构
+              </span>
+            ) : null}
           </div>
-          <div className={`prose prose-sm max-w-none ${isDark ? 'prose-invert text-slate-200' : 'text-gray-800'}`}>
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeRaw, rehypeSanitize]}
-              components={{
-                p: ({ children }) => <p className="mb-2 last:mb-0 break-words">{children}</p>,
-                ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
-                ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-                li: ({ children }) => <li className="ml-2 break-words">{children}</li>,
-                blockquote: ({ children }) => (
-                  <blockquote
-                    className={`my-3 border-l-4 pl-4 italic ${
-                      isDark ? 'border-slate-600 text-slate-300' : 'border-slate-300 text-slate-600'
-                    }`}
-                  >
-                    {children}
-                  </blockquote>
-                ),
-                table: ({ children }) => (
-                  <div className="my-3 max-w-full">
-                    <div
-                      className={`mb-2 flex items-center justify-between text-[11px] sm:hidden ${
-                        isDark ? 'text-slate-400' : 'text-slate-500'
+
+          <div className={`mt-4 rounded-2xl border p-4 sm:p-5 ${
+            isDark ? 'border-slate-700 bg-slate-950/65' : 'border-white/90 bg-white/90 shadow-sm'
+          }`}>
+            <div className={`mb-3 text-xs font-medium uppercase tracking-[0.18em] ${isDark ? 'text-amber-300/80' : 'text-amber-700'}`}>
+              Main Response
+            </div>
+            <div className={`prose prose-sm max-w-none ${isDark ? 'prose-invert text-slate-100' : 'text-gray-800'}`}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw, rehypeSanitize]}
+                components={{
+                  p: ({ children }) => <p className="mb-3 last:mb-0 break-words text-[15px] leading-7">{children}</p>,
+                  ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-2">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-2">{children}</ol>,
+                  li: ({ children }) => <li className="ml-2 break-words leading-7">{children}</li>,
+                  blockquote: ({ children }) => (
+                    <blockquote
+                      className={`my-4 border-l-4 pl-4 italic ${
+                        isDark ? 'border-amber-500/60 text-slate-300' : 'border-amber-300 text-slate-600'
                       }`}
                     >
-                      <span>左右滑动查看完整表格</span>
-                      <span className="font-medium">表格</span>
-                    </div>
-                    <div
-                      className={`max-w-full overflow-x-auto overscroll-x-contain rounded-xl border ${
-                        isDark ? 'border-slate-700 bg-slate-900/40' : 'border-amber-200 bg-white/70'
-                      }`}
-                      style={{ WebkitOverflowScrolling: 'touch' }}
-                    >
-                      <table
-                        className={`w-max min-w-full border-collapse text-sm ${
-                          isDark ? 'border-slate-700 text-slate-200' : 'border-amber-200 text-gray-800'
+                      {children}
+                    </blockquote>
+                  ),
+                  table: ({ children }) => (
+                    <div className="my-3 max-w-full">
+                      <div
+                        className={`mb-2 flex items-center justify-between text-[11px] sm:hidden ${
+                          isDark ? 'text-slate-400' : 'text-slate-500'
                         }`}
                       >
-                        {children}
-                      </table>
+                        <span>左右滑动查看完整表格</span>
+                        <span className="font-medium">表格</span>
+                      </div>
+                      <div
+                        className={`max-w-full overflow-x-auto overscroll-x-contain rounded-xl border ${
+                          isDark ? 'border-slate-700 bg-slate-900/40' : 'border-amber-200 bg-white/70'
+                        }`}
+                        style={{ WebkitOverflowScrolling: 'touch' }}
+                      >
+                        <table
+                          className={`w-max min-w-full border-collapse text-sm ${
+                            isDark ? 'border-slate-700 text-slate-200' : 'border-amber-200 text-gray-800'
+                          }`}
+                        >
+                          {children}
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                ),
-                thead: ({ children }) => (
-                  <thead className={isDark ? 'bg-slate-800/80' : 'bg-amber-100/80'}>{children}</thead>
-                ),
-                tbody: ({ children }) => <tbody>{children}</tbody>,
-                tr: ({ children }) => (
-                  <tr className={isDark ? 'border-b border-slate-700' : 'border-b border-amber-200'}>{children}</tr>
-                ),
-                th: ({ children }) => (
-                  <th className="min-w-[6rem] px-3 py-2 text-left align-top font-semibold sm:min-w-[7rem]">{children}</th>
-                ),
-                td: ({ children }) => (
-                  <td className="min-w-[6rem] px-3 py-2 align-top break-words sm:min-w-[7rem]">{children}</td>
-                ),
-                code: ({ children }) => (
-                  <code
-                    className={`rounded px-1.5 py-0.5 text-[0.9em] ${
-                      isDark ? 'bg-slate-800 text-slate-100' : 'bg-amber-100 text-amber-950'
-                    }`}
-                  >
-                    {children}
-                  </code>
-                ),
-                a: ({ node, ...props }) => (
-                  <a
-                    {...props}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`underline ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'}`}
-                  />
-                ),
-              }}
-            >
-              {normalizeMarkdownContent(step.content)}
-            </ReactMarkdown>
+                  ),
+                  thead: ({ children }) => (
+                    <thead className={isDark ? 'bg-slate-800/80' : 'bg-amber-100/80'}>{children}</thead>
+                  ),
+                  tbody: ({ children }) => <tbody>{children}</tbody>,
+                  tr: ({ children }) => (
+                    <tr className={isDark ? 'border-b border-slate-700' : 'border-b border-amber-200'}>{children}</tr>
+                  ),
+                  th: ({ children }) => (
+                    <th className="min-w-[6rem] px-3 py-2 text-left align-top font-semibold sm:min-w-[7rem]">{children}</th>
+                  ),
+                  td: ({ children }) => (
+                    <td className="min-w-[6rem] px-3 py-2 align-top break-words sm:min-w-[7rem]">{children}</td>
+                  ),
+                  code: ({ children }) => (
+                    <code
+                      className={`rounded px-1.5 py-0.5 text-[0.9em] ${
+                        isDark ? 'bg-slate-800 text-slate-100' : 'bg-amber-100 text-amber-950'
+                      }`}
+                    >
+                      {children}
+                    </code>
+                  ),
+                  a: ({ node, ...props }) => (
+                    <a
+                      {...props}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`underline ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'}`}
+                    />
+                  ),
+                }}
+              >
+                {primaryContent}
+              </ReactMarkdown>
+            </div>
           </div>
-          {renderMeta(step)}
+
+          {parsedAnswer.supporting ? (
+            <details className="mt-4 group">
+              <summary
+                className={`flex cursor-pointer list-none items-center justify-between rounded-xl border px-4 py-3 text-sm font-medium ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-900/45 text-slate-200 hover:bg-slate-900/65'
+                    : 'border-amber-200 bg-white/80 text-slate-700 hover:bg-amber-50'
+                }`}
+              >
+                <span>查看补充说明</span>
+                <span className={`text-xs transition-transform group-open:rotate-180 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  ▼
+                </span>
+              </summary>
+              <div className={`mt-3 rounded-2xl border p-4 ${
+                isDark ? 'border-slate-700 bg-slate-950/55' : 'border-gray-200 bg-white/85'
+              }`}>
+                <div className={`prose prose-sm max-w-none ${isDark ? 'prose-invert text-slate-300' : 'text-gray-700'}`}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeRaw, rehypeSanitize]}
+                    components={{
+                      p: ({ children }) => <p className="mb-2 last:mb-0 break-words">{children}</p>,
+                      ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                      ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                      li: ({ children }) => <li className="ml-2 break-words">{children}</li>,
+                      a: ({ node, ...props }) => (
+                        <a
+                          {...props}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`underline ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'}`}
+                        />
+                      ),
+                    }}
+                  >
+                    {parsedAnswer.supporting}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            </details>
+          ) : null}
+
+          {renderMeta(step, { collapsible: true })}
         </div>
       );
     }
@@ -381,7 +554,7 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
       thought: '思考',
       action: '行动',
       observation: '观察',
-      final_answer: '完成',
+      final_answer: '正式回答',
       goal: '目标',
     }[stepType] || stepType);
 

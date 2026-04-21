@@ -133,6 +133,8 @@ const AgentChat = () => {
     };
     setCurrentSession(tempSession);
 
+    // AI-assisted: DeepSeek-V3 2026-01 — SSE流式接收框架与currentSession状态结构
+    // 修改: streamRunId取消机制重构、mode参数切换、组件拆分到AgentStepViewer.jsx由开发者完成
     try {
       activeStreamRef.current = agentApi.createTaskStream(
         finalGoal,
@@ -357,9 +359,6 @@ const AgentChat = () => {
     setShowScrollToBottom(false);
     const scrollElement = document.documentElement;
     window.scrollTo({ top: scrollElement.scrollHeight, behavior });
-    window.setTimeout(() => {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
-    }, 450);
   };
 
   useEffect(() => {

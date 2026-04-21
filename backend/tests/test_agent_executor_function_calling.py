@@ -70,7 +70,10 @@ async def test_execute_function_calling_uses_native_tool_calls(monkeypatch):
     monkeypatch.setattr(executor, "_record_step", lambda *args, **kwargs: None)
     monkeypatch.setattr("services.agent_executor.AgentRepository.update_session_status", lambda *args, **kwargs: True)
     monkeypatch.setattr(executor, "_execute_tool_step", fake_execute_tool_step)
-    monkeypatch.setattr(executor, "_build_final_answer", lambda goal, plan, observations, review: "最终答案")
+    async def fake_build_final_answer_async(goal, plan, observations, review):
+        return "最终答案"
+
+    monkeypatch.setattr(executor, "_build_final_answer_async", fake_build_final_answer_async)
 
     result = await executor.execute_function_calling("解释牛顿第二定律")
 

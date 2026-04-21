@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
+from core.exceptions import UpstreamServiceError
 from database import get_db
 from models.quizzes import Quiz
 from utils.quiz_generator import generate_quiz, evaluate_quiz
@@ -19,6 +20,18 @@ import os
 import tempfile
 
 router = APIRouter(prefix="/api/v1/quiz", tags=["AI测评"])
+
+
+def _raise_upstream_http_exception(exc: UpstreamServiceError) -> None:
+    headers = None
+    if exc.upstream_status is not None:
+        headers = {"X-Upstream-Status": str(exc.upstream_status)}
+
+    raise HTTPException(
+        status_code=exc.http_status,
+        detail=str(exc),
+        headers=headers,
+    )
 
 
 class GenerateQuizRequest(BaseModel):
@@ -78,6 +91,9 @@ async def quiz_generate(
             "message": "测验题目生成成功"
         }
         
+    except UpstreamServiceError as e:
+        logger.error(f"生成测验题目失败（上游依赖错误）: {str(e)}")
+        _raise_upstream_http_exception(e)
     except ValueError as e:
         logger.error(f"生成测验题目失败（参数错误）: {str(e)}")
         raise HTTPException(
@@ -125,7 +141,8 @@ async def quiz_submit(
         result = evaluate_quiz(
             questions=request.questions,
             user_answers=request.answers,
-            provider=request.provider
+            provider=request.provider,
+            db=db
         )
         
         # 保存到数据库
@@ -146,13 +163,22 @@ async def quiz_submit(
         return {
             "success": True,
             "score": result.get("score", 0),
+            "total_score": result.get("total_score"),
+            "correct_count": result.get("correct_count"),
+            "total_count": result.get("total_count"),
             "explanations": result.get("explanations", []),
+            "summary": result.get("summary", ""),
+            "weak_points": result.get("weak_points", []),
+            "next_steps": result.get("next_steps", []),
             "quiz_id": quiz.id,
             "message": "测验提交成功"
         }
         
     except HTTPException:
         raise
+    except UpstreamServiceError as e:
+        db.rollback()
+        _raise_upstream_http_exception(e)
     except ValueError as e:
         db.rollback()
         raise HTTPException(

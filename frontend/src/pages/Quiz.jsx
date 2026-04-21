@@ -107,6 +107,7 @@ function Quiz() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [startTime, setStartTime] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [submitSnapshot, setSubmitSnapshot] = useState(null);
   const [showQuestionOverview, setShowQuestionOverview] = useState(false);
   const [loading, setLoading] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -185,7 +186,20 @@ function Quiz() {
     [isDark]
   );
 
-  const syncProgress = (nextAnswers, nextIndex = currentQuestionIndex, nextStartTime = startTime) => {
+  const getElapsedSecondsSnapshot = (anchorStartTime = startTime, fallbackElapsedSeconds = elapsedSeconds) => {
+    if (anchorStartTime) {
+      return Math.max(0, Math.floor((Date.now() - anchorStartTime) / 1000));
+    }
+
+    return Math.max(0, Math.floor(fallbackElapsedSeconds || 0));
+  };
+
+  const syncProgress = (
+    nextAnswers,
+    nextIndex = currentQuestionIndex,
+    nextStartTime = startTime,
+    nextElapsedSeconds = getElapsedSecondsSnapshot(nextStartTime)
+  ) => {
     if (!isRegularExamView) return;
 
     sessionStorage.setItem(
@@ -195,6 +209,7 @@ function Quiz() {
         questions,
         answers: nextAnswers,
         startTime: nextStartTime,
+        elapsedSeconds: nextElapsedSeconds,
         currentQuestionIndex: nextIndex,
       })
     );
@@ -204,7 +219,7 @@ function Quiz() {
     const nextAnswers = [...answers];
     nextAnswers[index] = value;
     setAnswers(nextAnswers);
-    syncProgress(nextAnswers);
+    syncProgress(nextAnswers, currentQuestionIndex, startTime, getElapsedSecondsSnapshot());
   };
 
   const handleToggleMultipleChoice = (index, optionValue) => {
@@ -247,6 +262,7 @@ function Quiz() {
       setAnswers(nextAnswers);
       setStartTime(nextStartTime);
       setElapsedSeconds(0);
+      setSubmitSnapshot(null);
       setCurrentQuestionIndex(0);
       setShowQuestionOverview(false);
       setStatusMessage('测评已生成，可以开始作答了。');
@@ -258,6 +274,7 @@ function Quiz() {
           questions: nextQuestions,
           answers: nextAnswers,
           startTime: nextStartTime,
+          elapsedSeconds: 0,
           currentQuestionIndex: 0,
         })
       );
@@ -281,6 +298,15 @@ function Quiz() {
       }
     }
 
+    const frozenElapsedSeconds = getElapsedSecondsSnapshot();
+    const previousStartTime = startTime;
+
+    setElapsedSeconds(frozenElapsedSeconds);
+    setStartTime(null);
+    setSubmitSnapshot({
+      frozenElapsedSeconds,
+      previousStartTime,
+    });
     setSubmitting(true);
     setError('');
     setStatusMessage('AI 正在统一批改并生成复盘建议...');
@@ -298,14 +324,21 @@ function Quiz() {
       }
 
       sessionStorage.removeItem(ANSWER_STORAGE_KEY);
+      setSubmitSnapshot(null);
       navigate('/quiz-result', {
         state: {
           score: response.data.score,
+          totalScore: response.data.total_score,
+          correctCount: response.data.correct_count,
+          totalCount: response.data.total_count,
           explanations: response.data.explanations,
+          summary: response.data.summary,
+          weakPoints: response.data.weak_points,
+          nextSteps: response.data.next_steps,
           questions,
           answers,
           topic,
-          durationSeconds: elapsedSeconds,
+          durationSeconds: frozenElapsedSeconds,
           submittedAt: new Date().toISOString(),
         },
       });
@@ -328,6 +361,7 @@ function Quiz() {
     setCurrentQuestionIndex(0);
     setStartTime(null);
     setElapsedSeconds(0);
+    setSubmitSnapshot(null);
     setShowQuestionOverview(false);
     setError('');
     setStatusMessage('');
@@ -457,7 +491,12 @@ function Quiz() {
         setTopic(parsed.topic || '');
         setQuestions(normalizedQuestions);
         setAnswers(parsed.answers || new Array(normalizedQuestions.length).fill(''));
-        setStartTime(parsed.startTime || Date.now());
+        const restoredElapsedSeconds = Math.max(0, Number(parsed.elapsedSeconds) || 0);
+        const restoredStartTime =
+          parsed.startTime || Date.now() - restoredElapsedSeconds * 1000;
+        setElapsedSeconds(restoredElapsedSeconds);
+        setStartTime(restoredStartTime);
+        setSubmitSnapshot(null);
         setCurrentQuestionIndex(Math.min(parsed.currentQuestionIndex || 0, Math.max(normalizedQuestions.length - 1, 0)));
       }
     } catch (err) {
@@ -477,9 +516,9 @@ function Quiz() {
   useEffect(() => {
     if (!isRegularExamView || !startTime) return undefined;
 
-    setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
+    setElapsedSeconds(getElapsedSecondsSnapshot(startTime));
     const timer = window.setInterval(() => {
-      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
+      setElapsedSeconds(getElapsedSecondsSnapshot(startTime));
     }, 1000);
 
     return () => window.clearInterval(timer);
@@ -487,8 +526,21 @@ function Quiz() {
 
   useEffect(() => {
     if (!isRegularExamView) return;
-    syncProgress(answers);
+    syncProgress(answers, currentQuestionIndex, startTime, getElapsedSecondsSnapshot());
   }, [currentQuestionIndex]);
+
+  useEffect(() => {
+    if (submitting || !submitSnapshot || startTime || !error) return;
+
+    const resumedStartTime =
+      submitSnapshot.previousStartTime ||
+      Date.now() - Math.max(0, submitSnapshot.frozenElapsedSeconds) * 1000;
+
+    setElapsedSeconds(submitSnapshot.frozenElapsedSeconds);
+    setStartTime(resumedStartTime);
+    syncProgress(answers, currentQuestionIndex, resumedStartTime, submitSnapshot.frozenElapsedSeconds);
+    setSubmitSnapshot(null);
+  }, [answers, currentQuestionIndex, error, startTime, submitSnapshot, submitting]);
 
   const renderQuestionInput = (question, index) => {
     if (!question) return null;

@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "grade_level": "初中",
+  "subject": "数学",
+  "display_name": "初中数学试卷模板库",
+  "default_template_id": "junior-math-unit-test",
+  "templates": [
+    {
+      "template_id": "junior-math-unit-test",
+      "paper_type": "unit_test",
+      "paper_type_label": "单元检测卷",
+      "match_keywords": ["单元", "章节", "同步", "模块", "课时"],
+      "description": "适合方程、函数、几何等单元学习后的周测或课堂检测。",
+      "total_questions": 18,
+      "time_limit": 90,
+      "total_score": 100,
+      "difficulty_distribution": { "easy": 40, "medium": 40, "hard": 20 },
+      "question_type_distribution": {
+        "choice": 6,
+        "fill": 4,
+        "calculation": 4,
+        "comprehensive": 4
+      },
+      "question_buckets": [
+        { "category_key": "single_choice", "category_name": "单选题", "mapped_type": "choice", "count": 6, "score_per_question": 3 },
+        { "category_key": "fill_blank", "category_name": "填空题", "mapped_type": "fill", "count": 4, "score_per_question": 4 },
+        { "category_key": "calculation", "category_name": "计算题", "mapped_type": "calculation", "count": 4, "score_per_question": 6 },
+        { "category_key": "application", "category_name": "应用题", "mapped_type": "comprehensive", "count": 2, "score_per_question": 8 },
+        { "category_key": "proof", "category_name": "证明题", "mapped_type": "comprehensive", "count": 2, "score_per_question": 8 }
+      ],
+      "knowledge_focus": ["基础运算", "模型应用", "几何推理"]
+    },
+    {
+      "template_id": "junior-math-comprehensive-review",
+      "paper_type": "comprehensive_review",
+      "paper_type_label": "综合复习卷",
+      "match_keywords": ["综合", "复习", "专题", "总复习"],
+      "description": "适合中考前阶段复习，覆盖基础题、计算题和综合应用题。",
+      "total_questions": 22,
+      "time_limit": 120,
+      "total_score": 120,
+      "difficulty_distribution": { "easy": 30, "medium": 45, "hard": 25 },
+      "question_type_distribution": {
+        "choice": 8,
+        "fill": 4,
+        "calculation": 4,
+        "comprehensive": 6
+      },
+      "question_buckets": [
+        { "category_key": "single_choice", "category_name": "单选题", "mapped_type": "choice", "count": 8, "score_per_question": 3 },
+        { "category_key": "fill_blank", "category_name": "填空题", "mapped_type": "fill", "count": 4, "score_per_question": 4 },
+        { "category_key": "calculation", "category_name": "计算题", "mapped_type": "calculation", "count": 4, "score_per_question": 6 },
+        { "category_key": "application", "category_name": "应用题", "mapped_type": "comprehensive", "count": 3, "score_per_question": 9 },
+        { "category_key": "proof", "category_name": "证明题", "mapped_type": "comprehensive", "count": 3, "score_per_question": 9 }
+      ],
+      "knowledge_focus": ["中考基础", "综合建模", "规范解题步骤"]
+    }
+  ]
+}

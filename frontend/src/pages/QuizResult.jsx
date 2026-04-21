@@ -28,7 +28,7 @@ const formatDuration = (seconds = 0) => {
 
 const buildSummaryText = (percentage, wrongCount) => {
   if (percentage >= 90) {
-    return '本次表现非常稳定，核心知识已经掌握得比较扎实，后续可以把重点放在速度和细节准确率上。';
+    return '这次整体发挥很稳定，核心知识点掌握得比较扎实，后续可以把重点放在速度和细节准确率上。';
   }
 
   if (percentage >= 75) {
@@ -36,14 +36,182 @@ const buildSummaryText = (percentage, wrongCount) => {
   }
 
   if (percentage >= 60) {
-    return '基础框架已经建立起来，不过关键题型上还有波动，建议先补齐高频错点再继续提难度。';
+    return '基础框架已经建立起来，不过部分知识点上还有波动，建议先补齐高频错点再继续提难度。';
   }
 
   if (wrongCount === 0) {
     return '这次题量不大，但发挥比较稳定，可以继续尝试更高难度的测评。';
   }
 
-  return '当前薄弱点还比较集中，建议先回到基础知识和高频题型，完成一轮针对性巩固后再复测。';
+  return '当前薄弱点还比较集中，建议先回到基础知识和高频错点，完成一轮针对性巩固后再复测。';
+};
+
+const normalizeKnowledgePoints = (rawValue) => {
+  if (rawValue === undefined || rawValue === null || rawValue === '') {
+    return [];
+  }
+
+  if (Array.isArray(rawValue)) {
+    return [...new Set(rawValue.flatMap((item) => normalizeKnowledgePoints(item)).filter(Boolean))];
+  }
+
+  if (typeof rawValue === 'object') {
+    return normalizeKnowledgePoints(
+      rawValue.knowledge_points ??
+        rawValue.knowledge_point ??
+        rawValue.points ??
+        rawValue.point ??
+        rawValue.name ??
+        rawValue.label ??
+        rawValue.text
+    );
+  }
+
+  return [...new Set(
+    String(rawValue)
+      .split(/[\n,，、；;/]+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  )];
+};
+
+const normalizeExplanationItem = (item = {}, question = {}, userAnswer = '') => {
+  const correct = Boolean(item?.is_correct ?? item?.correct ?? false);
+
+  return {
+    ...item,
+    correct,
+    is_correct: correct,
+    question: item?.question || question?.question || question?.stem || '',
+    user_answer: item?.user_answer ?? userAnswer ?? '',
+    correct_answer: item?.correct_answer ?? question?.answer ?? '',
+    explanation: item?.explanation || '',
+  };
+};
+
+const buildFallbackWeakPoints = (questions = [], explanations = []) => {
+  const grouped = new Map();
+
+  explanations.forEach((item, index) => {
+    if (item?.correct) return;
+
+    const question = questions[index] || {};
+    const knowledgePoints = normalizeKnowledgePoints(
+      item?.knowledge_points ?? item?.knowledge_point ?? question?.knowledge_points ?? question?.knowledge_point
+    );
+
+    knowledgePoints.forEach((knowledgePoint) => {
+      const current = grouped.get(knowledgePoint) || {
+        knowledge_point: knowledgePoint,
+        reason: '该知识点相关题目出现失分，建议结合逐题解析回看核心概念、方法与易错点。',
+        related_questions: [],
+        count: 0,
+      };
+
+      current.count += 1;
+      current.related_questions.push(index + 1);
+      grouped.set(knowledgePoint, current);
+    });
+  });
+
+  return [...grouped.values()]
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 3)
+    .map(({ count, ...item }) => ({
+      ...item,
+      related_questions: [...new Set(item.related_questions)].sort((left, right) => left - right),
+    }));
+};
+
+const normalizeWeakPoints = (rawWeakPoints = [], questions = [], explanations = []) => {
+  if (Array.isArray(rawWeakPoints) && rawWeakPoints.length > 0) {
+    const normalizedItems = rawWeakPoints
+      .map((item) => {
+        if (typeof item === 'string') {
+          return {
+            knowledge_point: item.trim(),
+            reason: '',
+            related_questions: [],
+          };
+        }
+
+        if (!item || typeof item !== 'object') {
+          return null;
+        }
+
+        const knowledgePoint =
+          item.knowledge_point ||
+          item.point ||
+          item.name ||
+          item.label ||
+          normalizeKnowledgePoints(item.knowledge_points)[0] ||
+          '';
+
+        if (!knowledgePoint) {
+          return null;
+        }
+
+        const rawRelatedQuestions = item.related_questions ?? item.question_numbers ?? item.questions ?? [];
+        const relatedQuestions = Array.isArray(rawRelatedQuestions) ? rawRelatedQuestions : [];
+
+        return {
+          knowledge_point: knowledgePoint,
+          reason: item.reason || item.analysis || item.description || '',
+          related_questions: [...new Set(
+            relatedQuestions
+              .map((questionNo) => Number(questionNo))
+              .filter((questionNo) => Number.isFinite(questionNo) && questionNo > 0)
+          )].sort((left, right) => left - right),
+        };
+      })
+      .filter(Boolean);
+
+    if (normalizedItems.length > 0) {
+      return normalizedItems.slice(0, 3);
+    }
+  }
+
+  return buildFallbackWeakPoints(questions, explanations);
+};
+
+const normalizeNextSteps = (rawNextSteps, weakPoints = [], durationSeconds = 0) => {
+  const extractedSteps = [];
+
+  const appendSteps = (value) => {
+    if (value === undefined || value === null || value === '') return;
+
+    if (Array.isArray(value)) {
+      value.forEach(appendSteps);
+      return;
+    }
+
+    String(value)
+      .split(/[\n\r]+|(?<=[。！？；;])/)
+      .map((item) => item.trim().replace(/^[-\d.\s、)]+/, ''))
+      .filter(Boolean)
+      .forEach((item) => extractedSteps.push(item));
+  };
+
+  appendSteps(rawNextSteps);
+
+  const deduplicatedSteps = [...new Set(extractedSteps)];
+  if (deduplicatedSteps.length > 0) {
+    return deduplicatedSteps.slice(0, 4);
+  }
+
+  if (weakPoints.length > 0) {
+    const generatedSteps = weakPoints.slice(0, 3).map(
+      (item) => `优先复习“${item.knowledge_point}”相关概念、方法和典型题，并重做关联错题。`
+    );
+
+    if (durationSeconds > 0) {
+      generatedSteps.push(`保持当前复盘节奏，下一轮练习时尝试在 ${formatDuration(durationSeconds)} 内提升稳定性。`);
+    }
+
+    return generatedSteps.slice(0, 4);
+  }
+
+  return ['整体表现比较稳定，下一轮可以适当提高难度，并继续保持当前答题节奏。'];
 };
 
 function QuizResult() {
@@ -54,7 +222,13 @@ function QuizResult() {
 
   const {
     score,
-    explanations = [],
+    totalScore,
+    correctCount: responseCorrectCount,
+    totalCount: responseTotalCount,
+    explanations: rawExplanations = [],
+    summary,
+    weakPoints: rawWeakPoints = [],
+    nextSteps: rawNextSteps = [],
     questions: rawQuestions = [],
     answers = [],
     topic = '',
@@ -101,6 +275,10 @@ function QuizResult() {
   );
 
   const questions = useMemo(() => normalizeQuizQuestions(rawQuestions), [rawQuestions]);
+  const explanations = useMemo(
+    () => rawExplanations.map((item, index) => normalizeExplanationItem(item, questions[index] || {}, answers[index])),
+    [answers, questions, rawExplanations]
+  );
 
   if (score === undefined && !explanations.length) {
     return (
@@ -120,40 +298,21 @@ function QuizResult() {
     );
   }
 
-  const correctCount = explanations.filter((item) => item?.correct).length;
-  const totalCount = explanations.length || questions.length || 1;
+  const correctCount = Number.isFinite(Number(responseCorrectCount))
+    ? Number(responseCorrectCount)
+    : explanations.filter((item) => item?.correct).length;
+  const totalCount = Number.isFinite(Number(responseTotalCount))
+    ? Number(responseTotalCount)
+    : explanations.length || questions.length || 1;
   const wrongCount = Math.max(totalCount - correctCount, 0);
   const percentage = totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : 0;
   const finalScore = Number.isFinite(Number(score)) ? Number(score) : percentage;
-
-  const wrongTypeCountMap = explanations.reduce((accumulator, item, index) => {
-    if (item?.correct) return accumulator;
-
-    const questionType = questions[index]?.type || 'other';
-    const label = QUESTION_TYPE_LABELS[questionType] || '其他题型';
-    accumulator[label] = (accumulator[label] || 0) + 1;
-
-    return accumulator;
-  }, {});
-
-  const weakTypeEntries = Object.entries(wrongTypeCountMap)
-    .sort((left, right) => right[1] - left[1])
-    .slice(0, 3);
-
-  const weakTypes = weakTypeEntries.map(([label]) => label);
-  const summaryText = buildSummaryText(percentage, wrongCount);
+  const displayTotalScore = Number.isFinite(Number(totalScore)) ? Number(totalScore) : 100;
+  const weakPoints = normalizeWeakPoints(rawWeakPoints, questions, explanations);
+  const weakPointNames = weakPoints.map((item) => item.knowledge_point);
+  const summaryText = summary || buildSummaryText(percentage, wrongCount);
   const submittedText = submittedAt ? new Date(submittedAt).toLocaleString() : '刚刚完成';
-  const suggestions = [
-    weakTypes.length
-      ? `优先回看 ${weakTypes.join('、')} 的错题和典型例题。`
-      : '整体错误不集中，可以直接进入下一轮更高难度测评。',
-    wrongCount > 0
-      ? '把本次做错的题重新独立做一遍，再对照解析查漏补缺。'
-      : '本轮没有明显失分点，可以把题量或难度再提高一档。',
-    durationSeconds > 0
-      ? `本次作答耗时 ${formatDuration(durationSeconds)}，下次可以继续优化节奏控制。`
-      : '下次测评时建议继续保持单题作答节奏，避免来回切换影响专注。',
-  ];
+  const nextSteps = normalizeNextSteps(rawNextSteps, weakPoints, durationSeconds);
 
   const scoreTone =
     finalScore >= 85 ? palette.success : finalScore >= 60 ? palette.warning : palette.danger;
@@ -259,6 +418,7 @@ function QuizResult() {
                 <div className={`rounded-md border px-5 py-5 ${scoreTone}`}>
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] opacity-80">最终得分</div>
                   <div className="mt-4 text-5xl font-bold leading-none tracking-tight">{finalScore}</div>
+                  <div className="mt-2 text-xs opacity-80">满分 {displayTotalScore}</div>
                 </div>
                 <div className={`${palette.mutedSoft} px-5 py-5`}>
                   <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${palette.muted}`}>答对题数</div>
@@ -291,14 +451,14 @@ function QuizResult() {
                   <div className="flex items-start justify-between gap-4 py-4">
                     <div>
                       <dt className={panelMetaClass}>重点回看</dt>
-                      <dd className={`mt-1 text-sm ${palette.text}`}>优先处理的题型</dd>
+                      <dd className={`mt-1 text-sm ${palette.text}`}>优先处理的知识点</dd>
                     </div>
                     <div
                       className={`max-w-[11rem] text-right text-sm font-medium leading-6 ${
-                        weakTypeEntries.length ? warningAccentClass : successAccentClass
+                        weakPointNames.length ? warningAccentClass : successAccentClass
                       }`}
                     >
-                      {weakTypeEntries.length ? weakTypes.join(' / ') : '暂无集中失分'}
+                      {weakPointNames.length ? weakPointNames.join(' / ') : '暂无集中失分'}
                     </div>
                   </div>
                 </dl>
@@ -325,23 +485,32 @@ function QuizResult() {
                 <div className={panelTitleClass}>薄弱点</div>
               </div>
               <div className={panelBodyClass}>
-                {weakTypeEntries.length ? (
-                  <div className={`divide-y ${panelDivider}`}>
-                    {weakTypeEntries.map(([label, count], index) => (
-                      <div key={label} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-                        <div className="flex items-center gap-3">
-                          <span className={`w-6 text-xs font-semibold ${palette.muted}`}>
-                            {String(index + 1).padStart(2, '0')}
-                          </span>
-                          <span className={`text-sm font-medium ${palette.title}`}>{label}</span>
+                {weakPoints.length ? (
+                  <div className={`space-y-3`}>
+                    {weakPoints.map((item, index) => (
+                      <div key={`${item.knowledge_point}-${index}`} className={`${palette.mutedSoft} p-4`}>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <span className={`w-6 text-xs font-semibold ${palette.muted}`}>
+                              {String(index + 1).padStart(2, '0')}
+                            </span>
+                            <span className={`text-sm font-medium ${palette.title}`}>{item.knowledge_point}</span>
+                          </div>
+                          {item.related_questions?.length ? (
+                            <span className={`text-xs font-medium ${warningAccentClass}`}>
+                              题号 {item.related_questions.join(', ')}
+                            </span>
+                          ) : null}
                         </div>
-                        <span className={`text-sm font-medium ${warningAccentClass}`}>{count} 题</span>
+                        {item.reason ? (
+                          <p className={`mt-3 text-sm leading-7 ${palette.text}`}>{item.reason}</p>
+                        ) : null}
                       </div>
                     ))}
                   </div>
                 ) : (
                   <p className={`text-sm leading-7 ${palette.text}`}>
-                    当前没有明显集中薄弱点，可以继续提高难度，或者尝试压缩作答时间。
+                    当前没有明显集中的薄弱知识点，可以继续提高难度，或者尝试压缩作答时间。
                   </p>
                 )}
               </div>
@@ -353,8 +522,8 @@ function QuizResult() {
               </div>
               <div className={panelBodyClass}>
                 <ul className={`divide-y ${panelDivider}`}>
-                  {suggestions.map((item, index) => (
-                    <li key={item} className="flex gap-3 py-3 first:pt-0 last:pb-0">
+                  {nextSteps.map((item, index) => (
+                    <li key={`${item}-${index}`} className="flex gap-3 py-3 first:pt-0 last:pb-0">
                       <span className={`mt-0.5 w-6 text-xs font-semibold ${palette.muted}`}>
                         {String(index + 1).padStart(2, '0')}
                       </span>
@@ -382,7 +551,10 @@ function QuizResult() {
             <div className="space-y-4">
               {explanations.map((item, index) => {
                 const question = questions[index] || {};
-                const userAnswer = answers[index];
+                const userAnswer = item?.user_answer ?? answers[index];
+                const knowledgePoints = normalizeKnowledgePoints(
+                  item?.knowledge_points ?? item?.knowledge_point ?? question?.knowledge_points ?? question?.knowledge_point
+                );
 
                 return (
                   <article
@@ -406,6 +578,15 @@ function QuizResult() {
                         <h3 className={`mt-3 text-lg font-semibold leading-8 ${palette.title}`}>
                           {index + 1}. {item?.question || question.question || question.stem || '题目'}
                         </h3>
+                        {knowledgePoints.length ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {knowledgePoints.map((knowledgePoint) => (
+                              <span key={`${knowledgePoint}-${index}`} className={`rounded-sm border px-3 py-1 text-xs ${palette.info}`}>
+                                {knowledgePoint}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
 
@@ -414,13 +595,17 @@ function QuizResult() {
                         <div className={`text-xs font-semibold uppercase tracking-[0.16em] ${palette.muted}`}>
                           你的答案
                         </div>
-                        <div className={`mt-2 text-sm leading-7 ${palette.title}`}>{userAnswer || '未作答'}</div>
+                        <div className={`mt-2 text-sm leading-7 ${palette.title}`}>
+                          {String(userAnswer || '未作答')}
+                        </div>
                       </div>
                       <div className={`${palette.mutedSoft} p-4`}>
                         <div className={`text-xs font-semibold uppercase tracking-[0.16em] ${palette.muted}`}>
                           标准答案
                         </div>
-                        <div className={`mt-2 text-sm leading-7 ${palette.title}`}>{question.answer || '未提供'}</div>
+                        <div className={`mt-2 text-sm leading-7 ${palette.title}`}>
+                          {String(item?.correct_answer || question.answer || '未提供')}
+                        </div>
                       </div>
                     </div>
 

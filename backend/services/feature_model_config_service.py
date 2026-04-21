@@ -45,6 +45,9 @@ class FeatureModelConfigService:
         if feature_key in _cache and _cache[feature_key][1] > now:
             return _cache[feature_key][0]
 
+        if db is None:
+            return None
+
         config = db.query(FeatureModelConfig).filter(
             FeatureModelConfig.feature_key == feature_key
         ).first()

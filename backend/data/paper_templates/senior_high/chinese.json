@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0",
+  "grade_level": "高中",
+  "subject": "语文",
+  "display_name": "高中语文试卷模板库",
+  "default_template_id": "high-chinese-unit-test",
+  "templates": [
+    {
+      "template_id": "high-chinese-unit-test",
+      "paper_type": "unit_test",
+      "paper_type_label": "单元检测卷",
+      "match_keywords": ["单元", "章节", "同步", "模块", "课时"],
+      "description": "适合现代文、古诗文或写作单元学习后的阶段性检测。",
+      "total_questions": 16,
+      "time_limit": 90,
+      "total_score": 100,
+      "difficulty_distribution": { "easy": 40, "medium": 40, "hard": 20 },
+      "question_type_distribution": {
+        "choice": 6,
+        "fill": 3,
+        "essay": 6,
+        "composition": 1
+      },
+      "question_buckets": [
+        { "category_key": "language_choice", "category_name": "语言文字运用题", "mapped_type": "choice", "count": 4, "score_per_question": 3 },
+        { "category_key": "reading_choice", "category_name": "阅读理解选择题", "mapped_type": "choice", "count": 2, "score_per_question": 4 },
+        { "category_key": "famous_sentence_fill", "category_name": "名句默写题", "mapped_type": "fill", "count": 2, "score_per_question": 3 },
+        { "category_key": "context_fill", "category_name": "情境填空题", "mapped_type": "fill", "count": 1, "score_per_question": 4 },
+        { "category_key": "reading_answer", "category_name": "阅读理解题", "mapped_type": "essay", "count": 4, "score_per_question": 6 },
+        { "category_key": "appreciation_answer", "category_name": "诗歌鉴赏题", "mapped_type": "essay", "count": 2, "score_per_question": 6 },
+        { "category_key": "composition", "category_name": "作文题", "mapped_type": "composition", "count": 1, "score_per_question": 40 }
+      ],
+      "knowledge_focus": ["基础积累", "文本理解", "表达训练"]
+    },
+    {
+      "template_id": "high-chinese-comprehensive-review",
+      "paper_type": "comprehensive_review",
+      "paper_type_label": "综合复习卷",
+      "match_keywords": ["综合", "复习", "专题", "总复习"],
+      "description": "覆盖语言文字运用、古诗文阅读、现代文阅读和写作，适合阶段复习。",
+      "total_questions": 20,
+      "time_limit": 150,
+      "total_score": 150,
+      "difficulty_distribution": { "easy": 30, "medium": 50, "hard": 20 },
+      "question_type_distribution": {
+        "choice": 10,
+        "fill": 4,
+        "essay": 5,
+        "composition": 1
+      },
+      "question_buckets": [
+        { "category_key": "language_choice", "category_name": "语言文字运用题", "mapped_type": "choice", "count": 4, "score_per_question": 3 },
+        { "category_key": "modern_reading_choice", "category_name": "现代文阅读选择题", "mapped_type": "choice", "count": 3, "score_per_question": 4 },
+        { "category_key": "ancient_reading_choice", "category_name": "文言文阅读选择题", "mapped_type": "choice", "count": 3, "score_per_question": 4 },
+        { "category_key": "famous_sentence_fill", "category_name": "名句默写题", "mapped_type": "fill", "count": 2, "score_per_question": 3 },
+        { "category_key": "context_fill", "category_name": "文意概括填空题", "mapped_type": "fill", "count": 2, "score_per_question": 4 },
+        { "category_key": "reading_answer", "category_name": "阅读理解题", "mapped_type": "essay", "count": 3, "score_per_question": 6 },
+        { "category_key": "appreciation_answer", "category_name": "鉴赏简答题", "mapped_type": "essay", "count": 2, "score_per_question": 6 },
+        { "category_key": "composition", "category_name": "作文题", "mapped_type": "composition", "count": 1, "score_per_question": 50 }
+      ],
+      "knowledge_focus": ["古今文本对读", "综合表达", "审题立意"]
+    }
+  ]
+}

@@ -223,6 +223,9 @@ class RAGService:
             db.commit()
             return {"success": False, "error": str(e)}
 
+    # AI-assisted: ChatGPT-4o 2026-02 — ChromaDB语义检索查询构造与SentenceTransformer懒加载
+    # Prompt: "请帮我实现一个基于ChromaDB的RAG检索服务..."
+    # 修改: HF_ENDPOINT国内镜像、image_paths字段、SearchResult字段定义、Agent工具集成由开发者实现
     @classmethod
     def search(
         cls,

@@ -9,6 +9,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from core.config import settings
+from core.exceptions import UpstreamServiceError
 from core.logger import logger
 from database import SessionLocal
 from repositories.api_call_repo import APICallRepository
@@ -91,6 +92,9 @@ class AIService:
         except Exception as log_error:
             logger.warning("记录 API 调用日志失败: %s", log_error)
 
+    # AI-assisted: DeepSeek-V3 2026-01 — 统一AI调用接口、system prompt注入、fallback逻辑
+    # Prompt: "请帮我设计一个FastAPI项目的AI调用统一层..."
+    # 修改: 品牌替换改为多关键词列表、增加quality_status/confidence等trace元数据、日志写入由开发者实现
     @staticmethod
     def call_ai(
         db: Session,
@@ -153,6 +157,12 @@ class AIService:
                     "trace_id": trace_id,
                 },
             }
+        except UpstreamServiceError as exc:
+            logger.error("AI 调用失败: %s", exc)
+            AIService._record_api_call(
+                db, provider or "unknown", source="user", success=False
+            )
+            raise
         except Exception as exc:
             logger.error("AI 调用失败: %s", exc)
             AIService._record_api_call(
@@ -223,6 +233,12 @@ class AIService:
                     "trace_id": trace_id,
                 },
             }
+        except UpstreamServiceError as exc:
+            logger.warning("AI Function Calling 调用失败: %s", exc)
+            AIService._record_api_call(
+                db, provider or "unknown", source="function_calling", success=False
+            )
+            raise
         except Exception as exc:
             logger.warning("AI Function Calling 璋冪敤澶辫触: %s", exc)
             AIService._record_api_call(

@@ -182,32 +182,32 @@ function StudyPlan() {
     { label: '任务项', value: totalTasks },
   ];
 
-  const pageBg = isDark ? 'bg-[#0f1724]' : 'bg-[#f6f3ee]';
-  const pageGlow = isDark ? 'bg-[radial-gradient(circle_at_top,_rgba(61,88,115,0.18),_transparent_48%)]' : 'bg-[radial-gradient(circle_at_top,_rgba(255,250,242,0.95),_transparent_52%)]';
-  const cardBase = `${isDark ? 'border-slate-800 bg-[#111827]/92 shadow-[0_18px_48px_rgba(0,0,0,0.28)]' : 'border-[#e7dfd2] bg-[#fffdf8] shadow-[0_18px_40px_rgba(60,49,33,0.08)]'} border rounded-[28px]`;
-  const softCard = `${isDark ? 'border-slate-700/80 bg-slate-900/60' : 'border-[#ece3d7] bg-[#f8f4ec]'} border rounded-[24px]`;
-  const heroShell = `${isDark ? 'border-slate-800 bg-[#121a28]' : 'border-[#e7dfd2] bg-[#fffaf2]'} border rounded-[32px]`;
-  const heroMetricCard = `${isDark ? 'border-slate-700/80 bg-slate-900/55' : 'border-[#eadfce] bg-[#fcf7ef]'} border rounded-[24px]`;
-  const titleText = isDark ? 'text-slate-50' : 'text-[#1f2a37]';
-  const bodyText = isDark ? 'text-slate-300' : 'text-[#5e6b78]';
-  const subduedText = isDark ? 'text-slate-500' : 'text-[#7a8792]';
+  const pageBg = isDark ? 'bg-[#0f1724]' : 'bg-gray-50';
+  const pageGlow = isDark ? 'bg-[radial-gradient(circle_at_top,_rgba(61,88,115,0.18),_transparent_48%)]' : '';
+  const cardBase = `${isDark ? 'border-slate-800 bg-[#111827]/92 shadow-[0_18px_48px_rgba(0,0,0,0.28)]' : 'border-gray-200 bg-white shadow-sm'} border rounded-[28px]`;
+  const softCard = `${isDark ? 'border-slate-700/80 bg-slate-900/60' : 'border-gray-200 bg-gray-50'} border rounded-[24px]`;
+  const heroShell = `${isDark ? 'border-slate-800 bg-[#121a28]' : 'border-gray-200 bg-white'} border rounded-[32px]`;
+  const heroMetricCard = `${isDark ? 'border-slate-700/80 bg-slate-900/55' : 'border-gray-200 bg-gray-50'} border rounded-[24px]`;
+  const titleText = isDark ? 'text-slate-50' : 'text-gray-900';
+  const bodyText = isDark ? 'text-slate-300' : 'text-gray-600';
+  const subduedText = isDark ? 'text-slate-500' : 'text-gray-400';
   const primaryButton = isDark
     ? 'bg-[#325a79] text-white hover:bg-[#3b688c]'
-    : 'bg-[#1f4b6e] text-white hover:bg-[#16324a]';
+    : 'bg-blue-600 text-white hover:bg-blue-700';
   const secondaryButton = isDark
     ? 'border border-slate-700 bg-slate-900/70 text-slate-100 hover:bg-slate-800'
-    : 'border border-[#d8cdbc] bg-[#fffdf8] text-[#304759] hover:bg-[#f7f1e6]';
-  const progressTrack = isDark ? 'bg-slate-800' : 'bg-[#e7ded2]';
-  const progressFill = progress === 100 ? 'bg-emerald-600' : 'bg-[#5a8b67]';
+    : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50';
+  const progressTrack = isDark ? 'bg-slate-800' : 'bg-gray-200';
+  const progressFill = progress === 100 ? 'bg-emerald-600' : 'bg-blue-600';
   const badgeClass = isDark
     ? 'border-slate-700 bg-slate-900/70 text-slate-200'
-    : 'border-[#ddd1c1] bg-[#f4ecdf] text-[#3b5266]';
+    : 'border-gray-200 bg-gray-100 text-gray-600';
   const warmBadgeClass = isDark
     ? 'border-amber-700/40 bg-amber-500/10 text-amber-200'
-    : 'border-[#ebd3a4] bg-[#fff3de] text-[#8a5a1f]';
+    : 'border-amber-200 bg-amber-50 text-amber-700';
   const successBadgeClass = isDark
     ? 'border-emerald-700/40 bg-emerald-500/10 text-emerald-200'
-    : 'border-[#cfe0d1] bg-[#eef7ef] text-[#496453]';
+    : 'border-emerald-200 bg-emerald-50 text-emerald-700';
 
   if (loading) {
     return (
@@ -215,12 +215,12 @@ function StudyPlan() {
         <div className={`min-h-screen ${pageGlow}`}>
           <div className="container-xl px-4 py-6 sm:py-8">
             <div className="animate-pulse space-y-6">
-              <div className={`h-72 rounded-[32px] ${isDark ? 'bg-slate-800' : 'bg-[#fffaf2]'}`} />
+              <div className={`h-72 rounded-[32px] ${isDark ? 'bg-slate-800' : 'bg-gray-100'}`} />
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_320px]">
-                <div className={`h-[42rem] rounded-[28px] ${isDark ? 'bg-slate-800' : 'bg-[#fffdf8]'}`} />
+                <div className={`h-[42rem] rounded-[28px] ${isDark ? 'bg-slate-800' : 'bg-gray-100'}`} />
                 <div className="space-y-6">
-                  <div className={`h-56 rounded-[28px] ${isDark ? 'bg-slate-800' : 'bg-[#fffdf8]'}`} />
-                  <div className={`h-72 rounded-[28px] ${isDark ? 'bg-slate-800' : 'bg-[#fffdf8]'}`} />
+                  <div className={`h-56 rounded-[28px] ${isDark ? 'bg-slate-800' : 'bg-gray-100'}`} />
+                  <div className={`h-72 rounded-[28px] ${isDark ? 'bg-slate-800' : 'bg-gray-100'}`} />
                 </div>
               </div>
             </div>
@@ -314,7 +314,7 @@ function StudyPlan() {
 
             {showCreateForm && (
               <section id="study-plan-form" className={`${cardBase} overflow-hidden`}>
-                <div className={`border-b px-5 py-5 sm:px-6 ${isDark ? 'border-slate-700/60' : 'border-[#ece3d7]'}`}>
+                <div className={`border-b px-5 py-5 sm:px-6 ${isDark ? 'border-slate-700/60' : 'border-gray-200'}`}>
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <AppBadge variant="neutral" size="md" className={badgeClass}>创建计划</AppBadge>
@@ -345,7 +345,7 @@ function StudyPlan() {
                         className={`min-h-36 w-full rounded-[24px] border px-4 py-3 text-sm leading-7 transition-colors focus:outline-none focus:ring-2 ${
                           isDark
                             ? 'border-slate-600 bg-slate-800/70 text-white placeholder-slate-400 focus:border-[#5b85a5] focus:ring-[#5b85a5]/20'
-                            : 'border-[#ddd4c7] bg-[#fffdf8] text-[#1f2a37] placeholder-[#9aa3ab] focus:border-[#1f4b6e] focus:ring-[#1f4b6e]/15'
+                            : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400 focus:border-blue-600 focus:ring-blue-600/15'
                         }`}
                         required
                       />
@@ -354,7 +354,7 @@ function StudyPlan() {
                       </p>
                     </div>
                     <div className={`${softCard} p-4 sm:p-5`}>
-                      <div className={`rounded-[20px] border px-4 py-4 ${isDark ? 'border-slate-700 bg-slate-800/80' : 'border-[#e5dacb] bg-[#fffaf2]'}`}>
+                      <div className={`rounded-[20px] border px-4 py-4 ${isDark ? 'border-slate-700 bg-slate-800/80' : 'border-gray-200 bg-gray-50'}`}>
                         <div className={`text-sm font-medium ${titleText}`}>周期自动识别</div>
                         <p className={`mt-2 text-sm leading-6 ${bodyText}`}>
                           系统会优先识别目标里的时间表达，例如“3 天”“2 周”“1 个月”；如果没有明确周期，会自动分析更合适的学习节奏。
@@ -406,7 +406,7 @@ function StudyPlan() {
                           <div className="mt-6 grid gap-3">
                             {currentTask.tasks.map((task, idx) => (
                               <div key={`${currentTask.day}-${idx}`} className={`${softCard} flex items-start gap-3 px-4 py-4`}>
-                                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl text-sm font-semibold ${isDark ? 'bg-slate-800 text-slate-200' : 'bg-[#fffdf8] text-[#435766]'}`}>
+                                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl text-sm font-semibold ${isDark ? 'bg-slate-800 text-slate-200' : 'bg-gray-100 text-gray-600'}`}>
                                   {idx + 1}
                                 </div>
                                 <div className={`min-w-0 text-sm leading-7 ${isDark ? 'text-slate-300' : 'text-[#3d4c57]'}`}>{task}</div>
@@ -421,7 +421,7 @@ function StudyPlan() {
                             <div className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-[#3d586d]'}`}>当前推进</div>
                             <div className={`mt-1 text-3xl font-bold ${titleText}`}>{progress}%</div>
                           </div>
-                          <div className={`rounded-2xl px-3 py-2 text-sm ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-[#fffdf8] text-[#566776]'}`}>
+                          <div className={`rounded-2xl px-3 py-2 text-sm ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-gray-50 text-gray-600'}`}>
                             还剩 {remaining} 天
                           </div>
                         </div>
@@ -430,7 +430,7 @@ function StudyPlan() {
                         </div>
                         <button
                           onClick={() => toggleDayCompletion(currentTask.day)}
-                          className="mt-5 min-h-12 w-full rounded-2xl bg-[#5a8b67] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#4a7556]"
+                          className="mt-5 min-h-12 w-full rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
                         >
                           标记今天已完成
                         </button>
@@ -497,11 +497,11 @@ function StudyPlan() {
                         ? (isDark ? 'border-emerald-500/20 bg-emerald-500/8' : 'border-[#d4e2d5] bg-[#f4faf4]')
                         : active
                           ? (isDark ? 'border-[#4f7391]/40 bg-[#132334]' : 'border-[#cfdae3] bg-[#f3f7fa]')
-                          : (isDark ? 'border-slate-700/60 bg-slate-900/55' : 'border-[#ebe2d6] bg-[#fffdf8]');
+                          : (isDark ? 'border-slate-700/60 bg-slate-900/55' : 'border-gray-200 bg-white');
                       const marker = done
                         ? 'border-emerald-600 bg-emerald-600 text-white'
                         : active
-                          ? 'border-[#1f4b6e] bg-[#1f4b6e] text-white'
+                          ? 'border-blue-600 bg-blue-600 text-white'
                           : isDark
                             ? 'border-slate-600 bg-slate-800 text-slate-200'
                             : 'border-[#d9cfbf] bg-[#f6efe3] text-[#526472]';
@@ -553,7 +553,7 @@ function StudyPlan() {
                               <div className="space-y-3">
                                 {item.tasks.map((task, idx) => (
                                   <div key={`${item.day}-${idx}`} className="flex items-start gap-3">
-                                    <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-xs font-semibold ${isDark ? 'bg-slate-800 text-slate-200' : 'bg-[#fffdf8] text-[#50616f]'}`}>
+                                    <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-xs font-semibold ${isDark ? 'bg-slate-800 text-slate-200' : 'bg-gray-100 text-gray-600'}`}>
                                       {idx + 1}
                                     </div>
                                     <div className={`text-sm leading-7 ${isDark ? 'text-slate-300' : 'text-[#3d4c57]'}`}>{task}</div>
