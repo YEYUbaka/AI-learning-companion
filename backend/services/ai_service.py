@@ -92,7 +92,7 @@ class AIService:
         except Exception as log_error:
             logger.warning("记录 API 调用日志失败: %s", log_error)
 
-    # AI-assisted: DeepSeek-V3 2026-01 — 统一AI调用接口、system prompt注入、fallback逻辑
+    # AI辅助生成: 智谱AI GLM-5 2026-01 — 统一AI调用接口、system prompt注入、fallback逻辑
     # Prompt: "请帮我设计一个FastAPI项目的AI调用统一层..."
     # 修改: 品牌替换改为多关键词列表、增加quality_status/confidence等trace元数据、日志写入由开发者实现
     @staticmethod
@@ -111,6 +111,8 @@ class AIService:
             PromptService.get_system_prompt(db, system_prompt_name)
             or DEFAULT_SYSTEM_PROMPT
         )
+        # Always resolve the latest stored system prompt so prompt tuning can be
+        # updated from the admin side without redeploying the backend.
         messages = [
             {"role": "system", "content": system_prompt_content},
             {"role": "user", "content": user_prompt},
@@ -139,6 +141,8 @@ class AIService:
                 success=True,
             )
 
+            # Preserve both raw and cleaned text so callers can audit formatting
+            # issues while still getting a sanitized user-facing answer.
             return {
                 "trace_id": trace_id,
                 "provider": actual_provider,
@@ -186,6 +190,8 @@ class AIService:
             PromptService.get_system_prompt(db, system_prompt_name)
             or DEFAULT_SYSTEM_PROMPT
         )
+        # Tool calls use the same prompt injection path as plain chat so feature
+        # behavior stays consistent across direct answers and agent workflows.
         messages = [
             {"role": "system", "content": system_prompt_content},
             {"role": "user", "content": user_prompt},

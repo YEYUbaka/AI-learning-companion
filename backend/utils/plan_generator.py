@@ -80,6 +80,8 @@ def infer_duration_days(goals: str = "", max_days: int = MAX_PLAN_DAYS) -> Optio
         return None
 
     normalized = goals.replace("個", "个").replace("兩", "两")
+    # Convert fuzzy natural-language durations to a day count so the generated
+    # plan can stay on a single comparable timeline.
     patterns = [
         (r"(?P<num>\d+(?:\.\d+)?|半|[一二两三四五六七八九十]+)\s*(?:个)?\s*(分钟|分鍾|分鐘)", lambda n: 1),
         (r"(?P<num>\d+(?:\.\d+)?|半|[一二两三四五六七八九十]+)\s*(?:个)?\s*(小时|小時)", lambda n: 1),
@@ -116,6 +118,8 @@ def build_user_prompt(goals: str = "", file_text: Optional[str] = None, duration
     if file_text:
         max_text_length = 3000
         if len(file_text) > max_text_length:
+            # Cap the document excerpt so long uploads do not crowd out the
+            # actual planning instructions in the model context window.
             file_text = file_text[:max_text_length] + "\n\n[内容已截断...]"
         user_prompt += f"教材内容摘要：\n{file_text}\n\n"
     elif not goals or not goals.strip():

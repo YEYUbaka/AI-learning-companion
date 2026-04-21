@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
+import { getAnchorProps, normalizeHref } from '../utils/links';
 import { normalizeMarkdownContent } from '../utils/markdown';
 
 const STATUS_MAP = {
@@ -85,6 +86,27 @@ const splitFinalAnswerContent = (content = '') => {
     supporting,
     isLegacyStructured: false,
   };
+};
+
+const getLinkedEvidence = (step) => {
+  const evidence = getStepExtraData(step).evidence || [];
+  const deduped = [];
+  const seen = new Set();
+
+  evidence.forEach((item, index) => {
+    const url = normalizeHref(item?.url);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    deduped.push({
+      key: `${url}-${index}`,
+      url,
+      title: item.title || item.summary || item.excerpt || '相关知识点',
+      summary: item.summary || '',
+      sectionTitle: item.section_title || '',
+    });
+  });
+
+  return deduped;
 };
 
 const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
@@ -179,11 +201,26 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
               证据摘要
             </div>
             <div className="space-y-2">
-              {evidence.slice(0, 5).map((item, index) => (
-                <div key={`${item.summary || item.excerpt || index}-${index}`} className={`text-xs rounded-lg p-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-700 border border-gray-200'}`}>
-                  {item.summary || item.excerpt || JSON.stringify(item)}
-                </div>
-              ))}
+              {evidence.slice(0, 5).map((item, index) => {
+                const content = item.summary || item.excerpt || JSON.stringify(item);
+                return item.url ? (
+                  <a
+                    key={`${item.url}-${index}`}
+                    {...getAnchorProps(item.url)}
+                    className={`block text-xs rounded-lg p-2 transition-colors ${
+                      isDark
+                        ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        : 'bg-white text-slate-700 border border-gray-200 hover:border-blue-300 hover:text-blue-700'
+                    }`}
+                  >
+                    {content}
+                  </a>
+                ) : (
+                  <div key={`${item.summary || item.excerpt || index}-${index}`} className={`text-xs rounded-lg p-2 ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-700 border border-gray-200'}`}>
+                    {content}
+                  </div>
+                );
+              })}
             </div>
           </div>
         ) : null}
@@ -381,6 +418,8 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
       const primaryContent = parsedAnswer.primary
         || '这条结果仍是旧版结构化输出，正式回答没有被单独抽离。建议重新执行一次任务，以获得新版正文展示。';
 
+      const linkedEvidence = getLinkedEvidence(step);
+
       return (
         <div
           className={`overflow-hidden rounded-2xl border p-4 shadow-sm sm:p-5 ${
@@ -487,8 +526,7 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
                   a: ({ node, ...props }) => (
                     <a
                       {...props}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      {...getAnchorProps(props.href)}
                       className={`underline ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'}`}
                     />
                   ),
@@ -498,6 +536,43 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
               </ReactMarkdown>
             </div>
           </div>
+
+          {linkedEvidence.length > 0 ? (
+            <div className={`mt-4 rounded-2xl border p-4 ${
+              isDark ? 'border-slate-700 bg-slate-950/55' : 'border-blue-100 bg-blue-50/70'
+            }`}>
+              <div className={`mb-3 text-xs font-medium uppercase tracking-[0.18em] ${
+                isDark ? 'text-blue-300/80' : 'text-blue-700'
+              }`}>
+                Related Knowledge
+              </div>
+              <div className="space-y-2">
+                {linkedEvidence.slice(0, 6).map((item) => (
+                  <a
+                    key={item.key}
+                    {...getAnchorProps(item.url)}
+                    className={`block rounded-xl border px-4 py-3 transition-colors ${
+                      isDark
+                        ? 'border-slate-700 bg-slate-900/70 text-slate-100 hover:border-blue-500/60 hover:text-blue-300'
+                        : 'border-white bg-white text-slate-800 hover:border-blue-300 hover:text-blue-700'
+                    }`}
+                  >
+                    <div className="text-sm font-medium">{item.title}</div>
+                    {item.sectionTitle ? (
+                      <div className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        章节：{item.sectionTitle}
+                      </div>
+                    ) : null}
+                    {item.summary && item.summary !== item.title ? (
+                      <div className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        {item.summary}
+                      </div>
+                    ) : null}
+                  </a>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {parsedAnswer.supporting ? (
             <details className="mt-4 group">
@@ -528,8 +603,7 @@ const AgentStepViewer = ({ steps, toolCalls, isDark = false }) => {
                       a: ({ node, ...props }) => (
                         <a
                           {...props}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                          {...getAnchorProps(props.href)}
                           className={`underline ${isDark ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-800'}`}
                         />
                       ),

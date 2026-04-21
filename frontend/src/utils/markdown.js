@@ -1,3 +1,5 @@
+import { linkifyPlainUrls } from './links';
+
 const normalizeInlineHtml = (content = '') =>
   content
     .replace(/\r\n?/g, '\n')
@@ -86,4 +88,4 @@ const repairMarkdownTables = (content = '') => {
 };
 
 export const normalizeMarkdownContent = (content = '') =>
-  repairMarkdownTables(normalizeInlineHtml(content));
+  repairMarkdownTables(linkifyPlainUrls(normalizeInlineHtml(content)));

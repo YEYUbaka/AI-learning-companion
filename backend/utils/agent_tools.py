@@ -2,9 +2,11 @@
 Agent 工具系统
 """
 import json
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote, urlparse
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -144,7 +146,148 @@ class FileParserTool(BaseTool):
             return self.build_result(success=False, error=str(exc), quality_status="failed", confidence=0.2)
 
 
+r"""
+Legacy SearchKnowledgeTool implementation disabled due to corrupted encoded string literals.
+
 class SearchKnowledgeTool(BaseTool):
+    TECH_TERM_PATTERNS = [
+        (re.compile(r"\bjava\b", re.IGNORECASE), "Java"),
+        (re.compile(r"\bpython\b", re.IGNORECASE), "Python"),
+        (re.compile(r"\bgolang\b|\bgo\b", re.IGNORECASE), "Go"),
+        (re.compile(r"\bjavascript\b", re.IGNORECASE), "JavaScript"),
+        (re.compile(r"\btypescript\b", re.IGNORECASE), "TypeScript"),
+        (re.compile(r"\bspring\s*boot\b", re.IGNORECASE), "Spring Boot"),
+        (re.compile(r"\bspring\b", re.IGNORECASE), "Spring"),
+        (re.compile(r"\bmysql\b", re.IGNORECASE), "MySQL"),
+        (re.compile(r"\bredis\b", re.IGNORECASE), "Redis"),
+        (re.compile(r"\bjvm\b", re.IGNORECASE), "JVM"),
+    ]
+    QUERY_HINT_TERMS = [
+        "面试",
+        "学习路径",
+        "学习路线",
+        "学习计划",
+        "路线图",
+        "roadmap",
+        "后端",
+        "前端",
+        "编程",
+        "开发",
+        "算法",
+        "数据结构",
+        "并发",
+        "网络",
+        "数据库",
+        "\u4f8b\u9898",
+        "\u771f\u9898",
+        "\u9898\u578b",
+    ]
+    QUERY_EXPANSION_MAP = {
+        "Java": ["鍚庣"],
+        "Spring Boot": ["Spring"],
+        "瀛︿範璺緞": ["瀛︿範璺嚎", "瀛︿範璁″垝", "璺嚎鍥?],
+        "瀛︿範璺嚎": ["瀛︿範璺緞", "瀛︿範璁″垝", "璺嚎鍥?],
+        "瀛︿範璁″垝": ["瀛︿範璺緞", "瀛︿範璺嚎", "璺嚎鍥?],
+        "闈㈣瘯": ["鍩虹", "杩涢樁"],
+    }
+    QUERY_STOP_TERMS = {
+        "帮我",
+        "推荐",
+        "推荐一个",
+        "能够",
+        "达到",
+        "程度",
+        "相关",
+        "问题",
+        "一下",
+        "一下子",
+        "这个",
+        "那个",
+    }
+
+    @classmethod
+    def _dedupe_terms(cls, terms: List[str]) -> List[str]:
+        deduped = []
+        seen = set()
+        for term in terms:
+            normalized = (term or "").strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(normalized)
+        return deduped
+
+    @classmethod
+    def rewrite_query(cls, query: str, grade_level: Optional[str] = None, subject: Optional[str] = None) -> str:
+        raw_query = (query or "").strip()
+        if not raw_query:
+            return ""
+
+        lower_query = raw_query.lower()
+        terms: List[str] = []
+
+        for pattern, label in cls.TECH_TERM_PATTERNS:
+            if pattern.search(raw_query) or label.lower() in lower_query:
+                terms.append(label)
+
+        for keyword in cls.QUERY_HINT_TERMS:
+            if keyword.lower() in lower_query or keyword in raw_query:
+                terms.append("路线图" if keyword == "roadmap" else keyword)
+
+        if ("学习路径" in terms or "学习路线" in terms or "学习计划" in terms) and "路线图" not in terms:
+            terms.append("路线图")
+
+        if grade_level:
+            terms.insert(0, grade_level)
+        if subject:
+            terms.insert(1 if grade_level else 0, subject)
+
+        fallback_terms = re.findall(r"[A-Za-z][A-Za-z0-9.+#-]*|[\u4e00-\u9fff]{2,}", raw_query)
+        fallback_terms = [term for term in fallback_terms if term not in cls.QUERY_STOP_TERMS]
+
+        optimized_terms = cls._dedupe_terms(terms or fallback_terms[:6])
+        return " ".join(optimized_terms) if optimized_terms else raw_query
+
+    @classmethod
+    def build_query_candidates(
+        cls,
+        query: str,
+        grade_level: Optional[str] = None,
+        subject: Optional[str] = None,
+    ) -> List[str]:
+        primary_query = cls.rewrite_query(query, grade_level=grade_level, subject=subject)
+        if not primary_query:
+            return []
+
+        candidates = [primary_query]
+        expanded_terms = primary_query.split()
+
+        for term in list(expanded_terms):
+            for extra_term in cls.QUERY_EXPANSION_MAP.get(term, []):
+                expanded_terms.append(extra_term)
+
+        expanded_query = " ".join(cls._dedupe_terms(expanded_terms))
+        if expanded_query and expanded_query != primary_query:
+            candidates.append(expanded_query)
+
+        raw_query = (query or "").strip()
+        if raw_query and raw_query not in candidates:
+            candidates.append(raw_query)
+
+        return candidates
+
+    @staticmethod
+    def _build_result_link(document_id: Optional[int], section_title: Optional[str] = None) -> Optional[str]:
+        if not document_id:
+            return None
+        base_url = f"/knowledge/documents/{document_id}"
+        if not section_title:
+            return base_url
+        return f"{base_url}?section={quote(section_title)}"
+
     def get_definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="search_knowledge",
@@ -168,12 +311,29 @@ class SearchKnowledgeTool(BaseTool):
         try:
             from services.rag_service import RAGService
 
-            results = RAGService.search(
-                query=params["query"],
-                n_results=params.get("limit", 5),
+            raw_query = params["query"]
+            query_candidates = self.build_query_candidates(
+                raw_query,
                 grade_level=params.get("grade_level"),
                 subject=params.get("subject"),
             )
+            if not query_candidates and raw_query:
+                query_candidates = [raw_query]
+
+            results = []
+            query_used = query_candidates[0] if query_candidates else raw_query
+            for candidate in query_candidates:
+                query_used = candidate
+                results = RAGService.search(
+                    query=candidate,
+                    n_results=params.get("limit", 5),
+                    grade_level=params.get("grade_level"),
+                    subject=params.get("subject"),
+                )
+                if results:
+                    break
+
+            fallback_used = bool(query_candidates) and query_used != query_candidates[0]
             if not results:
                 return self.build_result(
                     success=True,
@@ -184,6 +344,7 @@ class SearchKnowledgeTool(BaseTool):
                 )
             serialized = []
             evidence = []
+            default_section_title = "\u77e5\u8bc6\u7247\u6bb5"
             for item in results:
                 serialized_item = {
                     "title": item.title,
@@ -220,6 +381,288 @@ class SearchKnowledgeTool(BaseTool):
                 quality_status="pass",
                 confidence=0.25,
                 fallback_used=False,  # RAG未安装是正常预期状态，关键词搜索是设计好的备选路径
+                evidence=[],
+            )
+"""
+
+
+class SearchKnowledgeTool(BaseTool):
+    TECH_TERM_PATTERNS = [
+        (re.compile(r"\bjava\b", re.IGNORECASE), "Java"),
+        (re.compile(r"\bpython\b", re.IGNORECASE), "Python"),
+        (re.compile(r"\bgolang\b|\bgo\b", re.IGNORECASE), "Go"),
+        (re.compile(r"\bjavascript\b", re.IGNORECASE), "JavaScript"),
+        (re.compile(r"\btypescript\b", re.IGNORECASE), "TypeScript"),
+        (re.compile(r"\bspring\s*boot\b", re.IGNORECASE), "Spring Boot"),
+        (re.compile(r"\bspring\b", re.IGNORECASE), "Spring"),
+        (re.compile(r"\bmysql\b", re.IGNORECASE), "MySQL"),
+        (re.compile(r"\bredis\b", re.IGNORECASE), "Redis"),
+        (re.compile(r"\bjvm\b", re.IGNORECASE), "JVM"),
+    ]
+    QUERY_HINT_TERMS = [
+        "\u9762\u8bd5",
+        "\u5b66\u4e60\u8def\u5f84",
+        "\u5b66\u4e60\u8def\u7ebf",
+        "\u5b66\u4e60\u8ba1\u5212",
+        "\u8def\u7ebf\u56fe",
+        "roadmap",
+        "\u540e\u7aef",
+        "\u524d\u7aef",
+        "\u7f16\u7a0b",
+        "\u5f00\u53d1",
+        "\u7b97\u6cd5",
+        "\u6570\u636e\u7ed3\u6784",
+        "\u5e76\u53d1",
+        "\u7f51\u7edc",
+        "\u6570\u636e\u5e93",
+        "\u4f8b\u9898",
+        "\u771f\u9898",
+        "\u9898\u578b",
+    ]
+    QUERY_EXPANSION_MAP = {
+        "Java": ["\u540e\u7aef"],
+        "Spring Boot": ["Spring"],
+        "\u5b66\u4e60\u8def\u5f84": [
+            "\u5b66\u4e60\u8def\u7ebf",
+            "\u5b66\u4e60\u8ba1\u5212",
+            "\u8def\u7ebf\u56fe",
+        ],
+        "\u5b66\u4e60\u8def\u7ebf": [
+            "\u5b66\u4e60\u8def\u5f84",
+            "\u5b66\u4e60\u8ba1\u5212",
+            "\u8def\u7ebf\u56fe",
+        ],
+        "\u5b66\u4e60\u8ba1\u5212": [
+            "\u5b66\u4e60\u8def\u5f84",
+            "\u5b66\u4e60\u8def\u7ebf",
+            "\u8def\u7ebf\u56fe",
+        ],
+        "\u9762\u8bd5": ["\u57fa\u7840", "\u8fdb\u9636"],
+        "\u4f8b\u9898": ["\u771f\u9898", "\u9898\u578b"],
+        "\u771f\u9898": ["\u4f8b\u9898", "\u9898\u578b"],
+    }
+    QUERY_STOP_TERMS = {
+        "\u5e2e\u6211",
+        "\u63a8\u8350",
+        "\u63a8\u8350\u4e00\u4e2a",
+        "\u80fd\u591f",
+        "\u8fbe\u5230",
+        "\u7a0b\u5ea6",
+        "\u76f8\u5173",
+        "\u95ee\u9898",
+        "\u4e00\u4e0b",
+        "\u4e00\u4e0b\u5b50",
+        "\u8fd9\u4e2a",
+        "\u90a3\u4e2a",
+    }
+
+    @classmethod
+    def _dedupe_terms(cls, terms: List[str]) -> List[str]:
+        deduped = []
+        seen = set()
+        for term in terms:
+            normalized = (term or "").strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(normalized)
+        return deduped
+
+    @classmethod
+    def rewrite_query(cls, query: str, grade_level: Optional[str] = None, subject: Optional[str] = None) -> str:
+        raw_query = (query or "").strip()
+        if not raw_query:
+            return ""
+
+        lower_query = raw_query.lower()
+        terms: List[str] = []
+
+        for pattern, label in cls.TECH_TERM_PATTERNS:
+            if pattern.search(raw_query) or label.lower() in lower_query:
+                terms.append(label)
+
+        for keyword in cls.QUERY_HINT_TERMS:
+            if keyword.lower() in lower_query or keyword in raw_query:
+                terms.append("\u8def\u7ebf\u56fe" if keyword == "roadmap" else keyword)
+
+        learning_path_terms = {
+            "\u5b66\u4e60\u8def\u5f84",
+            "\u5b66\u4e60\u8def\u7ebf",
+            "\u5b66\u4e60\u8ba1\u5212",
+        }
+        if learning_path_terms.intersection(terms) and "\u8def\u7ebf\u56fe" not in terms:
+            terms.append("\u8def\u7ebf\u56fe")
+
+        if grade_level:
+            terms.insert(0, grade_level)
+        if subject:
+            terms.insert(1 if grade_level else 0, subject)
+
+        fallback_terms = re.findall(r"[A-Za-z][A-Za-z0-9.+#-]*|[\u4e00-\u9fff]{2,}", raw_query)
+        fallback_terms = [term for term in fallback_terms if term not in cls.QUERY_STOP_TERMS]
+
+        optimized_terms = cls._dedupe_terms(terms or fallback_terms[:6])
+        return " ".join(optimized_terms) if optimized_terms else raw_query
+
+    @classmethod
+    def build_query_candidates(
+        cls,
+        query: str,
+        grade_level: Optional[str] = None,
+        subject: Optional[str] = None,
+    ) -> List[str]:
+        primary_query = cls.rewrite_query(query, grade_level=grade_level, subject=subject)
+        if not primary_query:
+            return []
+
+        candidates = [primary_query]
+        expanded_terms = primary_query.split()
+
+        for term in list(expanded_terms):
+            for extra_term in cls.QUERY_EXPANSION_MAP.get(term, []):
+                expanded_terms.append(extra_term)
+
+        expanded_query = " ".join(cls._dedupe_terms(expanded_terms))
+        if expanded_query and expanded_query != primary_query:
+            candidates.append(expanded_query)
+
+        raw_query = (query or "").strip()
+        if raw_query and raw_query not in candidates:
+            candidates.append(raw_query)
+
+        return candidates
+
+    @staticmethod
+    def _build_result_link(document_id: Optional[int], section_title: Optional[str] = None) -> Optional[str]:
+        if not document_id:
+            return None
+        base_url = f"/knowledge/documents/{document_id}"
+        if not section_title:
+            return base_url
+        return f"{base_url}?section={quote(section_title)}"
+
+    def get_definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="search_knowledge",
+            description="\u68c0\u7d22\u672c\u5730\u77e5\u8bc6\u5e93\u4e2d\u7684\u77e5\u8bc6\u70b9\u3001\u516c\u5f0f\u3001\u6982\u5ff5\u3001\u8003\u70b9\u4e0e\u8bc1\u636e\u6750\u6599\u3002",
+            category="search",
+            parameters=[
+                ToolParameter(name="query", type="string", description="\u68c0\u7d22\u95ee\u9898\u6216\u5173\u952e\u8bcd"),
+                ToolParameter(name="limit", type="integer", description="\u6700\u5927\u8fd4\u56de\u6761\u6570", required=False, default=5),
+                ToolParameter(name="grade_level", type="string", description="\u5b66\u6bb5\u8fc7\u6ee4", required=False, default=None),
+                ToolParameter(name="subject", type="string", description="\u5b66\u79d1\u8fc7\u6ee4", required=False, default=None),
+            ],
+            intent_tags=["knowledge_search", "concept", "formula", "exam_point"],
+            preconditions=["\u5f53\u7528\u6237\u8be2\u95ee\u6982\u5ff5\u3001\u77e5\u8bc6\u70b9\u3001\u516c\u5f0f\u3001\u8003\u70b9\u65f6\u4f18\u5148\u4f7f\u7528"],
+            output_schema={"type": "object", "properties": {"results": {"type": "array"}}},
+            quality_checks=["\u4f18\u5148\u547d\u4e2d\u77e5\u8bc6\u5e93\u8bc1\u636e", "\u8fd4\u56de\u6765\u6e90\u6458\u8981"],
+            fallback_policy="return_empty_with_warning",
+        )
+
+    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+        params = self.validate_params(kwargs)
+        raw_query = params["query"]
+        query_candidates = self.build_query_candidates(
+            raw_query,
+            grade_level=params.get("grade_level"),
+            subject=params.get("subject"),
+        )
+        if not query_candidates and raw_query:
+            query_candidates = [raw_query]
+
+        try:
+            from services.rag_service import RAGService
+
+            results = []
+            query_used = query_candidates[0] if query_candidates else raw_query
+            for candidate in query_candidates:
+                query_used = candidate
+                results = RAGService.search(
+                    query=candidate,
+                    n_results=params.get("limit", 5),
+                    grade_level=params.get("grade_level"),
+                    subject=params.get("subject"),
+                )
+                if results:
+                    break
+
+            fallback_used = bool(query_candidates) and query_used != query_candidates[0]
+            if not results:
+                return self.build_result(
+                    success=True,
+                    payload={
+                        "query": raw_query,
+                        "query_used": query_used,
+                        "query_candidates": query_candidates,
+                        "results": [],
+                        "text": "\u77e5\u8bc6\u5e93\u6682\u65f6\u65e0\u5339\u914d\u8bc1\u636e\u3002",
+                    },
+                    quality_status="pass",
+                    confidence=0.35,
+                    fallback_used=fallback_used,
+                )
+
+            serialized = []
+            evidence = []
+            default_section_title = "\u77e5\u8bc6\u7247\u6bb5"
+            for item in results:
+                result_url = self._build_result_link(item.document_id, item.section_title)
+                serialized_item = {
+                    "document_id": item.document_id,
+                    "chunk_index": item.chunk_index,
+                    "title": item.title,
+                    "subject": item.subject,
+                    "grade_level": item.grade_level,
+                    "section_title": item.section_title,
+                    "text_preview": item.text[:200],
+                    "image_paths": item.image_paths,
+                    "url": result_url,
+                }
+                serialized.append(serialized_item)
+                evidence.append(
+                    {
+                        "type": "knowledge_chunk",
+                        "summary": f"{item.title} - {item.section_title or default_section_title}",
+                        "excerpt": item.text[:120],
+                        "title": item.title,
+                        "section_title": item.section_title,
+                        "document_id": item.document_id,
+                        "chunk_index": item.chunk_index,
+                        "url": result_url,
+                    }
+                )
+
+            return self.build_result(
+                success=True,
+                payload={
+                    "query": raw_query,
+                    "query_used": query_used,
+                    "query_candidates": query_candidates,
+                    "results": serialized,
+                    "count": len(serialized),
+                    "text": "\n\n".join(item["text_preview"] for item in serialized),
+                },
+                evidence=evidence,
+                confidence=0.88,
+                fallback_used=fallback_used,
+            )
+        except Exception as exc:
+            logger.warning("\u77e5\u8bc6\u5e93\u68c0\u7d22\u964d\u7ea7: %s", exc)
+            return self.build_result(
+                success=True,
+                payload={
+                    "query": raw_query,
+                    "query_used": raw_query,
+                    "query_candidates": query_candidates,
+                    "results": [],
+                    "text": "RAG \u672a\u542f\u7528\uff0c\u5f53\u524d\u65e0\u6cd5\u63d0\u4f9b\u77e5\u8bc6\u5e93\u8bc1\u636e\u3002",
+                },
+                quality_status="pass",
+                confidence=0.25,
+                fallback_used=False,
                 evidence=[],
             )
 
@@ -543,6 +986,115 @@ class StudyPlanGeneratorTool(BaseTool):
 
 
 class WebSearchTool(BaseTool):
+    BLOCKED_DOMAINS = {
+        "aiqicha.baidu.com",
+        "aiqicha.com",
+        "www.aiqicha.com",
+        "qcc.com",
+        "www.qcc.com",
+        "tianyancha.com",
+        "www.tianyancha.com",
+    }
+    BLOCKED_TERMS = {
+        "爱企查",
+        "企业信息查询",
+        "企业信用查询",
+        "工商查询",
+        "老板查询",
+        "企查查",
+        "天眼查",
+    }
+    WEB_HINT_PATTERNS = [
+        (re.compile(r"\binterview\b|\u9762\u8bd5", re.IGNORECASE), "\u9762\u8bd5"),
+        (
+            re.compile(
+                r"\u5b66\u4e60\u8def\u5f84|\u5b66\u4e60\u8def\u7ebf|\u5b66\u4e60\u8ba1\u5212|\u8def\u7ebf\u56fe|roadmap",
+                re.IGNORECASE,
+            ),
+            "\u5b66\u4e60\u8def\u5f84",
+        ),
+        (
+            re.compile(
+                r"\u5b66\u4e60\u8def\u5f84|\u5b66\u4e60\u8def\u7ebf|\u5b66\u4e60\u8ba1\u5212|\u8def\u7ebf\u56fe|roadmap",
+                re.IGNORECASE,
+            ),
+            "\u8def\u7ebf\u56fe",
+        ),
+        (re.compile(r"\bbackend\b|\u540e\u7aef", re.IGNORECASE), "\u540e\u7aef"),
+        (re.compile(r"\bfrontend\b|\u524d\u7aef", re.IGNORECASE), "\u524d\u7aef"),
+    ]
+    LEARNING_QUERY_PATTERN = re.compile(
+        r"\u9762\u8bd5|\u5b66\u4e60\u8def\u5f84|\u5b66\u4e60\u8def\u7ebf|\u5b66\u4e60\u8ba1\u5212|\u8def\u7ebf\u56fe|roadmap|tutorial|guide|interview",
+        re.IGNORECASE,
+    )
+    LEARNING_RESULT_PATTERN = re.compile(
+        r"\u5b66\u4e60|\u8def\u5f84|\u8def\u7ebf|\u8ba1\u5212|\u6559\u7a0b|\u9762\u8bd5|roadmap|tutorial|guide|interview|curriculum|path",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _build_keyword_query(cls, query: str) -> str:
+        raw_query = (query or "").strip()
+        if not raw_query:
+            return ""
+
+        lower_query = raw_query.lower()
+        terms: List[str] = []
+
+        for pattern, label in SearchKnowledgeTool.TECH_TERM_PATTERNS:
+            if pattern.search(raw_query) or label.lower() in lower_query:
+                terms.append(label)
+
+        for pattern, label in cls.WEB_HINT_PATTERNS:
+            if pattern.search(raw_query):
+                terms.append(label)
+
+        fallback_terms = re.findall(r"[A-Za-z][A-Za-z0-9.+#-]*", raw_query)
+        optimized_terms = SearchKnowledgeTool._dedupe_terms(terms or fallback_terms[:4])
+        return " ".join(optimized_terms)
+
+    @classmethod
+    def _build_query_candidates(cls, query: str) -> List[str]:
+        candidates: List[str] = []
+        keyword_query = cls._build_keyword_query(query)
+        if keyword_query:
+            candidates.append(keyword_query)
+
+        for candidate in SearchKnowledgeTool.build_query_candidates(query):
+            if candidate not in candidates:
+                candidates.append(candidate)
+
+        if not candidates and query:
+            candidates = [(query or "").strip()]
+
+        web_candidates: List[str] = []
+        for candidate in candidates:
+            normalized = (candidate or "").strip()
+            if not normalized:
+                continue
+            web_candidates.append(normalized)
+
+            if any(term in normalized for term in ("学习路径", "学习路线", "学习计划", "路线图", "面试")):
+                web_candidates.append(f"{normalized} roadmap tutorial")
+                web_candidates.append(f"{normalized} 学习资料")
+
+        return SearchKnowledgeTool._dedupe_terms(web_candidates)
+
+    @classmethod
+    def _is_noisy_result(cls, title: str, snippet: str, url: str) -> bool:
+        domain = urlparse(url or "").netloc.lower()
+        if any(domain == blocked or domain.endswith(f".{blocked}") for blocked in cls.BLOCKED_DOMAINS):
+            return True
+
+        haystack = f"{title or ''}\n{snippet or ''}\n{url or ''}".lower()
+        return any(term.lower() in haystack for term in cls.BLOCKED_TERMS)
+
+    @classmethod
+    def _is_low_signal_result(cls, query: str, title: str, snippet: str, url: str) -> bool:
+        if not cls.LEARNING_QUERY_PATTERN.search(query or ""):
+            return False
+        haystack = f"{title or ''}\n{snippet or ''}\n{url or ''}"
+        return not bool(cls.LEARNING_RESULT_PATTERN.search(haystack))
     def get_definition(self) -> ToolDefinition:
         return ToolDefinition(
             name="web_search",
@@ -561,31 +1113,180 @@ class WebSearchTool(BaseTool):
 
     async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
         params = self.validate_params(kwargs)
+        raw_query = params["query"]
+        query_candidates = self._build_query_candidates(raw_query)
+        if not query_candidates and raw_query:
+            query_candidates = [raw_query]
         try:
             from ddgs import DDGS
 
-            search_results = DDGS().text(params["query"], max_results=params.get("max_results", 5))
             results = []
             evidence = []
-            for item in search_results:
-                result = {
-                    "title": item.get("title", ""),
-                    "snippet": item.get("body", ""),
-                    "url": item.get("href", ""),
-                }
-                results.append(result)
-                evidence.append({"type": "web_result", "summary": result["title"], "excerpt": result["snippet"]})
+            query_used = raw_query
+
+            for candidate in query_candidates:
+                query_used = candidate
+                search_results = DDGS().text(candidate, max_results=params.get("max_results", 5))
+                candidate_results = []
+                candidate_evidence = []
+                for item in search_results:
+                    result = {
+                        "title": item.get("title", ""),
+                        "snippet": item.get("body", ""),
+                        "url": item.get("href", ""),
+                    }
+                    if self._is_noisy_result(result["title"], result["snippet"], result["url"]) or self._is_low_signal_result(
+                        candidate,
+                        result["title"],
+                        result["snippet"],
+                        result["url"],
+                    ):
+                        continue
+                    candidate_results.append(result)
+                    candidate_evidence.append(
+                        {
+                            "type": "web_result",
+                            "title": result["title"],
+                            "summary": result["title"],
+                            "excerpt": result["snippet"],
+                            "url": result["url"],
+                        }
+                    )
+
+                if candidate_results:
+                    results = candidate_results
+                    evidence = candidate_evidence
+                    break
+            fallback_used = bool(query_candidates) and query_used != query_candidates[0]
+            if not results:
+                return self.build_result(
+                    success=True,
+                    payload={
+                        "query": raw_query,
+                        "query_used": query_used,
+                        "query_candidates": query_candidates,
+                        "results": [],
+                        "count": 0,
+                        "text": "未找到相关的网页搜索结果。",
+                    },
+                    quality_status="pass",
+                    confidence=0.35,
+                    fallback_used=True if query_candidates else fallback_used,
+                )
+
             return self.build_result(
                 success=True,
-                payload={"query": params["query"], "results": results, "count": len(results)},
+                payload={
+                    "query": raw_query,
+                    "query_used": query_used,
+                    "query_candidates": query_candidates,
+                    "results": results,
+                    "count": len(results),
+                },
                 evidence=evidence,
                 confidence=0.74,
+                fallback_used=fallback_used,
             )
         except Exception as exc:
             logger.warning("网络搜索降级: %s", exc)
             return self.build_result(
                 success=True,
                 payload={"query": params["query"], "results": [], "count": 0, "text": "网络搜索暂不可用。"},
+                quality_status="warning",
+                confidence=0.2,
+                fallback_used=True,
+            )
+    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+        params = self.validate_params(kwargs)
+        raw_query = params["query"]
+        query_candidates = self._build_query_candidates(raw_query)
+        if not query_candidates and raw_query:
+            query_candidates = [raw_query]
+
+        try:
+            from ddgs import DDGS
+
+            results = []
+            evidence = []
+            query_used = raw_query
+
+            for candidate in query_candidates:
+                query_used = candidate
+                search_results = DDGS().text(candidate, max_results=params.get("max_results", 5))
+                candidate_results = []
+                candidate_evidence = []
+
+                for item in search_results:
+                    result = {
+                        "title": item.get("title", ""),
+                        "snippet": item.get("body", ""),
+                        "url": item.get("href", ""),
+                    }
+                    if self._is_noisy_result(result["title"], result["snippet"], result["url"]) or self._is_low_signal_result(
+                        candidate,
+                        result["title"],
+                        result["snippet"],
+                        result["url"],
+                    ):
+                        continue
+                    candidate_results.append(result)
+                    candidate_evidence.append(
+                        {
+                            "type": "web_result",
+                            "title": result["title"],
+                            "summary": result["title"],
+                            "excerpt": result["snippet"],
+                            "url": result["url"],
+                        }
+                    )
+
+                if candidate_results:
+                    results = candidate_results
+                    evidence = candidate_evidence
+                    break
+
+            fallback_used = bool(query_candidates) and query_used != query_candidates[0]
+            if not results:
+                return self.build_result(
+                    success=True,
+                    payload={
+                        "query": raw_query,
+                        "query_used": query_used,
+                        "query_candidates": query_candidates,
+                        "results": [],
+                        "count": 0,
+                        "text": "未找到相关的网页搜索结果。",
+                    },
+                    quality_status="pass",
+                    confidence=0.35,
+                    fallback_used=True if query_candidates else fallback_used,
+                )
+
+            return self.build_result(
+                success=True,
+                payload={
+                    "query": raw_query,
+                    "query_used": query_used,
+                    "query_candidates": query_candidates,
+                    "results": results,
+                    "count": len(results),
+                },
+                evidence=evidence,
+                confidence=0.74,
+                fallback_used=fallback_used,
+            )
+        except Exception as exc:
+            logger.warning("网络搜索降级: %s", exc)
+            return self.build_result(
+                success=True,
+                payload={
+                    "query": raw_query,
+                    "query_used": raw_query,
+                    "query_candidates": query_candidates,
+                    "results": [],
+                    "count": 0,
+                    "text": "网络搜索暂不可用。",
+                },
                 quality_status="warning",
                 confidence=0.2,
                 fallback_used=True,

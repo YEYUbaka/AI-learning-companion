@@ -328,6 +328,71 @@ async def get_document_content(
         "content": content
     }
 
+r'''
+@router.get("/documents/{doc_id}/preview")
+async def get_document_preview(
+    doc_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """鑾峰彇鏂囨。鍙緵鐢ㄦ埛閲忚鐨勯瑙堝唴瀹?"""
+    doc = db.query(KnowledgeDocument).filter(KnowledgeDocument.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="鏂囨。涓嶅瓨鍦?)
+
+    if not os.path.exists(doc.file_path):
+        raise HTTPException(status_code=404, detail="鏂囦欢涓嶅瓨鍦?)
+
+    try:
+        with open(doc.file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"璇诲彇鏂囦欢澶辫触: {e}")
+
+    return {
+        "id": doc.id,
+        "title": doc.title,
+        "grade_level": doc.grade_level,
+        "subject": doc.subject,
+        "topic": doc.topic,
+        "source": doc.source,
+        "tags": doc.tags or [],
+        "content": content,
+    }
+'''
+
+
+@router.get("/documents/{doc_id}/preview")
+async def get_document_preview(
+    doc_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取文档只读预览内容（普通登录用户可访问）。"""
+    doc = db.query(KnowledgeDocument).filter(KnowledgeDocument.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    if not os.path.exists(doc.file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    try:
+        with open(doc.file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取文件失败: {e}")
+
+    return {
+        "id": doc.id,
+        "title": doc.title,
+        "grade_level": doc.grade_level,
+        "subject": doc.subject,
+        "topic": doc.topic,
+        "source": doc.source,
+        "tags": doc.tags or [],
+        "content": content,
+    }
+
 
 @router.put("/documents/{doc_id}")
 async def update_document(

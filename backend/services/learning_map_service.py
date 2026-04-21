@@ -193,6 +193,8 @@ class LearningMapService:
             except ValueError as exc:
                 last_error = exc
                 if attempt < max_attempts:
+                    # Feed the invalid output back into the retry prompt so the
+                    # model can correct structure errors instead of regenerating blindly.
                     prompt = LearningMapService._build_retry_prompt(
                         source_excerpt, map_mode, raw_text
                     )
@@ -303,6 +305,7 @@ class LearningMapService:
             nodes_data=normalized_nodes,
             file_id=file_id,
         )
+        # Persist nodes first and resolve edges by title after ids are assigned.
         title_to_id = {node.title: node.id for node in nodes}
         edges = LearningMapRepository.create_edges(
             db=db,

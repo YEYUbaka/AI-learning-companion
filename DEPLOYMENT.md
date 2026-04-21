@@ -9,8 +9,8 @@
 
 | 项目 | 本地开发 | 生产服务器 |
 |------|---------|----------|
-| **后端地址** | http://127.0.0.1:8000 | http://47.114.79.49（Nginx 80 端口） |
-| **前端地址** | http://localhost:5173（或 5174） | http://47.114.79.49 |
+| **后端地址** | http://127.0.0.1:8000 | http://http://47.111.227.9/（Nginx 80 端口） |
+| **前端地址** | http://localhost:5173（或 5174） | http://http://47.111.227.9/ |
 | **后端代码路径** | `E:\AI_projects\Web\backend\` | `/opt/zhixueban/backend/` |
 | **前端代码路径** | `E:\AI_projects\Web\frontend\` | `/opt/zhixueban/frontend/` |
 | **后端启动方式** | `uvicorn main:app --reload` | `systemctl restart zhixueban-backend` |

@@ -107,11 +107,21 @@ const AgentChat = () => {
     if (file) handleFileUpload(file);
   };
 
+  const handleGoalKeyDown = (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent?.isComposing) {
+      return;
+    }
+
+    e.preventDefault();
+    handleSubmit({ preventDefault: () => {} });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!goal.trim()) return;
 
     cancelActiveStream();
+    // Freeze the active run id so stale SSE callbacks cannot mutate a newer task.
     const streamRunId = activeStreamRunIdRef.current;
     setLoading(true);
     setError(null);
@@ -133,8 +143,7 @@ const AgentChat = () => {
     };
     setCurrentSession(tempSession);
 
-    // AI-assisted: DeepSeek-V3 2026-01 — SSE流式接收框架与currentSession状态结构
-    // 修改: streamRunId取消机制重构、mode参数切换、组件拆分到AgentStepViewer.jsx由开发者完成
+    // Stream task events into a local step timeline so the UI can replay progress.
     try {
       activeStreamRef.current = agentApi.createTaskStream(
         finalGoal,
@@ -147,6 +156,7 @@ const AgentChat = () => {
           setCurrentSession(prev => {
             if (!prev) return prev;
 
+            // Keep an append-only step trace so the UI can replay the agent flow.
             const newSession = {
               ...prev,
               steps: [...prev.steps],
@@ -347,6 +357,11 @@ const AgentChat = () => {
     return scrollElement.scrollHeight - (window.scrollY + window.innerHeight) < threshold;
   };
 
+  const isMobileViewport = () => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 1024;
+  };
+
   const updateScrollToBottomVisibility = () => {
     const shouldShow = Boolean(currentSession) && !isNearPageBottom();
     userScrolledUpRef.current = shouldShow;
@@ -382,6 +397,13 @@ const AgentChat = () => {
     if (!currentSession) {
       userScrolledUpRef.current = false;
       setShowScrollToBottom(false);
+      return;
+    }
+
+    if (!isMobileViewport()) {
+      requestAnimationFrame(() => {
+        updateScrollToBottomVisibility();
+      });
       return;
     }
 
@@ -428,8 +450,9 @@ const AgentChat = () => {
                   <textarea
                     value={goal}
                     onChange={(e) => setGoal(e.target.value)}
+                    onKeyDown={handleGoalKeyDown}
                     placeholder="例如：分析上传的文件并生成学习计划和测验"
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
+                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none transition-colors ${
                       isDark
                         ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-500'
                         : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
@@ -525,7 +548,7 @@ const AgentChat = () => {
                   <select
                     value={mode}
                     onChange={(e) => setMode(e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors ${
+                    className={`w-full px-3 py-2 border rounded-lg focus:outline-none transition-colors ${
                       isDark
                         ? 'bg-slate-700 border-slate-600 text-white'
                         : 'bg-white border-gray-300 text-gray-900'

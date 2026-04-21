@@ -6,6 +6,8 @@ import rehypeKatex from 'rehype-katex';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 import api from '../api/apiClient';
+import { getAnchorProps } from '../utils/links';
+import { normalizeMarkdownContent } from '../utils/markdown';
 import 'katex/dist/katex.min.css';
 import { useThemeStore } from '../store/themeStore';
 
@@ -1330,13 +1332,13 @@ function AIChat() {
                           th: ({ children }) => <th className="px-4 py-2 text-left font-semibold">{children}</th>,
                           td: ({ children }) => <td className="px-4 py-2">{children}</td>,
                           a: ({ children, href }) => (
-                            <a href={href} target="_blank" rel="noopener noreferrer" className={layout.link}>
+                            <a {...getAnchorProps(href)} className={layout.link}>
                               {children}
                             </a>
                           ),
                         }}
                       >
-                        {normalizeMathContent(msg.content)}
+                        {normalizeMarkdownContent(normalizeMathContent(msg.content))}
                       </ReactMarkdown>
                     </div>
                   )}

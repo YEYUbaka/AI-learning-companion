@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import { useThemeStore } from '../store/themeStore';
+import { getAnchorProps } from '../utils/links';
 import { normalizeMarkdownContent } from '../utils/markdown';
 import { normalizeQuizQuestions } from '../utils/quiz';
 
@@ -389,8 +390,7 @@ function QuizResult() {
     a: ({ node, ...props }) => (
       <a
         {...props}
-        target="_blank"
-        rel="noopener noreferrer"
+        {...getAnchorProps(props.href)}
         className={isDark ? 'text-blue-400 underline hover:text-blue-300' : 'text-blue-600 underline hover:text-blue-800'}
       />
     ),

@@ -59,6 +59,8 @@ class OpenAICompatProvider(AIProvider):
             "Content-Type": "application/json",
             **self.extra_headers,
         }
+        # Keep the provider payload normalized here so different vendors can
+        # share one request path and one fallback contract upstream.
         payload = {
             "model": kwargs.get("model", self.model_name),
             "messages": messages,
@@ -110,6 +112,8 @@ class OpenAICompatProvider(AIProvider):
                                 delta = chunk_data.get("choices", [{}])[0].get("delta", {})
                                 content = delta.get("content", "")
                                 if content:
+                                    # Normalize every provider stream to the same SSE token event
+                                    # so the frontend only needs to handle one format.
                                     yield f'data: {json.dumps({"type": "token", "content": content}, ensure_ascii=False)}\n\n'
                                 if chunk_data.get("model"):
                                     model_name = chunk_data["model"]
@@ -275,8 +279,8 @@ def _provider_template(
     }
 
 
-# AI-assisted: DeepSeek-V3 2025-12 — Provider注册工厂结构与httpx请求实现
-# Prompt: "我正在开发一个支持多AI提供商的学习平台，需要一个统一的Provider注册工厂..."
+# AI辅助生成: DeepSeek-V3 2025-12 — Provider注册工厂结构与httpx请求实现
+# Prompt: "我正在开发一个支持多AI提供商的学习平台，需要一个统一的Provider注册..."
 # 修改: 增加了PROVIDER_ALIASES别名反向查找、call_with_fallback()容错逻辑、加密密钥解密集成
 PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
     "deepseek": _provider_template(

@@ -12,6 +12,7 @@ import { useThemeStore } from '../store/themeStore';
 import MindMapNode from '../components/MindMapNode';
 import { getLayoutedElements } from '../utils/mindMapLayout';
 import { getUserId } from '../utils/auth';
+import { getAnchorProps } from '../utils/links';
 import logger from '../utils/logger';
 
 const masteryColors = {
@@ -603,9 +604,7 @@ function LearningMap() {
                         {selectedNode.resources.map((resource, index) => (
                           <li key={`${resource.url || resource.title || index}-${index}`}>
                             <a
-                              href={resource.url || '#'}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                              {...getAnchorProps(resource.url || '#')}
                               className={`text-blue-600 hover:underline ${!resource.url ? 'pointer-events-none opacity-50' : ''}`}
                             >
                               {resource.title || resource.url || `资源 ${index + 1}`}

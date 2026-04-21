@@ -8,6 +8,7 @@ import StudyPlan from './pages/StudyPlan';
 import Quiz from './pages/Quiz';
 import QuizResult from './pages/QuizResult';
 import LearningMap from './pages/LearningMap';
+import KnowledgeDocument from './pages/KnowledgeDocument';
 import AdminDashboard from './pages/Admin/Dashboard';
 import ModelManagement from './pages/Admin/ModelManagement';
 import PromptEditor from './pages/Admin/PromptEditor';
@@ -106,6 +107,14 @@ const AppContent = () => {
           element={
             <ProtectedRoute>
               <LearningMap />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/knowledge/documents/:docId"
+          element={
+            <ProtectedRoute>
+              <KnowledgeDocument />
             </ProtectedRoute>
           }
         />

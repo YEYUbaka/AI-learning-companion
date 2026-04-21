@@ -74,6 +74,61 @@ SEARCH_INTENT_KEYWORDS_EN = [
     "look up",
 ]
 
+LEARNING_PATH_KEYWORDS = [
+    "学习计划",
+    "学习路线",
+    "学习路径",
+    "路线图",
+]
+
+LEARNING_PATH_KEYWORDS_EN = [
+    "study plan",
+    "learning path",
+    "learning roadmap",
+    "roadmap",
+]
+
+TECH_QUERY_KEYWORDS = [
+    "Java",
+    "java",
+    "Python",
+    "python",
+    "Go",
+    "golang",
+    "JavaScript",
+    "TypeScript",
+    "Spring",
+    "Spring Boot",
+    "MySQL",
+    "Redis",
+    "JVM",
+    "后端",
+    "前端",
+    "编程",
+    "开发",
+    "算法",
+    "数据结构",
+    "面试",
+]
+
+TECH_QUERY_KEYWORDS_EN = [
+    "java",
+    "python",
+    "golang",
+    "javascript",
+    "typescript",
+    "spring",
+    "spring boot",
+    "mysql",
+    "redis",
+    "jvm",
+    "backend",
+    "frontend",
+    "programming",
+    "coding",
+    "interview",
+]
+
 META_EVIDENCE_MARKERS = [
     "本地知识库未命中",
     "知识库未命中",
@@ -120,10 +175,32 @@ class AgentPlanner:
             SEARCH_INTENT_KEYWORDS_EN,
         ) or cls._is_current_events_query(goal_text, lower_goal)
 
-    # AI-assisted: ChatGPT-4o 2026-01 — ReAct模式Thought-Action-Observation循环框架
-    # Prompt: "请为教育AI平台设计一个ReAct模式的Agent执行引擎..."
-    # 修改: 关键词检测数组、SSE推送格式、多工具意图路由逻辑由开发者大幅重写
+    @classmethod
+    def _is_learning_path_query(cls, goal_text: str, lower_goal: str) -> bool:
+        return cls._contains_any_keyword(
+            goal_text,
+            lower_goal,
+            LEARNING_PATH_KEYWORDS,
+            LEARNING_PATH_KEYWORDS_EN,
+        ) or "怎么学" in goal_text
+
+    @classmethod
+    def _is_tech_query(cls, goal_text: str, lower_goal: str) -> bool:
+        return cls._contains_any_keyword(
+            goal_text,
+            lower_goal,
+            TECH_QUERY_KEYWORDS,
+            TECH_QUERY_KEYWORDS_EN,
+        )
+
+    @classmethod
+    def _is_tech_learning_query(cls, goal_text: str, lower_goal: str) -> bool:
+        return cls._is_tech_query(goal_text, lower_goal) and cls._is_learning_path_query(goal_text, lower_goal)
+
+    # ReAct-style planner that maps common intents to deterministic tool chains.
     def plan(self, goal: str) -> Dict[str, Any]:
+        # Route high-confidence intents first so required tools are selected
+        # deterministically before the downstream agent starts free-form work.
         goal_text = (goal or "").strip()
         lower_goal = goal_text.lower()
         trace_id = str(uuid4())
@@ -181,6 +258,21 @@ class AgentPlanner:
             ]
             rationale = "检测到近期/最新资讯类诉求，优先联网搜索，再由 AI 整理为正式回答。"
             confidence = 0.88
+        elif self._is_tech_learning_query(goal_text, lower_goal):
+            tool_steps = [
+                {
+                    "tool_name": "search_knowledge",
+                    "tool_input": {"query": goal_text, "limit": 5},
+                    "reason": "先检索技术学习路径相关知识证据，为最终回答补充可点击参考链接",
+                },
+                {
+                    "tool_name": "generate_study_plan",
+                    "tool_input": {"goal": goal_text},
+                    "reason": "技术学习路径请求直接生成阶段化计划，避免误召回中小学知识库",
+                }
+            ]
+            rationale = "检测到编程/面试类学习路径请求，优先生成学习计划而不是检索 K12 知识库。"
+            confidence = 0.86
         elif any(keyword in goal_text for keyword in EDUCATION_EVIDENCE_KEYWORDS):
             tool_steps.append(
                 {
@@ -369,7 +461,11 @@ class AgentExecutor:
     @staticmethod
     def _goal_prefers_live_search(goal: str) -> bool:
         goal_text = (goal or "").strip()
-        return AgentPlanner._is_current_events_query(goal_text, goal_text.lower())
+        lower_goal = goal_text.lower()
+        return (
+            AgentPlanner._is_current_events_query(goal_text, lower_goal)
+            or AgentPlanner._is_tech_learning_query(goal_text, lower_goal)
+        )
 
     @staticmethod
     def _observation_has_useful_results(observation: Dict[str, Any]) -> bool:
@@ -379,6 +475,8 @@ class AgentExecutor:
             return True
         if observation.get("count", 0):
             return True
+        if observation.get("fallback_used"):
+            return False
 
         text = (observation.get("text") or "").strip()
         if not text:
@@ -635,6 +733,18 @@ class AgentExecutor:
                 previous_output = {**previous_output, **observation}
                 step_number += 1
 
+                if self._should_add_supplemental_web_search(goal, observation, observations):
+                    supplemental_input = {"query": goal, "max_results": 5}
+                    supplemental_observation = await self._execute_tool_step(
+                        trace_id=trace_id,
+                        step_number=step_number,
+                        tool_name="web_search",
+                        tool_input=supplemental_input,
+                    )
+                    observations.append(supplemental_observation)
+                    previous_output = {**previous_output, **supplemental_observation}
+                    step_number += 1
+
             review = self.reviewer.review(plan, observations)
             final_answer = await self._build_final_answer_async(goal, plan, observations, review)
             review["fallback_used"] = review.get("fallback_used", False) or self.final_answer_fallback_used
@@ -715,6 +825,32 @@ class AgentExecutor:
             }
             await asyncio.sleep(0.05)
             step_number += 1
+
+            if self._should_add_supplemental_web_search(goal, observation, observations):
+                supplemental_input = {"query": goal, "max_results": 5}
+                yield {
+                    "type": "action",
+                    "tool_name": "web_search",
+                    "tool_input": supplemental_input,
+                    "step_number": step_number,
+                    "trace_id": trace_id,
+                }
+                supplemental_observation = await self._execute_tool_step(
+                    trace_id,
+                    step_number,
+                    "web_search",
+                    supplemental_input,
+                )
+                observations.append(supplemental_observation)
+                previous_output = {**previous_output, **supplemental_observation}
+                yield {
+                    "type": "observation",
+                    "result": supplemental_observation,
+                    "step_number": step_number + 1,
+                    "trace_id": trace_id,
+                }
+                await asyncio.sleep(0.05)
+                step_number += 1
 
         review = self.reviewer.review(plan, observations)
         final_answer = await self._build_final_answer_async(goal, plan, observations, review)

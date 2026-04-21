@@ -128,3 +128,52 @@ async def test_quiz_submit_returns_extended_result_fields(monkeypatch):
     assert len(result["next_steps"]) == 2
     assert result["quiz_id"] == 123
     assert db.rollback_called is False
+
+
+def test_normalize_evaluation_result_extracts_embedded_json_review_payload():
+    questions = [
+        {
+            "question": "Python 中类的构造方法是什么？",
+            "answer": "__init__",
+            "type": "fill",
+            "knowledge_point": "构造方法",
+        }
+    ]
+    user_answers = [""]
+    embedded_payload = {
+        "summary": "当前对类的初始化机制掌握不稳，建议回到对象创建流程重新梳理。",
+        "weak_points": [
+            {
+                "knowledge_point": "构造方法",
+                "reason": "对 __init__ 的触发时机理解不清。",
+                "related_questions": [1],
+            }
+        ],
+        "next_steps": [
+            "重新练习包含 __init__ 的类定义，并观察实例化时的调用过程。",
+            "对比 __init__ 与普通实例方法的执行时机。",
+        ],
+    }
+    embedded_json = (
+        '{"summary":"当前对类的初始化机制掌握不稳，建议回到对象创建流程重新梳理。",'
+        '"weak_points":[{"knowledge_point":"构造方法","reason":"对 __init__ 的触发时机理解不清。","related_questions":[1]}],'
+        '"next_steps":["重新练习包含 __init__ 的类定义，并观察实例化时的调用过程。","对比 __init__ 与普通实例方法的执行时机。"]}'
+    )
+    result_data = {
+        "score": 0,
+        "summary": embedded_json,
+        "next_steps": [embedded_json],
+        "explanations": [
+            {
+                "question": questions[0]["question"],
+                "correct": False,
+                "explanation": "示例解析",
+            }
+        ],
+    }
+
+    normalized = normalize_evaluation_result(result_data, questions, user_answers)
+
+    assert normalized["summary"] == embedded_payload["summary"]
+    assert normalized["weak_points"] == embedded_payload["weak_points"]
+    assert normalized["next_steps"] == embedded_payload["next_steps"]

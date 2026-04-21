@@ -26,6 +26,11 @@ export const getDocumentContent = async (docId) => {
   return res.data;
 };
 
+export const getDocumentPreview = async (docId) => {
+  const res = await apiClient.get(`/api/v1/knowledge/documents/${docId}/preview`);
+  return res.data;
+};
+
 export const registerDocument = async (filePath, title) => {
   const res = await apiClient.post('/api/v1/knowledge/documents', { file_path: filePath, title });
   return res.data;

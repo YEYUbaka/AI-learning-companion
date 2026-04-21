@@ -3,6 +3,7 @@ RAG 服务 - 基于 ChromaDB 的语义检索核心
 """
 import os
 import json
+import re
 import uuid
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ from core.config import settings
 @dataclass
 class SearchResult:
     """检索结果"""
+    document_id: Optional[int]
+    chunk_index: Optional[int]
     text: str
     title: str
     grade_level: Optional[str]
@@ -32,9 +35,74 @@ class RAGService:
     """RAG 检索服务（ChromaDB + SentenceTransformers）"""
 
     COLLECTION_NAME = "zhixueban_knowledge"
+    K12_GRADE_LEVELS = {"小学", "初中", "高中"}
+    K12_SUBJECTS = {"语文", "数学", "英语", "物理", "化学", "生物", "历史", "地理", "政治", "道德与法治"}
+    TECH_QUERY_TERMS = (
+        "java",
+        "python",
+        "golang",
+        "javascript",
+        "typescript",
+        "spring",
+        "spring boot",
+        "mysql",
+        "redis",
+        "jvm",
+        "backend",
+        "frontend",
+        "编程",
+        "开发",
+        "算法",
+        "数据结构",
+        "面试",
+    )
     _client = None
     _collection = None
     _embedding_fn = None
+
+    @classmethod
+    def _extract_query_tech_terms(cls, query: str) -> List[str]:
+        lower_query = (query or "").lower()
+        matched_terms: List[str] = []
+        for term in cls.TECH_QUERY_TERMS:
+            if term in lower_query or term in query:
+                matched_terms.append(term)
+        return matched_terms
+
+    @classmethod
+    def _is_k12_metadata(cls, metadata: Dict[str, Any]) -> bool:
+        grade_level = (metadata.get("grade_level") or "").strip()
+        subject = (metadata.get("subject") or "").strip()
+        return grade_level in cls.K12_GRADE_LEVELS or subject in cls.K12_SUBJECTS
+
+    @classmethod
+    def _matches_query_domain(cls, query: str, metadata: Dict[str, Any], doc_text: str) -> bool:
+        tech_terms = cls._extract_query_tech_terms(query)
+        if not tech_terms:
+            return True
+
+        haystack = " ".join(
+            [
+                str(metadata.get("title") or ""),
+                str(metadata.get("subject") or ""),
+                str(metadata.get("topic") or ""),
+                str(metadata.get("section_title") or ""),
+                doc_text[:400],
+            ]
+        ).lower()
+
+        matched_in_doc = []
+        for term in tech_terms:
+            if term in haystack:
+                matched_in_doc.append(term)
+                continue
+            if re.fullmatch(r"[a-z0-9 .+-]+", term) and re.search(rf"\b{re.escape(term)}\b", haystack):
+                matched_in_doc.append(term)
+
+        if matched_in_doc:
+            return True
+
+        return not cls._is_k12_metadata(metadata)
 
     @classmethod
     def _get_embedding_fn(cls):
@@ -223,7 +291,7 @@ class RAGService:
             db.commit()
             return {"success": False, "error": str(e)}
 
-    # AI-assisted: ChatGPT-4o 2026-02 — ChromaDB语义检索查询构造与SentenceTransformer懒加载
+    # AI辅助生成: Kimi 2026-02 — ChromaDB语义检索查询构造与SentenceTransformer懒加载
     # Prompt: "请帮我实现一个基于ChromaDB的RAG检索服务..."
     # 修改: HF_ENDPOINT国内镜像、image_paths字段、SearchResult字段定义、Agent工具集成由开发者实现
     @classmethod
@@ -283,6 +351,11 @@ class RAGService:
                 results["metadatas"][0],
                 results["distances"][0]
             )):
+                # Vector recall may bring back K12 content for technical queries,
+                # so run one more lightweight domain filter before returning hits.
+                if not cls._matches_query_domain(query, metadata, doc_text):
+                    continue
+
                 image_paths = []
                 try:
                     image_paths = json.loads(metadata.get("image_paths", "[]"))
@@ -290,6 +363,8 @@ class RAGService:
                     pass
 
                 search_results.append(SearchResult(
+                    document_id=int(metadata["document_id"]) if metadata.get("document_id") else None,
+                    chunk_index=int(metadata["chunk_index"]) if metadata.get("chunk_index") else None,
                     text=doc_text,
                     title=metadata.get("title", ""),
                     grade_level=metadata.get("grade_level") or None,
@@ -335,6 +410,7 @@ class RAGService:
             if len(text) > remaining:
                 text = text[:remaining] + "..."
 
+            # Keep the assembled context bounded so downstream prompts stay stable.
             lines.append(text)
             total_chars += len(text)
 

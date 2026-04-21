@@ -69,7 +69,7 @@ EVALUATION_PROMPT = """你是智学伴，一个AI个性化学习与测评助手�
 }"""
 
 
-# AI-assisted: DeepSeek-V3 2025-12 — 试题生成Prompt结构与JSON解析框架
+# AI辅助生成: 智谱AI GLM-4.7 2025-12 — 试题生成Prompt结构与JSON解析框架
 # Prompt: "请为K12教育平台设计一个试题生成Prompt，要求严格JSON数组输出..."
 # 修改: 增加clean_and_extract_json()容错解析、题型分布参数、嵌套JSON截断处理由开发者重写
 def generate_quiz(
@@ -496,6 +496,46 @@ def _normalize_explanations(explanations, questions: List[Dict], user_answers: L
     return normalized_explanations
 
 
+def _parse_json_candidate(value):
+    if value in (None, ""):
+        return None
+
+    if isinstance(value, (dict, list)):
+        return value
+
+    if not isinstance(value, str):
+        return None
+
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return None
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            return json.loads(clean_and_extract_json(text, is_object=text[0] == "{"))
+        except ValueError:
+            return None
+
+
+def _extract_embedded_review_payload(value):
+    parsed = _parse_json_candidate(value)
+
+    if isinstance(parsed, dict) and any(
+        key in parsed for key in ("summary", "weak_points", "next_steps", "suggestions")
+    ):
+        return parsed
+
+    if isinstance(parsed, list):
+        for item in parsed:
+            payload = _extract_embedded_review_payload(item)
+            if payload:
+                return payload
+
+    return None
+
+
 def _fallback_weak_points(questions: List[Dict], explanations: List[Dict]) -> List[Dict]:
     grouped: Dict[str, Dict] = {}
 
@@ -538,6 +578,11 @@ def _fallback_weak_points(questions: List[Dict], explanations: List[Dict]) -> Li
 
 def _normalize_weak_points(raw_weak_points, questions: List[Dict], explanations: List[Dict]) -> List[Dict]:
     weak_points: List[Dict] = []
+    parsed_weak_points = _parse_json_candidate(raw_weak_points)
+    if isinstance(parsed_weak_points, dict):
+        raw_weak_points = parsed_weak_points.get("weak_points")
+    elif isinstance(parsed_weak_points, list):
+        raw_weak_points = parsed_weak_points
 
     if isinstance(raw_weak_points, list):
         for item in raw_weak_points:
@@ -595,6 +640,14 @@ def _normalize_next_steps(raw_next_steps, weak_points: List[Dict], raw_suggestio
     def _extend_from_value(value):
         if value in (None, ""):
             return
+
+        embedded_payload = _extract_embedded_review_payload(value)
+        if embedded_payload:
+            _extend_from_value(embedded_payload.get("next_steps"))
+            if not steps:
+                _extend_from_value(embedded_payload.get("suggestions"))
+            return
+
         if isinstance(value, list):
             for item in value:
                 _extend_from_value(item)
@@ -638,6 +691,17 @@ def _normalize_next_steps(raw_next_steps, weak_points: List[Dict], raw_suggestio
 def normalize_evaluation_result(result_data: Dict, questions: List[Dict], user_answers: List[str]) -> Dict:
     normalized_questions = [_normalize_question_metadata(question) for question in questions]
     normalized_explanations = _normalize_explanations(result_data.get("explanations", []), normalized_questions, user_answers)
+    embedded_payload = None
+    for candidate in (
+        result_data.get("summary"),
+        result_data.get("suggestions"),
+        result_data.get("next_steps"),
+        result_data.get("weak_points"),
+    ):
+        embedded_payload = _extract_embedded_review_payload(candidate)
+        if embedded_payload:
+            break
+
     correct_count = sum(1 for item in normalized_explanations if item.get("correct"))
     raw_total_count = result_data.get("total_count")
     try:
@@ -647,20 +711,38 @@ def normalize_evaluation_result(result_data: Dict, questions: List[Dict], user_a
     if total_count <= 0:
         total_count = len(normalized_explanations) or len(normalized_questions) or 0
 
+    raw_weak_points = result_data.get("weak_points")
+    if raw_weak_points in (None, "", []) and embedded_payload:
+        raw_weak_points = embedded_payload.get("weak_points")
     weak_points = _normalize_weak_points(
-        result_data.get("weak_points"),
+        raw_weak_points,
         normalized_questions,
         normalized_explanations,
     )
+
+    raw_next_steps = result_data.get("next_steps")
+    if (
+        embedded_payload
+        and (
+            raw_next_steps in (None, "", [])
+            or _extract_embedded_review_payload(raw_next_steps)
+        )
+    ):
+        raw_next_steps = embedded_payload.get("next_steps") or raw_next_steps
     next_steps = _normalize_next_steps(
-        result_data.get("next_steps"),
+        raw_next_steps,
         weak_points,
-        raw_suggestions=result_data.get("suggestions"),
+        raw_suggestions=embedded_payload.get("suggestions") if embedded_payload else result_data.get("suggestions"),
     )
-    summary = _stringify_quiz_value(
-        result_data.get("summary")
-        or result_data.get("suggestions")
-    ).strip()
+
+    summary_source = result_data.get("summary")
+    if embedded_payload and (not summary_source or _extract_embedded_review_payload(summary_source)):
+        summary_source = embedded_payload.get("summary") or embedded_payload.get("suggestions")
+    if not summary_source:
+        summary_source = result_data.get("suggestions")
+    if embedded_payload and (not summary_source or _extract_embedded_review_payload(summary_source)):
+        summary_source = embedded_payload.get("summary") or embedded_payload.get("suggestions") or summary_source
+    summary = _stringify_quiz_value(summary_source).strip()
 
     if not summary:
         if weak_points:
