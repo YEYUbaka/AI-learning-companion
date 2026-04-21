@@ -170,7 +170,7 @@ pip list | grep chromadb  # RAG 可选
 
 # 查看日志（后端启动后）
 # 日志输出到 stdout，生产服务器使用 journalctl
-ssh root@47.114.79.49 "journalctl -u zhixueban-backend -n 50 --no-pager"
+ssh root@47.111.227.9 "journalctl -u zhixueban-backend -n 50 --no-pager"
 ```
 
 ## 种子数据修改流程
@@ -179,5 +179,5 @@ ssh root@47.114.79.49 "journalctl -u zhixueban-backend -n 50 --no-pager"
 2. `${DEEPSEEK_API_KEY}` 等占位符会在启动时自动从 `.env` 读取替换
 3. 重启后端：
    - 本地：重启 uvicorn 进程
-   - 生产：`ssh root@47.114.79.49 "systemctl restart zhixueban-backend"`
+   - 生产：`ssh root@47.111.227.9 "systemctl restart zhixueban-backend"`
 4. 检查日志中出现 `[OK] 种子数据同步完成` 即成功

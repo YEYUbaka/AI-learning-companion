@@ -9,8 +9,8 @@
 
 | 项目 | 本地开发 | 生产服务器 |
 |------|---------|----------|
-| **后端地址** | http://127.0.0.1:8000 | http://http://47.111.227.9/（Nginx 80 端口） |
-| **前端地址** | http://localhost:5173（或 5174） | http://http://47.111.227.9/ |
+| **后端地址** | http://127.0.0.1:8000 | http://47.111.227.9/（Nginx 80 端口） |
+| **前端地址** | http://localhost:5173（或 5174） | http://47.111.227.9/ |
 | **后端代码路径** | `E:\AI_projects\Web\backend\` | `/opt/zhixueban/backend/` |
 | **前端代码路径** | `E:\AI_projects\Web\frontend\` | `/opt/zhixueban/frontend/` |
 | **后端启动方式** | `uvicorn main:app --reload` | `systemctl restart zhixueban-backend` |
@@ -72,8 +72,8 @@ pytest tests/test_ai_service_async.py -v # 运行指定测试文件
 
 | 项目 | 值 |
 |------|---|
-| IP | `47.114.79.49` |
-| SSH 登录 | `ssh root@47.114.79.49` |
+| IP | `47.111.227.9` |
+| SSH 登录 | `ssh root@47.111.227.9` |
 | 后端路径 | `/opt/zhixueban/backend/` |
 | 前端路径 | `/opt/zhixueban/frontend/` |
 
@@ -81,19 +81,19 @@ pytest tests/test_ai_service_async.py -v # 运行指定测试文件
 
 ```bash
 # 重启后端
-ssh root@47.114.79.49 "systemctl restart zhixueban-backend"
+ssh root@47.111.227.9 "systemctl restart zhixueban-backend"
 
 # 查看后端状态
-ssh root@47.114.79.49 "systemctl status zhixueban-backend"
+ssh root@47.111.227.9 "systemctl status zhixueban-backend"
 
 # 查看后端日志（最近 50 行）
-ssh root@47.114.79.49 "journalctl -u zhixueban-backend -n 50 --no-pager"
+ssh root@47.111.227.9 "journalctl -u zhixueban-backend -n 50 --no-pager"
 
 # 重载 Nginx（修改 nginx.conf 后需执行）
-ssh root@47.114.79.49 "systemctl reload nginx"
+ssh root@47.111.227.9 "systemctl reload nginx"
 
 # 查看 Nginx 状态
-ssh root@47.114.79.49 "systemctl status nginx"
+ssh root@47.111.227.9 "systemctl status nginx"
 ```
 
 ---
@@ -104,57 +104,57 @@ ssh root@47.114.79.49 "systemctl status nginx"
 
 ```bash
 # 替换 <relative_path> 为相对于 backend/ 的路径，例如 services/ai_service.py
-scp E:\AI_projects\Web\backend\<relative_path> root@47.114.79.49:/opt/zhixueban/backend/<relative_path>
+scp E:\AI_projects\Web\backend\<relative_path> root@47.111.227.9:/opt/zhixueban/backend/<relative_path>
 
 # 同步后重启后端
-ssh root@47.114.79.49 "systemctl restart zhixueban-backend"
+ssh root@47.111.227.9 "systemctl restart zhixueban-backend"
 
 # 确认重启成功（看到 active (running) 即可）
-ssh root@47.114.79.49 "systemctl status zhixueban-backend --no-pager"
+ssh root@47.111.227.9 "systemctl status zhixueban-backend --no-pager"
 ```
 
 **示例**：
 
 ```bash
-scp E:\AI_projects\Web\backend\services\agent_executor.py root@47.114.79.49:/opt/zhixueban/backend/services/agent_executor.py
-ssh root@47.114.79.49 "systemctl restart zhixueban-backend"
+scp E:\AI_projects\Web\backend\services\agent_executor.py root@47.111.227.9:/opt/zhixueban/backend/services/agent_executor.py
+ssh root@47.111.227.9 "systemctl restart zhixueban-backend"
 ```
 
 ### 同步前端文件（需重新构建）
 
 ```bash
 # 1. 同步源文件
-scp E:\AI_projects\Web\frontend\src\<relative_path> root@47.114.79.49:/opt/zhixueban/frontend/src/<relative_path>
+scp E:\AI_projects\Web\frontend\src\<relative_path> root@47.111.227.9:/opt/zhixueban/frontend/src/<relative_path>
 
 # 2. 在服务器上重新构建（构建产物由 Nginx 提供）
-ssh root@47.114.79.49 "cd /opt/zhixueban/frontend && npm run build"
+ssh root@47.111.227.9 "cd /opt/zhixueban/frontend && npm run build"
 ```
 
 **示例**：
 
 ```bash
-scp E:\AI_projects\Web\frontend\src\pages\AgentChat.jsx root@47.114.79.49:/opt/zhixueban/frontend/src/pages/AgentChat.jsx
-ssh root@47.114.79.49 "cd /opt/zhixueban/frontend && npm run build"
+scp E:\AI_projects\Web\frontend\src\pages\AgentChat.jsx root@47.111.227.9:/opt/zhixueban/frontend/src/pages/AgentChat.jsx
+ssh root@47.111.227.9 "cd /opt/zhixueban/frontend && npm run build"
 ```
 
 ### 同步多个文件（使用 scp -r 递归）
 
 ```bash
 # 同步整个 services 目录
-scp -r E:\AI_projects\Web\backend\services\ root@47.114.79.49:/opt/zhixueban/backend/services/
-ssh root@47.114.79.49 "systemctl restart zhixueban-backend"
+scp -r E:\AI_projects\Web\backend\services\ root@47.111.227.9:/opt/zhixueban/backend/services/
+ssh root@47.111.227.9 "systemctl restart zhixueban-backend"
 
 # 同步整个前端 src 目录并重新构建
-scp -r E:\AI_projects\Web\frontend\src\ root@47.114.79.49:/opt/zhixueban/frontend/src/
-ssh root@47.114.79.49 "cd /opt/zhixueban/frontend && npm run build"
+scp -r E:\AI_projects\Web\frontend\src\ root@47.111.227.9:/opt/zhixueban/frontend/src/
+ssh root@47.111.227.9 "cd /opt/zhixueban/frontend && npm run build"
 ```
 
 ### 同步种子数据
 
 ```bash
 # 同步 models.json（AI Provider 配置）
-scp E:\AI_projects\Web\backend\seed_data\models.json root@47.114.79.49:/opt/zhixueban/backend/seed_data/models.json
-ssh root@47.114.79.49 "systemctl restart zhixueban-backend"
+scp E:\AI_projects\Web\backend\seed_data\models.json root@47.111.227.9:/opt/zhixueban/backend/seed_data/models.json
+ssh root@47.111.227.9 "systemctl restart zhixueban-backend"
 # 日志中出现 "[OK] 种子数据同步完成" 即成功
 ```
 
@@ -176,7 +176,7 @@ Nginx 配置位于前端目录：`frontend/nginx.conf`
 
 ```bash
 # 先同步文件（nginx.conf 在生产机器哪里需根据实际部署调整）
-ssh root@47.114.79.49 "systemctl reload nginx"
+ssh root@47.111.227.9 "systemctl reload nginx"
 ```
 
 ---
@@ -217,12 +217,12 @@ ssh root@47.114.79.49 "systemctl reload nginx"
   测试: cd backend && pytest tests/ -v
 
 [生产同步]
-  后端: scp <file> root@47.114.79.49:/opt/zhixueban/backend/<path>
-        ssh root@47.114.79.49 "systemctl restart zhixueban-backend"
-  前端: scp <file> root@47.114.79.49:/opt/zhixueban/frontend/src/<path>
-        ssh root@47.114.79.49 "cd /opt/zhixueban/frontend && npm run build"
+  后端: scp <file> root@47.111.227.9:/opt/zhixueban/backend/<path>
+        ssh root@47.111.227.9 "systemctl restart zhixueban-backend"
+  前端: scp <file> root@47.111.227.9:/opt/zhixueban/frontend/src/<path>
+        ssh root@47.111.227.9 "cd /opt/zhixueban/frontend && npm run build"
 
 [生产日志]
-  后端: ssh root@47.114.79.49 "journalctl -u zhixueban-backend -n 50 --no-pager"
-  Nginx: ssh root@47.114.79.49 "systemctl reload nginx"
+  后端: ssh root@47.111.227.9 "journalctl -u zhixueban-backend -n 50 --no-pager"
+  Nginx: ssh root@47.111.227.9 "systemctl reload nginx"
 ```
