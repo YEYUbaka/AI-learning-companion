@@ -165,3 +165,11 @@ agent-zero-main/
 # 误创建的文件
 backend/nul
 
+# Repo slimming (remove from GitHub, keep local if needed)
+_archive/
+.claude/
+docs/
+CLAUDE.md
+DEPLOYMENT.md
+build_index2.py
+
