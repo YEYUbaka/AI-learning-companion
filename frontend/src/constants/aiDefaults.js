@@ -1,1 +1,2 @@
 export const DEFAULT_AI_MAX_TOKENS = 16384;
+export const MAX_AI_TOKEN_LIMIT = 1000000;

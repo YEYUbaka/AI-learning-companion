@@ -17,7 +17,7 @@ class AIRequest(BaseModel):
     max_tokens: Optional[int] = Field(
         settings.AI_DEFAULT_MAX_TOKENS,
         ge=1,
-        le=65536,
+        le=settings.AI_MAX_TOKEN_LIMIT,
         description="最大token数",
     )
 

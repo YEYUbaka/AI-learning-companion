@@ -35,3 +35,10 @@ def test_load_from_db_resolves_provider_name_and_id_aliases(monkeypatch):
         registry._providers = original_providers
         registry._provider_params = original_params
         registry._provider_aliases = original_aliases
+
+
+def test_resolve_provider_name_supports_doubao_aliases():
+    registry = ModelRegistry()
+
+    assert registry._resolve_provider_name("豆包") == "doubao"
+    assert registry._resolve_provider_name("ark") == "doubao"

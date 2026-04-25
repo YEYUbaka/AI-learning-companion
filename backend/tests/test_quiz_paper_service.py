@@ -55,6 +55,20 @@ def test_build_blueprint_generates_complete_question_specs():
     assert blueprint["summary"]["difficulty_distribution"]["medium"] >= 2
 
 
+def test_build_blueprint_supports_question_type_scores():
+    config = _base_config()
+    config["question_type_scores"] = {"choice": 3, "fill": 8}
+
+    blueprint = QuizPaperService.build_blueprint(config)
+
+    choice_scores = [item["score"] for item in blueprint["question_specs"] if item["question_type"] == "choice"]
+    fill_scores = [item["score"] for item in blueprint["question_specs"] if item["question_type"] == "fill"]
+
+    assert choice_scores == [3, 3, 3, 3]
+    assert fill_scores == [8, 8]
+    assert blueprint["total_score"] == sum(choice_scores) + sum(fill_scores)
+
+
 def test_review_generated_paper_reports_quality_warnings():
     blueprint = QuizPaperService.build_blueprint(_base_config())
     questions = [

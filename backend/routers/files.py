@@ -1,137 +1,141 @@
 """
-文件上传路由
-处理文件上传和解析
+File upload routes.
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
-from fastapi.responses import JSONResponse
+from __future__ import annotations
+
+import mimetypes
 import os
 import shutil
-from typing import Optional
-from utils.file_parser import parse_file, get_file_info
+import time
+from typing import Dict
 
-router = APIRouter(prefix="/api/v1/files", tags=["文件上传"])
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi.responses import JSONResponse
 
-# 上传文件保存目录
+from utils.file_parser import get_file_info, parse_file
+
+
+router = APIRouter(prefix="/api/v1/files", tags=["files"])
+
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# 允许的文件类型
-ALLOWED_EXTENSIONS = {'.pdf', '.txt', '.md', '.markdown', '.docx', '.pptx'}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+DOCUMENT_EXTENSIONS = {".pdf", ".txt", ".md", ".markdown", ".docx", ".pptx"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+ALLOWED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS
+MAX_FILE_SIZE = 10 * 1024 * 1024
+
+
+def _resolve_file_type(file_ext: str) -> str:
+    if file_ext in IMAGE_EXTENSIONS:
+        return "image"
+    if file_ext in DOCUMENT_EXTENSIONS:
+        return "document"
+    return "file"
+
+
+def _safe_filename(file_name: str) -> str:
+    name, ext = os.path.splitext(file_name or "upload")
+    safe_stem = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in name)[:80] or "upload"
+    return f"{safe_stem}_{int(time.time() * 1000)}{ext.lower()}"
+
+
+def _build_attachment_payload(
+    *,
+    original_name: str,
+    relative_path: str,
+    mime_type: str,
+    file_type: str,
+    preview_url: str,
+    file_size: int,
+) -> Dict[str, str]:
+    return {
+        "name": original_name,
+        "file_name": original_name,
+        "file_path": relative_path,
+        "file_url": preview_url,
+        "mime_type": mime_type,
+        "file_type": file_type,
+        "type": "image" if file_type == "image" else "file_reference",
+        "image_url": preview_url if file_type == "image" else None,
+        "size": file_size,
+    }
 
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    """
-    上传文件并解析内容
-    
-    Args:
-        file: 上传的文件
-        
-    Returns:
-        dict: 文件信息和解析结果
-    """
+    file_ext = os.path.splitext(file.filename or "")[1].lower()
+    if file_ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unsupported file type: {file_ext}",
+        )
+
+    file_type = _resolve_file_type(file_ext)
+    saved_name = _safe_filename(file.filename or "upload")
+    relative_path = os.path.join(UPLOAD_DIR, saved_name)
+    absolute_path = os.path.abspath(relative_path)
+
     try:
-        # 检查文件类型
-        file_ext = os.path.splitext(file.filename)[1].lower()
-        if file_ext not in ALLOWED_EXTENSIONS:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"不支持的文件类型: {file_ext}。支持的类型: {', '.join(ALLOWED_EXTENSIONS)}"
-            )
-        
-        # 保存文件
-        file_path = os.path.join(UPLOAD_DIR, file.filename)
-        
-        # 如果文件已存在，添加时间戳
-        if os.path.exists(file_path):
-            import time
-            name, ext = os.path.splitext(file.filename)
-            file_path = os.path.join(UPLOAD_DIR, f"{name}_{int(time.time())}{ext}")
-        
-        # 读取并保存文件
-        with open(file_path, "wb") as buffer:
+        with open(absolute_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        
-        # 检查文件大小
-        file_size = os.path.getsize(file_path)
+        file_size = os.path.getsize(absolute_path)
         if file_size > MAX_FILE_SIZE:
-            os.remove(file_path)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"文件过大: {file_size / 1024 / 1024:.2f}MB，最大允许: {MAX_FILE_SIZE / 1024 / 1024}MB"
-            )
-        
-        # 解析文件内容
-        try:
-            text_content, text_length = parse_file(file_path)
-            print(f"[INFO] 文件解析成功: {file.filename}, 提取文本长度: {text_length} 字符")
-        except ValueError as e:
-            # 如果解析失败（不支持的类型或内容为空），删除文件
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"文件解析失败: {str(e)}"
-            )
-        except Exception as e:
-            # 其他解析错误
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            print(f"[ERROR] 文件解析异常: {file.filename}, 错误: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"文件解析失败: {str(e)}"
-            )
-        
-        # 返回结果
-        return JSONResponse({
-            "success": True,
-            "file_name": file.filename,
-            "file_path": file_path,
-            "file_size": file_size,
-            "text_length": text_length,
-            "text_preview": text_content[:200] + "..." if len(text_content) > 200 else text_content,
-            "message": "文件上传并解析成功"
-        })
-        
+            os.remove(absolute_path)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file is too large")
+
+        mime_type = file.content_type or mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream"
+        preview_url = f"/uploads/{saved_name}"
+
+        text_content = ""
+        text_length = 0
+        if file_type == "document":
+            try:
+                text_content, text_length = parse_file(absolute_path)
+            except ValueError as exc:
+                if os.path.exists(absolute_path):
+                    os.remove(absolute_path)
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"failed to parse file: {exc}") from exc
+            except Exception as exc:  # pylint: disable=broad-except
+                if os.path.exists(absolute_path):
+                    os.remove(absolute_path)
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"failed to parse file: {exc}") from exc
+
+        attachment = _build_attachment_payload(
+            original_name=file.filename or saved_name,
+            relative_path=relative_path.replace("\\", "/"),
+            mime_type=mime_type,
+            file_type=file_type,
+            preview_url=preview_url,
+            file_size=file_size,
+        )
+        return JSONResponse(
+            {
+                "success": True,
+                "file_name": file.filename,
+                "file_path": relative_path.replace("\\", "/"),
+                "file_size": file_size,
+                "file_type": file_type,
+                "mime_type": mime_type,
+                "preview_url": preview_url,
+                "text_length": text_length,
+                "text_preview": text_content[:200] + "..." if text_content and len(text_content) > 200 else text_content,
+                "attachment": attachment,
+                "message": "file uploaded successfully",
+            }
+        )
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"文件上传失败: {str(e)}"
-        )
+    except Exception as exc:  # pylint: disable=broad-except
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"file upload failed: {exc}") from exc
 
 
 @router.get("/info/{file_name}")
 async def get_file_info_endpoint(file_name: str):
-    """
-    获取文件信息
-    
-    Args:
-        file_name: 文件名
-        
-    Returns:
-        dict: 文件信息
-    """
     file_path = os.path.join(UPLOAD_DIR, file_name)
-    
     if not os.path.exists(file_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="文件不存在"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="file not found")
     try:
-        info = get_file_info(file_path)
-        return JSONResponse({
-            "success": True,
-            "file_info": info
-        })
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取文件信息失败: {str(e)}"
-        )
-
+        return JSONResponse({"success": True, "file_info": get_file_info(file_path)})
+    except Exception as exc:  # pylint: disable=broad-except
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"failed to get file info: {exc}") from exc

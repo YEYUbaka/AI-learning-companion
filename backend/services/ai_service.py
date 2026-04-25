@@ -1,7 +1,8 @@
 """
-AI 服务
-统一封装系统 Prompt 注入、fallback、品牌清洗、日志和追踪元数据。
+Unified AI service helpers.
 """
+from __future__ import annotations
+
 import asyncio
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -19,21 +20,53 @@ from utils.markdown_sanitizer import clean_ai_response
 from utils.model_registry import registry
 
 
-DEFAULT_SYSTEM_PROMPT = "你是一个专业的 AI 学习助手，帮助用户学习和理解知识。"
+DEFAULT_SYSTEM_PROMPT = "You are a professional AI learning assistant."
 
 
 class AIService:
-    """AI 服务类"""
+    @staticmethod
+    def _build_input_items(
+        *,
+        system_prompt_content: str,
+        user_prompt: Optional[str] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        if system_prompt_content:
+            items.append({"role": "system", "content": system_prompt_content})
+        if input_items:
+            items.extend(input_items)
+        elif user_prompt is not None:
+            items.append({"role": "user", "content": user_prompt})
+        return items
+
+    @staticmethod
+    def _record_api_call(db: Session, provider: Optional[str], source: str, success: bool) -> None:
+        try:
+            APICallRepository.record_call(db, provider, source=source, success=success)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("Failed to record API call: %s", exc)
+
+    @staticmethod
+    def get_provider_capabilities(provider: Optional[str]) -> Dict[str, Any]:
+        if not provider:
+            return {}
+        return registry.get_provider_capabilities(provider)
 
     @staticmethod
     async def call_ai_async(
-        user_prompt: str,
+        user_prompt: Optional[str] = None,
+        *,
+        input_items: Optional[List[Dict[str, Any]]] = None,
         system_prompt_name: str = "system_prompt",
         provider: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = settings.AI_DEFAULT_MAX_TOKENS,
         quality_context: Optional[Dict[str, Any]] = None,
         allow_fallback: bool = True,
+        instructions: Optional[str] = None,
+        previous_response_id: Optional[str] = None,
+        extra_model_args: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         def _runner() -> Dict[str, Any]:
             db = SessionLocal()
@@ -41,12 +74,16 @@ class AIService:
                 return AIService.call_ai(
                     db=db,
                     user_prompt=user_prompt,
+                    input_items=input_items,
                     system_prompt_name=system_prompt_name,
                     provider=provider,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     quality_context=quality_context,
                     allow_fallback=allow_fallback,
+                    instructions=instructions,
+                    previous_response_id=previous_response_id,
+                    extra_model_args=extra_model_args,
                 )
             finally:
                 db.close()
@@ -55,13 +92,17 @@ class AIService:
 
     @staticmethod
     async def call_ai_with_tools_async(
-        user_prompt: str,
+        user_prompt: Optional[str] = None,
+        *,
         tools: List[Dict[str, Any]],
+        input_items: Optional[List[Dict[str, Any]]] = None,
         system_prompt_name: str = "system_prompt",
         provider: Optional[str] = None,
         temperature: float = 0.2,
         max_tokens: int = settings.AI_DEFAULT_MAX_TOKENS,
         quality_context: Optional[Dict[str, Any]] = None,
+        allow_fallback: bool = True,
+        extra_model_args: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         def _runner() -> Dict[str, Any]:
             db = SessionLocal()
@@ -69,12 +110,15 @@ class AIService:
                 return AIService.call_ai_with_tools(
                     db=db,
                     user_prompt=user_prompt,
+                    input_items=input_items,
                     tools=tools,
                     system_prompt_name=system_prompt_name,
                     provider=provider,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     quality_context=quality_context,
+                    allow_fallback=allow_fallback,
+                    extra_model_args=extra_model_args,
                 )
             finally:
                 db.close()
@@ -82,76 +126,55 @@ class AIService:
         return await asyncio.to_thread(_runner)
 
     @staticmethod
-    def _record_api_call(
-        db: Session, provider: Optional[str], source: str, success: bool
-    ) -> None:
-        try:
-            APICallRepository.record_call(
-                db, provider, source=source, success=success
-            )
-        except Exception as log_error:
-            logger.warning("记录 API 调用日志失败: %s", log_error)
-
-    # AI辅助生成: 智谱AI GLM-5 2026-01 — 统一AI调用接口、system prompt注入、fallback逻辑
-    # Prompt: "请帮我设计一个FastAPI项目的AI调用统一层..."
-    # 修改: 品牌替换改为多关键词列表、增加quality_status/confidence等trace元数据、日志写入由开发者实现
-    @staticmethod
     def call_ai(
         db: Session,
-        user_prompt: str,
+        user_prompt: Optional[str] = None,
+        *,
+        input_items: Optional[List[Dict[str, Any]]] = None,
         system_prompt_name: str = "system_prompt",
         provider: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = settings.AI_DEFAULT_MAX_TOKENS,
         quality_context: Optional[Dict[str, Any]] = None,
         allow_fallback: bool = True,
+        instructions: Optional[str] = None,
+        previous_response_id: Optional[str] = None,
+        extra_model_args: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         trace_id = str(uuid4())
-        system_prompt_content = (
-            PromptService.get_system_prompt(db, system_prompt_name)
-            or DEFAULT_SYSTEM_PROMPT
+        system_prompt_content = PromptService.get_system_prompt(db, system_prompt_name) or DEFAULT_SYSTEM_PROMPT
+        request_items = AIService._build_input_items(
+            system_prompt_content=system_prompt_content,
+            user_prompt=user_prompt,
+            input_items=input_items,
         )
-        # Always resolve the latest stored system prompt so prompt tuning can be
-        # updated from the admin side without redeploying the backend.
-        messages = [
-            {"role": "system", "content": system_prompt_content},
-            {"role": "user", "content": user_prompt},
-        ]
 
         try:
             result = registry.call_with_fallback(
-                messages=messages,
+                input_items=request_items,
                 preferred_provider=provider,
                 allow_fallback=allow_fallback,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                instructions=instructions,
+                previous_response_id=previous_response_id,
+                **(extra_model_args or {}),
             )
-
             actual_provider = result.get("provider", provider or "unknown")
-            fallback_used = bool(provider and actual_provider != provider)
-            quality_status = "warning" if fallback_used else "pass"
-            confidence = 0.72 if fallback_used else 0.86
             raw_text = result.get("text", "")
             cleaned_text = clean_ai_response(raw_text)
-
-            AIService._record_api_call(
-                db,
-                actual_provider,
-                source="user",
-                success=True,
-            )
-
-            # Preserve both raw and cleaned text so callers can audit formatting
-            # issues while still getting a sanitized user-facing answer.
+            fallback_used = bool(provider and actual_provider != provider)
+            AIService._record_api_call(db, actual_provider, source="user", success=True)
             return {
                 "trace_id": trace_id,
                 "provider": actual_provider,
                 "raw": raw_text,
                 "text": cleaned_text,
-                "quality_status": quality_status,
-                "confidence": confidence,
+                "quality_status": "warning" if fallback_used else "pass",
+                "confidence": 0.72 if fallback_used else 0.88,
                 "fallback_used": fallback_used,
                 "evidence": [],
+                "tool_calls": result.get("tool_calls", []),
                 "metadata": {
                     "usage": result.get("usage", {}),
                     "model": result.get("model", ""),
@@ -159,75 +182,65 @@ class AIService:
                     "system_prompt_name": system_prompt_name,
                     "quality_context": quality_context or {},
                     "trace_id": trace_id,
+                    "provider_format": result.get("provider_format"),
+                    "response_id": result.get("response_id"),
+                    "capabilities": registry.get_provider_capabilities(actual_provider),
                 },
             }
-        except UpstreamServiceError as exc:
-            logger.error("AI 调用失败: %s", exc)
-            AIService._record_api_call(
-                db, provider or "unknown", source="user", success=False
-            )
+        except UpstreamServiceError:
+            AIService._record_api_call(db, provider or "unknown", source="user", success=False)
             raise
-        except Exception as exc:
-            logger.error("AI 调用失败: %s", exc)
-            AIService._record_api_call(
-                db, provider or "unknown", source="user", success=False
-            )
-            raise Exception(f"AI 服务暂时不可用: {str(exc)}")
+        except Exception as exc:  # pylint: disable=broad-except
+            AIService._record_api_call(db, provider or "unknown", source="user", success=False)
+            logger.error("AI call failed: %s", exc)
+            raise Exception(f"AI service unavailable: {exc}") from exc
 
     @staticmethod
     def call_ai_with_tools(
         db: Session,
-        user_prompt: str,
+        user_prompt: Optional[str] = None,
+        *,
+        input_items: Optional[List[Dict[str, Any]]] = None,
         tools: List[Dict[str, Any]],
         system_prompt_name: str = "system_prompt",
         provider: Optional[str] = None,
         temperature: float = 0.2,
         max_tokens: int = settings.AI_DEFAULT_MAX_TOKENS,
         quality_context: Optional[Dict[str, Any]] = None,
+        allow_fallback: bool = True,
+        extra_model_args: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         trace_id = str(uuid4())
-        system_prompt_content = (
-            PromptService.get_system_prompt(db, system_prompt_name)
-            or DEFAULT_SYSTEM_PROMPT
+        system_prompt_content = PromptService.get_system_prompt(db, system_prompt_name) or DEFAULT_SYSTEM_PROMPT
+        request_items = AIService._build_input_items(
+            system_prompt_content=system_prompt_content,
+            user_prompt=user_prompt,
+            input_items=input_items,
         )
-        # Tool calls use the same prompt injection path as plain chat so feature
-        # behavior stays consistent across direct answers and agent workflows.
-        messages = [
-            {"role": "system", "content": system_prompt_content},
-            {"role": "user", "content": user_prompt},
-        ]
 
         try:
             result = registry.call_with_function_calling(
-                messages=messages,
+                input_items=request_items,
                 tools=tools,
                 preferred_provider=provider,
+                allow_fallback=allow_fallback,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                **(extra_model_args or {}),
             )
-
             actual_provider = result.get("provider", provider or "unknown")
-            fallback_used = bool(provider and actual_provider != provider)
-            quality_status = "warning" if fallback_used else "pass"
-            confidence = 0.72 if fallback_used else 0.9
             raw_text = result.get("text", "")
             cleaned_text = clean_ai_response(raw_text)
-
-            AIService._record_api_call(
-                db,
-                actual_provider,
-                source="function_calling",
-                success=True,
-            )
-
+            fallback_used = bool(provider and actual_provider != provider)
+            AIService._record_api_call(db, actual_provider, source="function_calling", success=True)
             return {
                 "trace_id": trace_id,
                 "provider": actual_provider,
                 "raw": raw_text,
                 "text": cleaned_text,
-                "tool_calls": result.get("tool_calls", result.get("function_calls", [])),
-                "quality_status": quality_status,
-                "confidence": confidence,
+                "tool_calls": result.get("tool_calls", []),
+                "quality_status": "warning" if fallback_used else "pass",
+                "confidence": 0.74 if fallback_used else 0.91,
                 "fallback_used": fallback_used,
                 "evidence": [],
                 "metadata": {
@@ -237,29 +250,21 @@ class AIService:
                     "system_prompt_name": system_prompt_name,
                     "quality_context": quality_context or {},
                     "trace_id": trace_id,
+                    "provider_format": result.get("provider_format"),
+                    "response_id": result.get("response_id"),
+                    "capabilities": registry.get_provider_capabilities(actual_provider),
                 },
             }
-        except UpstreamServiceError as exc:
-            logger.warning("AI Function Calling 调用失败: %s", exc)
-            AIService._record_api_call(
-                db, provider or "unknown", source="function_calling", success=False
-            )
+        except UpstreamServiceError:
+            AIService._record_api_call(db, provider or "unknown", source="function_calling", success=False)
             raise
-        except Exception as exc:
-            logger.warning("AI Function Calling 璋冪敤澶辫触: %s", exc)
-            AIService._record_api_call(
-                db, provider or "unknown", source="function_calling", success=False
-            )
-            raise Exception(f"AI Function Calling 暂时不可用: {str(exc)}")
+        except Exception as exc:  # pylint: disable=broad-except
+            AIService._record_api_call(db, provider or "unknown", source="function_calling", success=False)
+            logger.warning("AI tool call failed: %s", exc)
+            raise Exception(f"AI native tool calling unavailable: {exc}") from exc
 
     @staticmethod
-    def test_model_call(
-        db: Session,
-        provider_name: str,
-        test_prompt: str,
-    ) -> Dict[str, Any]:
-        messages = [{"role": "user", "content": test_prompt}]
-
+    def test_model_call(db: Session, provider_name: str, test_prompt: str) -> Dict[str, Any]:
         config = ModelConfigRepository.get_by_provider(db, provider_name)
         if not config:
             return {
@@ -268,7 +273,7 @@ class AIService:
                 "raw_response": "",
                 "cleaned_text": "",
                 "latency_ms": 0,
-                "error": f"未找到模型配置: {provider_name}",
+                "error": f"Model config not found: {provider_name}",
             }
         if not config.enabled:
             return {
@@ -277,7 +282,7 @@ class AIService:
                 "raw_response": "",
                 "cleaned_text": "",
                 "latency_ms": 0,
-                "error": f"模型已禁用: {provider_name}",
+                "error": f"Model is disabled: {provider_name}",
             }
 
         provider_instance = registry.build_provider_from_config(config)
@@ -288,25 +293,17 @@ class AIService:
                 "raw_response": "",
                 "cleaned_text": "",
                 "latency_ms": 0,
-                "error": "模型缺少有效的 API Key 或未被支持",
+                "error": "Model config is missing a valid API key",
             }
 
         try:
-            import time
-
-            start_time = time.time()
-            result = provider_instance.call(messages)
-            latency = (time.time() - start_time) * 1000
+            start_time = asyncio.get_event_loop_policy().get_event_loop().time() if False else None
+            started = __import__("time").time()
+            result = provider_instance.call(messages=[{"role": "user", "content": test_prompt}])
+            latency = (__import__("time").time() - started) * 1000
             raw_text = result.get("text", "")
             cleaned_text = clean_ai_response(raw_text)
-
-            AIService._record_api_call(
-                db,
-                provider_name,
-                source="admin_test",
-                success=True,
-            )
-
+            AIService._record_api_call(db, provider_name, source="admin_test", success=True)
             return {
                 "success": True,
                 "provider": provider_name,
@@ -314,15 +311,11 @@ class AIService:
                 "cleaned_text": cleaned_text,
                 "latency_ms": latency,
                 "error": None,
+                "capabilities": provider_instance.get_capabilities(),
             }
         except Exception as exc:  # pylint: disable=broad-except
-            logger.error("测试模型调用失败: %s, 错误: %s", provider_name, exc)
-            AIService._record_api_call(
-                db,
-                provider_name,
-                source="admin_test",
-                success=False,
-            )
+            logger.error("Test model call failed: %s", exc)
+            AIService._record_api_call(db, provider_name, source="admin_test", success=False)
             return {
                 "success": False,
                 "provider": provider_name,

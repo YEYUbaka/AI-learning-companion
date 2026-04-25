@@ -1,12 +1,14 @@
 /**
- * Prompt编辑器页面
- * 目的：按系统/AI功能管理 Prompt，并支持版本查看与编辑
+ * Prompt 编辑器页面
+ * 目的：按系统/AI功能管理 Prompt，并支持移动端分段查看
  */
 import { useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../../components/AdminLayout';
 import api from '../../api/apiClient';
 import { useThemeStore } from '../../store/themeStore';
 import logger from '../../utils/logger';
+
+const getIsMobileLayout = () => typeof window !== 'undefined' && window.innerWidth < 1280;
 
 const PROMPT_FEATURE_META = {
   system_prompt: {
@@ -34,7 +36,7 @@ const PROMPT_FEATURE_META = {
     scene: '知识图谱 / 学习地图',
   },
   quiz_generator_prompt: {
-    system: 'AI测评',
+    system: '智能测试',
     feature: '常规测评组题',
     summary: '生成在线答题场景下的小型测验或练习题。',
     scene: '常规测评 / 章节练习 / 在线答题',
@@ -46,7 +48,7 @@ const PROMPT_FEATURE_META = {
     scene: '教师卷 / 练习卷 / 智能组卷',
   },
   answer_evaluation_prompt: {
-    system: 'AI测评',
+    system: '智能测试',
     feature: '交卷后复盘',
     summary: '统一输出得分、逐题解析和学习建议。',
     scene: '测评结果页 / AI 复盘',
@@ -87,7 +89,7 @@ const getPromptMeta = (name, description = '') => {
 
   if (name.includes('quiz') || name.includes('evaluation')) {
     return {
-      system: 'AI测评',
+      system: '智能测试',
       feature: '未归类测评能力',
       summary: description || '与测评出题或结果分析相关的提示词。',
       scene: '在线测评',
@@ -102,6 +104,31 @@ const getPromptMeta = (name, description = '') => {
   };
 };
 
+const MobilePanelTabs = ({ active, onChange, isDark }) => (
+  <div className="flex gap-2 overflow-x-auto pb-1">
+    {[
+      { key: 'features', label: '功能' },
+      { key: 'versions', label: '版本' },
+      { key: 'detail', label: '详情' },
+    ].map((panel) => (
+      <button
+        key={panel.key}
+        type="button"
+        onClick={() => onChange(panel.key)}
+        className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+          active === panel.key
+            ? 'bg-blue-600 text-white'
+            : isDark
+              ? 'bg-slate-900 text-slate-300'
+              : 'bg-white border border-slate-200 text-slate-600'
+        }`}
+      >
+        {panel.label}
+      </button>
+    ))}
+  </div>
+);
+
 const PromptEditor = () => {
   const [prompts, setPrompts] = useState([]);
   const [selectedPromptName, setSelectedPromptName] = useState('');
@@ -112,6 +139,8 @@ const PromptEditor = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [isMobileLayout, setIsMobileLayout] = useState(getIsMobileLayout);
+  const [mobilePanel, setMobilePanel] = useState('features');
   const [formData, setFormData] = useState({
     name: '',
     content: '',
@@ -220,6 +249,12 @@ const PromptEditor = () => {
     fetchPrompts();
   }, []);
 
+  useEffect(() => {
+    const handleResize = () => setIsMobileLayout(getIsMobileLayout());
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const promptGroups = useMemo(() => {
     const grouped = prompts.reduce((acc, prompt) => {
       if (!acc[prompt.name]) {
@@ -296,12 +331,18 @@ const PromptEditor = () => {
     setSelectedPromptName(promptName);
     setSelectedVersion(null);
     setIsEditing(false);
+    if (getIsMobileLayout()) {
+      setMobilePanel('versions');
+    }
     void fetchVersions(promptName);
   };
 
   const handleSelectVersion = (version) => {
     setSelectedVersion(version);
     setIsEditing(false);
+    if (getIsMobileLayout()) {
+      setMobilePanel('detail');
+    }
     setEditData({
       description: version.description || '',
       content: version.content || '',
@@ -369,18 +410,324 @@ const PromptEditor = () => {
   const statCards = [
     { label: '功能提示词', value: coverageStats.totalFeatures, hint: '按功能去重后统计' },
     { label: '提示词版本', value: coverageStats.totalVersions, hint: '包含所有历史版本' },
-    { label: '覆盖系统', value: coverageStats.totalSystems, hint: `${coverageStats.activeFeatures} 条功能当前启用` },
+    { label: '覆盖系统', value: coverageStats.totalSystems, hint: `${coverageStats.activeFeatures} 条功能当前启用中` },
   ];
+
+  const renderFeatureList = () => (
+    <div className={`flex flex-col rounded-md ${palette.card}`}>
+      <div className={`border-b px-4 py-4 ${palette.divider}`}>
+        <h3 className="font-semibold">功能清单</h3>
+        <p className={`mt-1 text-sm ${palette.pageNote}`}>按系统归类查看当前已管理的提示词</p>
+      </div>
+
+      <div className="space-y-5 p-4">
+        {loading ? (
+          <div className={`py-8 text-center ${palette.empty}`}>加载中...</div>
+        ) : error ? (
+          <div className={`space-y-3 py-8 text-center ${palette.empty}`}>
+            <p className="text-red-500">错误：{error}</p>
+            <button onClick={fetchPrompts} className={palette.buttonPrimary}>
+              重试
+            </button>
+          </div>
+        ) : promptGroups.length === 0 ? (
+          <div className={`py-8 text-center ${palette.empty}`}>
+            <p>暂无 Prompt</p>
+            <p className="mt-2 text-xs">创建后会自动按系统归档显示</p>
+          </div>
+        ) : (
+          Object.entries(groupedBySystem).map(([system, items]) => (
+            <section key={system}>
+              <div className={`mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] ${palette.muted}`}>
+                {system}
+              </div>
+              <div className="space-y-2">
+                {items.map((item) => (
+                  <button
+                    key={item.name}
+                    type="button"
+                    onClick={() => handleSelectPrompt(item.name)}
+                    className={`w-full rounded-md border p-3 text-left transition ${
+                      selectedPromptName === item.name ? palette.listActive : palette.listInactive
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold">{item.meta.feature}</div>
+                        <div className={`mt-1 break-all font-mono text-[11px] ${palette.pageNote}`}>
+                          {item.name}
+                        </div>
+                        <div className={`mt-2 text-xs leading-5 ${palette.pageNote}`}>
+                          {item.meta.summary}
+                        </div>
+                      </div>
+                      <span className={`shrink-0 rounded-md px-2 py-1 text-[11px] ${item.activeVersion?.enabled ? palette.badgePrimary : palette.badgeNeutral}`}>
+                        {item.activeVersion?.enabled ? '启用中' : '未启用'}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className={`rounded-md px-2 py-1 text-[11px] ${palette.badgeNeutral}`}>
+                        {item.versionCount} 个版本
+                      </span>
+                      <span className={`rounded-md px-2 py-1 text-[11px] ${palette.badgeNeutral}`}>
+                        {item.meta.scene}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  const renderVersionList = () => (
+    <div className={`rounded-md ${palette.card}`}>
+      <div className={`border-b px-4 py-4 ${palette.divider}`}>
+        <h3 className="font-semibold">
+          {selectedPrompt ? `${selectedPrompt.meta.feature} · 版本` : '版本列表'}
+        </h3>
+        <p className={`mt-1 text-sm ${palette.pageNote}`}>查看历史版本并切换当前启用版本</p>
+      </div>
+
+      <div className="max-h-[42rem] space-y-3 overflow-y-auto p-4">
+        {selectedPrompt ? (
+          versions.length > 0 ? (
+            versions.map((version) => (
+              <div
+                key={version.id}
+                className={`rounded-md border p-4 transition ${
+                  selectedVersion?.id === version.id ? palette.listActive : palette.listInactive
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleSelectVersion(version)}
+                  className="w-full text-left"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">版本 {version.version}</div>
+                      <div className={`mt-1 text-xs ${palette.pageNote}`}>
+                        {version.description || '未填写描述'}
+                      </div>
+                    </div>
+                    <span className={`rounded-md px-2 py-1 text-[11px] ${version.enabled ? palette.badgePrimary : palette.badgeNeutral}`}>
+                      {version.enabled ? '当前版本' : '历史版本'}
+                    </span>
+                  </div>
+
+                  <div className={`mt-3 text-xs ${palette.pageNote}`}>
+                    {new Date(version.updated_at || version.created_at).toLocaleString()}
+                  </div>
+                </button>
+
+                {!version.enabled && (
+                  <button
+                    type="button"
+                    onClick={() => handleEnableVersion(version.name, version.version)}
+                    className="mt-3 w-full rounded-md border border-blue-500/30 px-3 py-2 text-sm font-semibold text-blue-600 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-500/10"
+                  >
+                    启用该版本
+                  </button>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className={`py-8 text-center ${palette.empty}`}>暂无版本记录</div>
+          )
+        ) : (
+          <div className={`py-8 text-center ${palette.empty}`}>请先从左侧选择一个功能 Prompt</div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderDetailPanel = () => (
+    <div className={`rounded-md ${palette.card}`}>
+      <div className={`border-b px-4 py-4 ${palette.divider}`}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h3 className="font-semibold">版本详情</h3>
+            <p className={`mt-1 text-sm ${palette.pageNote}`}>
+              {selectedPrompt
+                ? `当前查看：${selectedPrompt.meta.system} / ${selectedPrompt.meta.feature}`
+                : '选择左侧 Prompt 查看详情'}
+            </p>
+          </div>
+
+          {selectedVersion && (
+            <button
+              type="button"
+              onClick={() => setIsEditing((prev) => !prev)}
+              className={palette.buttonGhost}
+            >
+              {isEditing ? '取消编辑' : '编辑内容'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-4 p-4">
+        {selectedPrompt && (
+          <div className={`rounded-md p-4 ${palette.cardSoft}`}>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>所属系统</div>
+                <div className="mt-2 text-sm font-semibold">{selectedPrompt.meta.system}</div>
+              </div>
+              <div>
+                <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>功能名称</div>
+                <div className="mt-2 text-sm font-semibold">{selectedPrompt.meta.feature}</div>
+              </div>
+              <div>
+                <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>使用场景</div>
+                <div className="mt-2 text-sm font-semibold">{selectedPrompt.meta.scene}</div>
+              </div>
+            </div>
+
+            <div className={`mt-4 border-t pt-4 ${palette.divider}`}>
+              <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>Prompt 名称</div>
+              <div className={`mt-2 break-all font-mono text-sm ${palette.pageNote}`}>{selectedPrompt.name}</div>
+              <div className={`mt-3 text-sm leading-6 ${palette.pageNote}`}>{selectedPrompt.meta.summary}</div>
+            </div>
+          </div>
+        )}
+
+        {selectedVersion ? (
+          isEditing ? (
+            <form onSubmit={handleUpdateVersion} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium">描述</label>
+                <input
+                  type="text"
+                  value={editData.description}
+                  onChange={(e) =>
+                    setEditData((prev) => ({ ...prev, description: e.target.value }))
+                  }
+                  className={palette.input}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium">内容</label>
+                <textarea
+                  value={editData.content}
+                  onChange={(e) =>
+                    setEditData((prev) => ({ ...prev, content: e.target.value }))
+                  }
+                  rows={18}
+                  className={`${palette.textarea} font-mono text-sm`}
+                  required
+                />
+              </div>
+
+              <label className={`flex items-center gap-2 text-sm ${palette.pageNote}`}>
+                <input
+                  type="checkbox"
+                  checked={editData.enabled}
+                  onChange={(e) =>
+                    setEditData((prev) => ({ ...prev, enabled: e.target.checked }))
+                  }
+                />
+                启用该版本
+              </label>
+
+              <div className="flex flex-wrap gap-3">
+                <button type="submit" disabled={saving} className={palette.buttonPrimary}>
+                  {saving ? '保存中...' : '保存修改'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditing(false);
+                    setEditData({
+                      description: selectedVersion.description || '',
+                      content: selectedVersion.content || '',
+                      enabled: selectedVersion.enabled,
+                    });
+                  }}
+                  className={palette.buttonGhost}
+                >
+                  取消
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="space-y-4">
+              <div className={`rounded-md p-4 ${palette.cardSoft}`}>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>版本说明</div>
+                    <div className="mt-2 text-sm leading-6">
+                      {selectedVersion.description || '未填写描述'}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <span className={`rounded-md px-2 py-1 text-[11px] ${selectedVersion.enabled ? palette.badgePrimary : palette.badgeNeutral}`}>
+                      {selectedVersion.enabled ? '已启用' : '未启用'}
+                    </span>
+                    <span className={`rounded-md px-2 py-1 text-[11px] ${palette.badgeNeutral}`}>
+                      版本 {selectedVersion.version}
+                    </span>
+                  </div>
+                </div>
+
+                <div className={`mt-4 border-t pt-4 text-xs ${palette.pageNote} ${palette.divider}`}>
+                  最近更新：{new Date(selectedVersion.updated_at || selectedVersion.created_at).toLocaleString()}
+                </div>
+              </div>
+
+              <div>
+                <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>Prompt 内容</div>
+                <pre
+                  className={`mt-2 max-h-[32rem] overflow-auto rounded-md border p-4 text-sm whitespace-pre-wrap ${palette.code}`}
+                >
+                  {selectedVersion.content}
+                </pre>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {!selectedVersion.enabled && (
+                  <button
+                    type="button"
+                    onClick={() => handleEnableVersion(selectedVersion.name, selectedVersion.version)}
+                    className={palette.buttonPrimary}
+                  >
+                    启用该版本
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => handleDelete(selectedVersion.id)}
+                  className={`text-sm font-medium ${palette.danger}`}
+                >
+                  删除当前版本
+                </button>
+              </div>
+            </div>
+          )
+        ) : (
+          <div className={`py-8 text-center ${palette.empty}`}>请选择一个版本查看详情</div>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <AdminLayout>
-      <div className="space-y-5">
+      <div className="space-y-5 p-4 sm:p-6">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className={`text-sm ${palette.pageNote}`}>系统 Prompt 与 AI 功能提示词管理</p>
             <h2 className={`text-2xl font-bold ${palette.heading}`}>Prompt 管理</h2>
             <p className={`mt-2 max-w-3xl text-sm ${palette.pageNote}`}>
-              后台不再只是显示一串 prompt name，而是按“系统 / 功能 / 场景”来管理，方便后续针对单个 AI 功能独立调优。
+              后台不再只是显示一个 prompt name，而是按“系统 / 功能 / 场景”来管理，方便后续针对单个 AI 功能独立调优。
             </p>
           </div>
 
@@ -473,309 +820,20 @@ const PromptEditor = () => {
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[340px_280px_minmax(0,1fr)] xl:items-start">
-          <div className={`flex flex-col rounded-md ${palette.card}`}>
-            <div className={`border-b px-4 py-4 ${palette.divider}`}>
-              <h3 className="font-semibold">功能清单</h3>
-              <p className={`mt-1 text-sm ${palette.pageNote}`}>按系统归类查看当前已管理的提示词</p>
-            </div>
-
-            <div className="space-y-5 p-4">
-              {loading ? (
-                <div className={`py-8 text-center ${palette.empty}`}>加载中...</div>
-              ) : error ? (
-                <div className={`space-y-3 py-8 text-center ${palette.empty}`}>
-                  <p className="text-red-500">错误：{error}</p>
-                  <button onClick={fetchPrompts} className={palette.buttonPrimary}>
-                    重试
-                  </button>
-                </div>
-              ) : promptGroups.length === 0 ? (
-                <div className={`py-8 text-center ${palette.empty}`}>
-                  <p>暂无 Prompt</p>
-                  <p className="mt-2 text-xs">创建后会自动按系统归档显示</p>
-                </div>
-              ) : (
-                Object.entries(groupedBySystem).map(([system, items]) => (
-                  <section key={system}>
-                    <div className={`mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] ${palette.muted}`}>
-                      {system}
-                    </div>
-                    <div className="space-y-2">
-                      {items.map((item) => (
-                        <button
-                          key={item.name}
-                          type="button"
-                          onClick={() => handleSelectPrompt(item.name)}
-                          className={`w-full rounded-md border p-3 text-left transition ${
-                            selectedPromptName === item.name ? palette.listActive : palette.listInactive
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold">{item.meta.feature}</div>
-                              <div className={`mt-1 break-all font-mono text-[11px] ${palette.pageNote}`}>
-                                {item.name}
-                              </div>
-                              <div className={`mt-2 text-xs leading-5 ${palette.pageNote}`}>
-                                {item.meta.summary}
-                              </div>
-                            </div>
-                            <span className={`shrink-0 rounded-md px-2 py-1 text-[11px] ${item.activeVersion?.enabled ? palette.badgePrimary : palette.badgeNeutral}`}>
-                              {item.activeVersion?.enabled ? '启用中' : '未启用'}
-                            </span>
-                          </div>
-
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <span className={`rounded-md px-2 py-1 text-[11px] ${palette.badgeNeutral}`}>
-                              {item.versionCount} 个版本
-                            </span>
-                            <span className={`rounded-md px-2 py-1 text-[11px] ${palette.badgeNeutral}`}>
-                              {item.meta.scene}
-                            </span>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                ))
-              )}
-            </div>
+        {isMobileLayout ? (
+          <div className="space-y-4">
+            <MobilePanelTabs active={mobilePanel} onChange={setMobilePanel} isDark={isDark} />
+            {(mobilePanel === 'features' || !selectedPrompt) && renderFeatureList()}
+            {mobilePanel === 'versions' && renderVersionList()}
+            {mobilePanel === 'detail' && renderDetailPanel()}
           </div>
-
-          <div className={`rounded-md ${palette.card}`}>
-            <div className={`border-b px-4 py-4 ${palette.divider}`}>
-              <h3 className="font-semibold">
-                {selectedPrompt ? `${selectedPrompt.meta.feature} · 版本` : '版本列表'}
-              </h3>
-              <p className={`mt-1 text-sm ${palette.pageNote}`}>
-                查看历史版本并切换当前启用版本
-              </p>
-            </div>
-
-            <div className="max-h-[42rem] space-y-3 overflow-y-auto p-4">
-              {selectedPrompt ? (
-                versions.length > 0 ? (
-                  versions.map((version) => (
-                    <div
-                      key={version.id}
-                      className={`rounded-md border p-4 transition ${
-                        selectedVersion?.id === version.id ? palette.listActive : palette.listInactive
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleSelectVersion(version)}
-                        className="w-full text-left"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold">版本 {version.version}</div>
-                            <div className={`mt-1 text-xs ${palette.pageNote}`}>
-                              {version.description || '未填写描述'}
-                            </div>
-                          </div>
-                          <span className={`rounded-md px-2 py-1 text-[11px] ${version.enabled ? palette.badgePrimary : palette.badgeNeutral}`}>
-                            {version.enabled ? '当前版本' : '历史版本'}
-                          </span>
-                        </div>
-
-                        <div className={`mt-3 text-xs ${palette.pageNote}`}>
-                          {new Date(version.updated_at || version.created_at).toLocaleString()}
-                        </div>
-                      </button>
-
-                      {!version.enabled && (
-                        <button
-                          type="button"
-                          onClick={() => handleEnableVersion(version.name, version.version)}
-                          className="mt-3 w-full rounded-md border border-blue-500/30 px-3 py-2 text-sm font-semibold text-blue-600 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-500/10"
-                        >
-                          启用该版本
-                        </button>
-                      )}
-                    </div>
-                  ))
-                ) : (
-                  <div className={`py-8 text-center ${palette.empty}`}>暂无版本记录</div>
-                )
-              ) : (
-                <div className={`py-8 text-center ${palette.empty}`}>请先从左侧选择一个功能 Prompt</div>
-              )}
-            </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-[340px_280px_minmax(0,1fr)] xl:items-start">
+            {renderFeatureList()}
+            {renderVersionList()}
+            {renderDetailPanel()}
           </div>
-
-          <div className={`rounded-md ${palette.card}`}>
-            <div className={`border-b px-4 py-4 ${palette.divider}`}>
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div>
-                  <h3 className="font-semibold">版本详情</h3>
-                  <p className={`mt-1 text-sm ${palette.pageNote}`}>
-                    {selectedPrompt
-                      ? `当前查看：${selectedPrompt.meta.system} / ${selectedPrompt.meta.feature}`
-                      : '选择左侧 Prompt 查看详情'}
-                  </p>
-                </div>
-
-                {selectedVersion && (
-                  <button
-                    type="button"
-                    onClick={() => setIsEditing((prev) => !prev)}
-                    className={palette.buttonGhost}
-                  >
-                    {isEditing ? '取消编辑' : '编辑内容'}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-4 p-4">
-              {selectedPrompt && (
-                <div className={`rounded-md p-4 ${palette.cardSoft}`}>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div>
-                      <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>所属系统</div>
-                      <div className="mt-2 text-sm font-semibold">{selectedPrompt.meta.system}</div>
-                    </div>
-                    <div>
-                      <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>功能名称</div>
-                      <div className="mt-2 text-sm font-semibold">{selectedPrompt.meta.feature}</div>
-                    </div>
-                    <div>
-                      <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>使用场景</div>
-                      <div className="mt-2 text-sm font-semibold">{selectedPrompt.meta.scene}</div>
-                    </div>
-                  </div>
-
-                  <div className={`mt-4 border-t pt-4 ${palette.divider}`}>
-                    <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>Prompt 名称</div>
-                    <div className={`mt-2 font-mono text-sm ${palette.pageNote}`}>{selectedPrompt.name}</div>
-                    <div className={`mt-3 text-sm leading-6 ${palette.pageNote}`}>{selectedPrompt.meta.summary}</div>
-                  </div>
-                </div>
-              )}
-
-              {selectedVersion ? (
-                isEditing ? (
-                  <form onSubmit={handleUpdateVersion} className="space-y-4">
-                    <div>
-                      <label className="mb-1 block text-sm font-medium">描述</label>
-                      <input
-                        type="text"
-                        value={editData.description}
-                        onChange={(e) =>
-                          setEditData((prev) => ({ ...prev, description: e.target.value }))
-                        }
-                        className={palette.input}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-1 block text-sm font-medium">内容</label>
-                      <textarea
-                        value={editData.content}
-                        onChange={(e) =>
-                          setEditData((prev) => ({ ...prev, content: e.target.value }))
-                        }
-                        rows={18}
-                        className={`${palette.textarea} font-mono text-sm`}
-                        required
-                      />
-                    </div>
-
-                    <label className={`flex items-center gap-2 text-sm ${palette.pageNote}`}>
-                      <input
-                        type="checkbox"
-                        checked={editData.enabled}
-                        onChange={(e) =>
-                          setEditData((prev) => ({ ...prev, enabled: e.target.checked }))
-                        }
-                      />
-                      启用该版本
-                    </label>
-
-                    <div className="flex flex-wrap gap-3">
-                      <button type="submit" disabled={saving} className={palette.buttonPrimary}>
-                        {saving ? '保存中...' : '保存修改'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsEditing(false);
-                          setEditData({
-                            description: selectedVersion.description || '',
-                            content: selectedVersion.content || '',
-                            enabled: selectedVersion.enabled,
-                          });
-                        }}
-                        className={palette.buttonGhost}
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <div className="space-y-4">
-                    <div className={`rounded-md p-4 ${palette.cardSoft}`}>
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>版本说明</div>
-                          <div className="mt-2 text-sm leading-6">
-                            {selectedVersion.description || '未填写描述'}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <span className={`rounded-md px-2 py-1 text-[11px] ${selectedVersion.enabled ? palette.badgePrimary : palette.badgeNeutral}`}>
-                            {selectedVersion.enabled ? '已启用' : '未启用'}
-                          </span>
-                          <span className={`rounded-md px-2 py-1 text-[11px] ${palette.badgeNeutral}`}>
-                            版本 {selectedVersion.version}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className={`mt-4 border-t pt-4 text-xs ${palette.pageNote} ${palette.divider}`}>
-                        最近更新：{new Date(selectedVersion.updated_at || selectedVersion.created_at).toLocaleString()}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className={`text-xs uppercase tracking-[0.16em] ${palette.muted}`}>Prompt 内容</div>
-                      <pre
-                        className={`mt-2 max-h-[32rem] overflow-auto rounded-md border p-4 text-sm whitespace-pre-wrap ${palette.code}`}
-                      >
-                        {selectedVersion.content}
-                      </pre>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                      {!selectedVersion.enabled && (
-                        <button
-                          type="button"
-                          onClick={() => handleEnableVersion(selectedVersion.name, selectedVersion.version)}
-                          className={palette.buttonPrimary}
-                        >
-                          启用该版本
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(selectedVersion.id)}
-                        className={`text-sm font-medium ${palette.danger}`}
-                      >
-                        删除当前版本
-                      </button>
-                    </div>
-                  </div>
-                )
-              ) : (
-                <div className={`py-8 text-center ${palette.empty}`}>请选择一个版本查看详情</div>
-              )}
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </AdminLayout>
   );

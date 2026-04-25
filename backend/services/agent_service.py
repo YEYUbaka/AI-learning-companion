@@ -22,6 +22,7 @@ class AgentService:
         user_id: int,
         goal: str,
         mode: str = "react",
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         try:
             session = self.repo.create_session(
@@ -29,11 +30,12 @@ class AgentService:
                 user_id=user_id,
                 session_type=mode,
                 goal=goal,
+                context=context,
             )
 
             logger.info("创建 Agent 会话: %s, 模式: %s", session.id, mode)
 
-            executor = AgentExecutor(self.db, user_id, session.id)
+            executor = AgentExecutor(self.db, user_id, session.id, context=context)
             if mode == "react":
                 result = await executor.execute_react(goal)
             elif mode == "cot":
@@ -71,6 +73,7 @@ class AgentService:
                 "goal": session.goal,
                 "status": session.status,
                 "session_type": session.session_type,
+                "context": session.context or {},
                 "created_at": (
                     session.created_at.isoformat() if session.created_at else None
                 ),
@@ -143,6 +146,7 @@ class AgentService:
         session_id: int,
         goal: str,
         mode: str = "react",
+        context: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         try:
             logger.info(
@@ -151,7 +155,7 @@ class AgentService:
                 mode,
             )
 
-            executor = AgentExecutor(self.db, user_id, session_id)
+            executor = AgentExecutor(self.db, user_id, session_id, context=context)
             if mode == "react":
                 async for event in executor.execute_react_stream(goal):
                     yield event

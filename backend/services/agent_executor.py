@@ -88,6 +88,33 @@ LEARNING_PATH_KEYWORDS_EN = [
     "roadmap",
 ]
 
+RESOURCE_RECOMMENDATION_KEYWORDS = [
+    "推荐",
+    "up主",
+    "博主",
+    "课程",
+    "老师",
+    "书",
+    "教材",
+    "视频",
+    "资料",
+    "资源",
+]
+
+RESOURCE_RECOMMENDATION_KEYWORDS_EN = [
+    "recommend",
+    "recommended",
+    "creator",
+    "course",
+    "courses",
+    "book",
+    "books",
+    "video",
+    "videos",
+    "resource",
+    "resources",
+]
+
 TECH_QUERY_KEYWORDS = [
     "Java",
     "java",
@@ -197,6 +224,15 @@ class AgentPlanner:
     def _is_tech_learning_query(cls, goal_text: str, lower_goal: str) -> bool:
         return cls._is_tech_query(goal_text, lower_goal) and cls._is_learning_path_query(goal_text, lower_goal)
 
+    @classmethod
+    def _is_resource_recommendation_query(cls, goal_text: str, lower_goal: str) -> bool:
+        return cls._contains_any_keyword(
+            goal_text,
+            lower_goal,
+            RESOURCE_RECOMMENDATION_KEYWORDS,
+            RESOURCE_RECOMMENDATION_KEYWORDS_EN,
+        ) and not cls._is_learning_path_query(goal_text, lower_goal)
+
     # ReAct-style planner that maps common intents to deterministic tool chains.
     def plan(self, goal: str) -> Dict[str, Any]:
         # Route high-confidence intents first so required tools are selected
@@ -273,6 +309,16 @@ class AgentPlanner:
             ]
             rationale = "检测到编程/面试类学习路径请求，优先生成学习计划而不是检索 K12 知识库。"
             confidence = 0.86
+        elif self._is_resource_recommendation_query(goal_text, lower_goal):
+            tool_steps = [
+                {
+                    "tool_name": "web_search",
+                    "tool_input": {"query": goal_text, "max_results": 8},
+                    "reason": "Use web search for recommendation and resource discovery queries.",
+                }
+            ]
+            rationale = "Resource recommendation requests should prefer fresh external search over weak knowledge-base matches."
+            confidence = 0.9
         elif any(keyword in goal_text for keyword in EDUCATION_EVIDENCE_KEYWORDS):
             tool_steps.append(
                 {
@@ -413,7 +459,7 @@ class AgentReviewer:
 class AgentExecutor:
     """Agent 执行引擎"""
 
-    def __init__(self, db: Session, user_id: int, session_id: int):
+    def __init__(self, db: Session, user_id: int, session_id: int, context: Dict[str, Any] = None):
         self.db = db
         self.user_id = user_id
         self.session_id = session_id
@@ -422,6 +468,9 @@ class AgentExecutor:
         self.reviewer = AgentReviewer()
         self.agent_provider = FeatureModelConfigService.get_provider_for_feature(db, "agent")
         self.final_answer_fallback_used = False
+        session = AgentRepository.get_session(db, session_id)
+        self.context = context or (session.context if session else {}) or {}
+        self.attachments = self.context.get("attachments") or []
 
     def _record_step(self, step_number: int, step_type: str, content: Any, extra_data: Dict[str, Any]) -> None:
         content_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
@@ -457,6 +506,71 @@ class AgentExecutor:
             else:
                 resolved[key] = value
         return resolved
+
+    def _has_image_attachments(self) -> bool:
+        for attachment in self.attachments:
+            if attachment.get("file_type") == "image" or attachment.get("type") == "image":
+                return True
+        return False
+
+    def _get_image_attachments(self) -> List[Dict[str, Any]]:
+        return [
+            attachment
+            for attachment in self.attachments
+            if attachment.get("file_type") == "image" or attachment.get("type") == "image"
+        ]
+
+    def _augment_goal_with_file_hints(self, goal: str) -> str:
+        file_hints: List[str] = []
+        for attachment in self.attachments:
+            if attachment.get("file_type") == "image" or attachment.get("type") == "image":
+                continue
+            file_path = attachment.get("file_path")
+            if file_path:
+                file_hints.append(
+                    f"[Attached file: {file_path}. Use the parse_file tool when file contents are needed.]"
+                )
+        if not file_hints:
+            return goal
+        return f"{goal.strip()}\n\n" + "\n".join(file_hints)
+
+    async def _execute_multimodal_direct(self, goal: str, mode: str) -> Dict[str, Any]:
+        capabilities = AIService.get_provider_capabilities(self.agent_provider)
+        if not capabilities.get("supports_vision") or not capabilities.get("supports_responses_api"):
+            raise ValueError("The current agent model does not support image understanding. Please switch to a vision-capable model.")
+
+        content_blocks: List[Dict[str, Any]] = []
+        for attachment in self._get_image_attachments():
+            image_url = attachment.get("image_url") or attachment.get("file_url") or attachment.get("preview_url")
+            if image_url and not str(image_url).startswith(("http://", "https://", "data:", "/")):
+                image_url = f"/{str(image_url).lstrip('/')}"
+            if image_url:
+                content_blocks.append({"type": "input_image", "image_url": image_url})
+        if goal.strip():
+            content_blocks.append({"type": "input_text", "text": goal.strip()})
+        if not content_blocks:
+            raise ValueError("No image attachment found")
+
+        result = await AIService.call_ai_async(
+            input_items=[{"role": "user", "content": content_blocks}],
+            system_prompt_name="system_prompt",
+            provider=self.agent_provider,
+            temperature=0.2 if mode != "cot" else 0.3,
+            max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
+            quality_context={"mode": "agent_vision"},
+        )
+        answer = result.get("text", "").strip()
+        if not answer:
+            raise ValueError("The model returned an empty visual analysis result")
+        return {
+            "success": True,
+            "answer": answer,
+            "trace_id": result.get("trace_id"),
+            "quality_status": result.get("quality_status", "pass"),
+            "confidence": result.get("confidence", 0.82),
+            "evidence": [{"type": "image_attachment", "summary": attachment.get("name") or "image"} for attachment in self._get_image_attachments()],
+            "fallback_used": result.get("fallback_used", False),
+        }
 
     @staticmethod
     def _goal_prefers_live_search(goal: str) -> bool:
@@ -701,10 +815,28 @@ class AgentExecutor:
 
     async def execute_react(self, goal: str) -> Dict[str, Any]:
         try:
-            plan = self.planner.plan(goal)
+            actual_goal = self._augment_goal_with_file_hints(goal)
+            if self._has_image_attachments():
+                direct_result = await self._execute_multimodal_direct(actual_goal, "react")
+                self._record_step(0, "goal", actual_goal, {})
+                self._record_step(
+                    1,
+                    "final_answer",
+                    direct_result["answer"],
+                    {
+                        "quality_status": direct_result.get("quality_status"),
+                        "confidence": direct_result.get("confidence"),
+                        "evidence": direct_result.get("evidence", []),
+                        "fallback_used": direct_result.get("fallback_used", False),
+                    },
+                )
+                AgentRepository.update_session_status(self.db, self.session_id, "completed")
+                return {**direct_result, "iterations": 1}
+
+            plan = self.planner.plan(actual_goal)
             trace_id = plan["trace_id"]
             step_number = 0
-            self._record_step(step_number, "goal", goal, {"trace_id": trace_id, "step_id": step_number})
+            self._record_step(step_number, "goal", actual_goal, {"trace_id": trace_id, "step_id": step_number})
             step_number += 1
             self._record_step(
                 step_number,
@@ -733,8 +865,8 @@ class AgentExecutor:
                 previous_output = {**previous_output, **observation}
                 step_number += 1
 
-                if self._should_add_supplemental_web_search(goal, observation, observations):
-                    supplemental_input = {"query": goal, "max_results": 5}
+                if self._should_add_supplemental_web_search(actual_goal, observation, observations):
+                    supplemental_input = {"query": actual_goal, "max_results": 5}
                     supplemental_observation = await self._execute_tool_step(
                         trace_id=trace_id,
                         step_number=step_number,
@@ -746,7 +878,7 @@ class AgentExecutor:
                     step_number += 1
 
             review = self.reviewer.review(plan, observations)
-            final_answer = await self._build_final_answer_async(goal, plan, observations, review)
+            final_answer = await self._build_final_answer_async(actual_goal, plan, observations, review)
             review["fallback_used"] = review.get("fallback_used", False) or self.final_answer_fallback_used
             self._record_step(
                 step_number,
@@ -778,11 +910,45 @@ class AgentExecutor:
             return {"success": False, "error": str(exc)}
 
     async def execute_react_stream(self, goal: str) -> AsyncGenerator[Dict[str, Any], None]:
-        plan = self.planner.plan(goal)
+        actual_goal = self._augment_goal_with_file_hints(goal)
+        if self._has_image_attachments():
+            self._record_step(0, "goal", actual_goal, {})
+            yield {"type": "goal", "content": actual_goal, "step_number": 0}
+            result = await self._execute_multimodal_direct(actual_goal, "react")
+            self._record_step(
+                1,
+                "final_answer",
+                result["answer"],
+                {
+                    "quality_status": result.get("quality_status"),
+                    "confidence": result.get("confidence"),
+                    "evidence": result.get("evidence", []),
+                    "fallback_used": result.get("fallback_used", False),
+                },
+            )
+            AgentRepository.update_session_status(self.db, self.session_id, "completed")
+            yield {
+                "type": "final_answer",
+                "content": result["answer"],
+                "step_number": 1,
+                "quality_status": result.get("quality_status", "pass"),
+                "confidence": result.get("confidence", 0.82),
+                "evidence": result.get("evidence", []),
+                "fallback_used": result.get("fallback_used", False),
+            }
+            yield {
+                "type": "completed",
+                "quality_status": result.get("quality_status", "pass"),
+                "confidence": result.get("confidence", 0.82),
+                "fallback_used": result.get("fallback_used", False),
+            }
+            return
+
+        plan = self.planner.plan(actual_goal)
         trace_id = plan["trace_id"]
         step_number = 0
-        self._record_step(step_number, "goal", goal, {"trace_id": trace_id, "step_id": step_number})
-        yield {"type": "goal", "content": goal, "step_number": step_number, "trace_id": trace_id}
+        self._record_step(step_number, "goal", actual_goal, {"trace_id": trace_id, "step_id": step_number})
+        yield {"type": "goal", "content": actual_goal, "step_number": step_number, "trace_id": trace_id}
         await asyncio.sleep(0.05)
         step_number += 1
 
@@ -826,8 +992,8 @@ class AgentExecutor:
             await asyncio.sleep(0.05)
             step_number += 1
 
-            if self._should_add_supplemental_web_search(goal, observation, observations):
-                supplemental_input = {"query": goal, "max_results": 5}
+            if self._should_add_supplemental_web_search(actual_goal, observation, observations):
+                supplemental_input = {"query": actual_goal, "max_results": 5}
                 yield {
                     "type": "action",
                     "tool_name": "web_search",
@@ -853,7 +1019,7 @@ class AgentExecutor:
                 step_number += 1
 
         review = self.reviewer.review(plan, observations)
-        final_answer = await self._build_final_answer_async(goal, plan, observations, review)
+        final_answer = await self._build_final_answer_async(actual_goal, plan, observations, review)
         review["fallback_used"] = review.get("fallback_used", False) or self.final_answer_fallback_used
         self._record_step(
             step_number + 1,
@@ -889,15 +1055,22 @@ class AgentExecutor:
 
     async def execute_cot(self, goal: str) -> Dict[str, Any]:
         try:
+            actual_goal = self._augment_goal_with_file_hints(goal)
+            if self._has_image_attachments():
+                result = await self._execute_multimodal_direct(actual_goal, "cot")
+                self._record_step(0, "goal", actual_goal, {})
+                self._record_step(1, "final_answer", result["answer"], {})
+                AgentRepository.update_session_status(self.db, self.session_id, "completed")
+                return {**result, "iterations": 1}
             result = await AIService.call_ai_async(
-                user_prompt=f"请逐步分析并回答：{goal}",
+                user_prompt=f"请逐步分析并回答：{actual_goal}",
                 system_prompt_name="system_prompt",
                 temperature=0.3,
                 max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
                 provider=self.agent_provider,
             )
             answer = result.get("text", "")
-            self._record_step(0, "goal", goal, {})
+            self._record_step(0, "goal", actual_goal, {})
             self._record_step(1, "final_answer", answer, {})
             AgentRepository.update_session_status(self.db, self.session_id, "completed")
             return {"success": True, "answer": answer, "iterations": 1}
@@ -948,10 +1121,18 @@ class AgentExecutor:
 
     async def execute_function_calling(self, goal: str) -> Dict[str, Any]:
         tools = [tool.to_openai_tool() for tool in self.tool_registry.get_structured_tools()]
+        actual_goal = goal
 
         try:
+            actual_goal = self._augment_goal_with_file_hints(goal)
+            if self._has_image_attachments():
+                result = await self._execute_multimodal_direct(actual_goal, "function_calling")
+                self._record_step(0, "goal", actual_goal, {})
+                self._record_step(1, "final_answer", result["answer"], {})
+                AgentRepository.update_session_status(self.db, self.session_id, "completed")
+                return {**result, "iterations": 1}
             native_result = await AIService.call_ai_with_tools_async(
-                user_prompt=goal,
+                user_prompt=actual_goal,
                 tools=tools,
                 system_prompt_name="system_prompt",
                 temperature=0.2,
@@ -967,7 +1148,7 @@ class AgentExecutor:
                 if not answer:
                     raise ValueError("原生 function calling 未返回可执行工具")
 
-                self._record_step(0, "goal", goal, {"trace_id": trace_id, "step_id": 0})
+                self._record_step(0, "goal", actual_goal, {"trace_id": trace_id, "step_id": 0})
                 self._record_step(
                     1,
                     "thought",
@@ -1012,7 +1193,7 @@ class AgentExecutor:
             }
 
             step_number = 0
-            self._record_step(step_number, "goal", goal, {"trace_id": trace_id, "step_id": step_number})
+            self._record_step(step_number, "goal", actual_goal, {"trace_id": trace_id, "step_id": step_number})
             step_number += 1
             self._record_step(
                 step_number,
@@ -1043,7 +1224,7 @@ class AgentExecutor:
 
             review = self.reviewer.review(plan, observations)
             review["fallback_used"] = review.get("fallback_used", False) or native_result.get("fallback_used", False)
-            final_answer = await self._build_final_answer_async(goal, plan, observations, review)
+            final_answer = await self._build_final_answer_async(actual_goal, plan, observations, review)
             review["fallback_used"] = review.get("fallback_used", False) or self.final_answer_fallback_used
             self._record_step(
                 step_number,
@@ -1071,4 +1252,4 @@ class AgentExecutor:
             }
         except Exception as exc:
             logger.warning("原生 Function Calling 不可用，回退到结构化执行器: %s", exc)
-            return await self.execute_react(goal)
+            return await self.execute_react(actual_goal)

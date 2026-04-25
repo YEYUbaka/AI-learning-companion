@@ -252,6 +252,36 @@ export const deleteModelConfig = async (configId) => {
   return api.delete(`/api/v1/admin/models/${configId}`);
 };
 
+export const listQuestionBankItems = async (params = {}) => {
+  return api.get('/api/v1/question-bank/items', { params });
+};
+
+export const createQuestionBankItem = async (payload) => {
+  return api.post('/api/v1/question-bank/items', payload);
+};
+
+export const updateQuestionBankItem = async (itemId, payload) => {
+  return api.put(`/api/v1/question-bank/items/${itemId}`, payload);
+};
+
+export const deleteQuestionBankItem = async (itemId) => {
+  return api.delete(`/api/v1/question-bank/items/${itemId}`);
+};
+
+export const importQuestionBankItems = async (formData) => {
+  return api.post('/api/v1/question-bank/items/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+};
+
+export const uploadQuestionBankAsset = async (formData) => {
+  return api.post('/api/v1/question-bank/assets/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  });
+};
+
 export const testModelCall = async (providerName, prompt) => {
   return api.post(
     '/api/v1/admin/test-model-call',

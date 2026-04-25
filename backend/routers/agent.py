@@ -19,6 +19,7 @@ class AgentTaskRequest(BaseModel):
     """Agent 任务请求"""
     goal: str
     mode: str = "react"  # react, cot, function_calling
+    context: Optional[dict] = None
 
 
 @router.post("/task")
@@ -33,7 +34,8 @@ async def create_agent_task(
         result = await agent_service.create_and_execute_task(
             user_id=current_user.id,
             goal=request.goal,
-            mode=request.mode
+            mode=request.mode,
+            context=request.context,
         )
 
         return result

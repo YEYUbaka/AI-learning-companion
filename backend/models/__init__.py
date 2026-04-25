@@ -11,6 +11,7 @@ from .learning_map import LearningMapFile, LearningNode, LearningEdge
 from .agent_session import AgentSession, AgentStep, AgentToolCall
 from .knowledge import KnowledgeDocument, KnowledgeChunk
 from .feature_model_config import FeatureModelConfig
+from .question_bank import QuestionBankItem, QuestionBankAsset
 
 __all__ = [
     "User",
@@ -28,4 +29,6 @@ __all__ = [
     "KnowledgeDocument",
     "KnowledgeChunk",
     "FeatureModelConfig",
+    "QuestionBankItem",
+    "QuestionBankAsset",
 ]

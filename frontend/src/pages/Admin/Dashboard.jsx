@@ -1,6 +1,6 @@
 /**
  * 管理后台仪表盘
- * 统一 EdTech Modern 风格，与用户页面配色一致
+ * 统一 EdTech Modern 风格，并补齐移动端布局适配
  */
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -50,7 +50,7 @@ const Dashboard = () => {
         ? {
             heading: 'text-white',
             subheading: 'text-slate-400',
-            card: 'bg-slate-800/80 border border-slate-700/50 rounded-xl',
+            card: 'bg-slate-800/80 border border-slate-700/50 rounded-2xl',
             cardHover: 'hover:border-slate-600/50',
             label: 'text-slate-400',
             value: 'text-white',
@@ -65,7 +65,7 @@ const Dashboard = () => {
         : {
             heading: 'text-gray-900',
             subheading: 'text-gray-500',
-            card: 'bg-white border border-gray-100 rounded-xl shadow-card',
+            card: 'bg-white border border-gray-100 rounded-2xl shadow-card',
             cardHover: 'hover:border-gray-200',
             label: 'text-gray-500',
             value: 'text-gray-900',
@@ -117,7 +117,7 @@ const Dashboard = () => {
   if (loading) {
     return (
       <AdminLayout>
-        <div className="flex justify-center items-center h-64">
+        <div className="flex h-64 items-center justify-center">
           <div className={palette.label}>加载中...</div>
         </div>
       </AdminLayout>
@@ -188,23 +188,17 @@ const Dashboard = () => {
 
   return (
     <AdminLayout>
-      <div className={`${palette.bg} min-h-full p-6`}>
-        <div className="max-w-7xl mx-auto space-y-6">
-          {/* 标题 */}
-          <div className="flex items-center justify-between">
+      <div className={`${palette.bg} min-h-full p-4 sm:p-6`}>
+        <div className="mx-auto max-w-7xl space-y-4 sm:space-y-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className={`text-2xl font-bold font-heading ${palette.heading}`}>
-                系统概览
-              </h1>
-              <p className={`text-sm mt-1 ${palette.subheading}`}>
-                实时监控系统运行状态
-              </p>
+              <h1 className={`text-2xl font-bold font-heading ${palette.heading}`}>系统概览</h1>
+              <p className={`mt-1 text-sm ${palette.subheading}`}>实时监控系统运行状态</p>
             </div>
             <AppBadge variant="success" dot>运行正常</AppBadge>
           </div>
 
-          {/* 统计卡片 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
             {statCards.map((card, index) => {
               const iconBgMap = {
                 primary: isDark ? 'bg-primary-900/30 text-primary-400' : 'bg-primary-100 text-primary-600',
@@ -213,30 +207,32 @@ const Dashboard = () => {
                 warning: isDark ? 'bg-warning-500/10 text-warning-400' : 'bg-warning-50 text-warning-600',
                 info: isDark ? 'bg-info-500/10 text-info-400' : 'bg-info-50 text-info-600',
               };
+
               return (
                 <div
                   key={index}
                   onClick={() => handleCardClick(card.link)}
-                  className={`${palette.card} ${card.link ? palette.cardHover : ''} p-5 transition-all duration-200 cursor-pointer group`}
+                  className={`${palette.card} ${card.link ? palette.cardHover : ''} group cursor-pointer p-4 transition-all duration-200 sm:p-5`}
                 >
-                  <div className="flex items-start justify-between mb-3">
+                  <div className="mb-3 flex items-start justify-between gap-3">
                     <p className={`text-sm font-medium ${palette.label}`}>{card.label}</p>
-                    {card.link && (
+                    {card.link ? (
                       <svg
-                        className={`w-4 h-4 ${palette.label} group-hover:text-primary-500 transition-colors`}
+                        className={`w-4 h-4 flex-shrink-0 ${palette.label} transition-colors group-hover:text-primary-500`}
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
                       >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                       </svg>
-                    )}
+                    ) : null}
                   </div>
-                  <div className="flex items-end justify-between">
-                    <p className={`text-3xl font-bold font-heading ${palette.value} leading-none`}>
+
+                  <div className="flex items-end justify-between gap-3">
+                    <p className={`text-3xl font-bold font-heading leading-none ${palette.value}`}>
                       {card.value.toLocaleString()}
                     </p>
-                    <div className={`${iconBgMap[card.variant]} w-12 h-12 rounded-xl flex items-center justify-center`}>
+                    <div className={`${iconBgMap[card.variant]} flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl`}>
                       {card.icon}
                     </div>
                   </div>
@@ -245,25 +241,21 @@ const Dashboard = () => {
             })}
           </div>
 
-          {/* 图表区域 */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* API调用趋势 */}
-            <div className={`${palette.card} p-6`}>
-              <div className="flex items-center justify-between mb-6">
+          <div className="grid grid-cols-1 gap-4 xl:gap-6 lg:grid-cols-2">
+            <div className={`${palette.card} p-4 sm:p-6`}>
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className={`text-base font-semibold font-heading ${palette.heading}`}>
-                    API调用趋势
-                  </h3>
-                  <p className={`text-xs mt-0.5 ${palette.subheading}`}>
-                    {chartData.is_hourly ? '周期: 1小时' : `最近${timeRange}天`}
+                  <h3 className={`text-base font-semibold font-heading ${palette.heading}`}>API调用趋势</h3>
+                  <p className={`mt-0.5 text-xs ${palette.subheading}`}>
+                    {chartData.is_hourly ? '周期：1小时' : `最近 ${timeRange} 天`}
                   </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {[1, 7, 30].map((days) => (
                     <button
                       key={days}
                       onClick={() => setTimeRange(days)}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
                         timeRange === days ? palette.buttonActive : palette.button
                       }`}
                     >
@@ -272,12 +264,13 @@ const Dashboard = () => {
                   ))}
                 </div>
               </div>
+
               {chartLoading ? (
-                <div className="flex justify-center items-center h-72">
+                <div className="flex h-72 items-center justify-center">
                   <div className={palette.label}>加载中...</div>
                 </div>
               ) : chartData.daily_stats.length === 0 ? (
-                <div className="flex justify-center items-center h-72">
+                <div className="flex h-72 items-center justify-center">
                   <div className={palette.label}>暂无数据</div>
                 </div>
               ) : (
@@ -327,20 +320,18 @@ const Dashboard = () => {
               )}
             </div>
 
-            {/* 模型调用比例 */}
-            <div className={`${palette.card} p-6`}>
+            <div className={`${palette.card} p-4 sm:p-6`}>
               <div className="mb-4">
-                <h3 className={`text-base font-semibold font-heading ${palette.heading}`}>
-                  各模型API调用比例
-                </h3>
-                <p className={`text-xs mt-0.5 ${palette.subheading}`}>不同AI模型的使用占比</p>
+                <h3 className={`text-base font-semibold font-heading ${palette.heading}`}>各模型API调用比例</h3>
+                <p className={`mt-0.5 text-xs ${palette.subheading}`}>不同AI模型的使用占比</p>
               </div>
+
               {chartLoading ? (
-                <div className="flex justify-center items-center h-72">
+                <div className="flex h-72 items-center justify-center">
                   <div className={palette.label}>加载中...</div>
                 </div>
               ) : chartData.provider_stats.length === 0 ? (
-                <div className="flex justify-center items-center h-72">
+                <div className="flex h-72 items-center justify-center">
                   <div className={palette.label}>暂无数据</div>
                 </div>
               ) : (
@@ -375,20 +366,18 @@ const Dashboard = () => {
               )}
             </div>
 
-            {/* 功能调用占比 */}
-            <div className={`${palette.card} p-6 lg:col-span-2`}>
+            <div className={`${palette.card} p-4 sm:p-6 lg:col-span-2`}>
               <div className="mb-4">
-                <h3 className={`text-base font-semibold font-heading ${palette.heading}`}>
-                  功能调用占比
-                </h3>
-                <p className={`text-xs mt-0.5 ${palette.subheading}`}>各功能模块的API调用分布</p>
+                <h3 className={`text-base font-semibold font-heading ${palette.heading}`}>功能调用占比</h3>
+                <p className={`mt-0.5 text-xs ${palette.subheading}`}>各功能模块的API调用分布</p>
               </div>
+
               {chartLoading ? (
-                <div className="flex justify-center items-center h-72">
+                <div className="flex h-72 items-center justify-center">
                   <div className={palette.label}>加载中...</div>
                 </div>
               ) : chartData.source_stats.length === 0 ? (
-                <div className="flex justify-center items-center h-72">
+                <div className="flex h-72 items-center justify-center">
                   <div className={palette.label}>暂无数据</div>
                 </div>
               ) : (

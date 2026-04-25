@@ -81,10 +81,11 @@ const classifyStreamError = (error, sessionId) => {
 };
 
 const agentApi = {
-  createTask: async (goal, mode = 'react') => {
+  createTask: async (goal, mode = 'react', context = null) => {
     const response = await apiClient.post('/api/agent/task', {
       goal,
       mode,
+      context,
     });
     return response.data;
   },
@@ -106,7 +107,7 @@ const agentApi = {
     return response.data;
   },
 
-  createTaskStream: (goal, mode, onMessage, onComplete, onError) => {
+  createTaskStream: (goal, mode, context, onMessage, onComplete, onError) => {
     const token = sessionStorage.getItem('token');
     const hostname = window.location.hostname;
     const baseURL =
@@ -136,7 +137,7 @@ const agentApi = {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ goal, mode }),
+          body: JSON.stringify({ goal, mode, context }),
           cache: 'no-store',
           signal: controller.signal,
         });

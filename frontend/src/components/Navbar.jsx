@@ -178,7 +178,7 @@ function Navbar() {
                 学习计划
               </button>
               <button onClick={() => !['/quiz', '/quiz-result'].includes(location.pathname) && navigate('/quiz')} className={navLinkClass('/quiz')}>
-                AI测评
+                智能测试
               </button>
               <button onClick={() => location.pathname !== '/learning-map' && navigate('/learning-map')} className={navLinkClass('/learning-map')}>
                 知识图谱
@@ -284,7 +284,7 @@ function Navbar() {
                     : isDark ? 'text-white/70 hover:bg-white/5' : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >
-                AI测评
+                智能测试
               </Link>
               <Link
                 to="/learning-map"

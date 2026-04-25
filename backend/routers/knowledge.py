@@ -91,6 +91,42 @@ async def search_knowledge(
     }
 
 
+@router.get("/catalog")
+async def get_knowledge_catalog(
+    grade_level: Optional[str] = None,
+    subject: Optional[str] = None,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """返回可用于组卷选择的知识点目录。"""
+    query = db.query(KnowledgeDocument).filter(KnowledgeDocument.status == "indexed")
+    if grade_level:
+        query = query.filter(KnowledgeDocument.grade_level == grade_level)
+    if subject:
+        query = query.filter(KnowledgeDocument.subject == subject)
+
+    docs = query.order_by(
+        KnowledgeDocument.grade_level.asc(),
+        KnowledgeDocument.subject.asc(),
+        KnowledgeDocument.topic.asc(),
+        KnowledgeDocument.title.asc(),
+    ).all()
+
+    return {
+        "count": len(docs),
+        "documents": [
+            {
+                "id": d.id,
+                "title": d.title,
+                "grade_level": d.grade_level,
+                "subject": d.subject,
+                "topic": d.topic,
+            }
+            for d in docs
+        ],
+    }
+
+
 # ─── 管理端 API ───────────────────────────────────────────────────────────────
 
 @router.get("/documents")

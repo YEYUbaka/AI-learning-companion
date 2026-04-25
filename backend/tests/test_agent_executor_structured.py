@@ -43,3 +43,11 @@ def test_planner_routes_java_learning_path_to_study_plan():
 
     tool_names = [item["tool_name"] for item in plan["tool_steps"]]
     assert tool_names == ["search_knowledge", "generate_study_plan"]
+
+
+def test_planner_routes_resource_recommendation_to_web_search():
+    planner = AgentPlanner(ToolRegistry())
+    plan = planner.plan("推荐几个好的高数up主")
+
+    tool_names = [item["tool_name"] for item in plan["tool_steps"]]
+    assert tool_names == ["web_search"]

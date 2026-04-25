@@ -13,7 +13,7 @@ if sys.platform == 'win32':
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import auth, ai, files, plan, quiz, analytics, admin, learning_map, chat, agent, knowledge
+from routers import auth, ai, files, plan, quiz, analytics, admin, learning_map, chat, agent, knowledge, question_bank
 from routers import agent_stream
 from core.logger import logger, log_file, error_log_file
 from core.security_middleware import SecurityMiddleware
@@ -80,7 +80,7 @@ async def startup_event():
     try:
         # 导入所有模型，确保表被创建
         from models import users, quizzes, study_plans, prompt, model_config, learning_map, chat_sessions  # noqa: F401
-        from models import quiz_paper, agent_session, knowledge  # noqa: F401
+        from models import quiz_paper, agent_session, knowledge, question_bank as question_bank_models  # noqa: F401
         logger.info("开始创建数据库表...")
         Base.metadata.create_all(bind=engine)
         logger.info("[OK] 数据库表创建成功")
@@ -156,9 +156,13 @@ app.include_router(knowledge.router)     # 知识库路由
 # 静态文件服务（知识库图片访问）
 import os
 from fastapi.staticfiles import StaticFiles
+app.include_router(question_bank.router)
 _kb_images_dir = os.path.abspath("knowledge_base/images")
 os.makedirs(_kb_images_dir, exist_ok=True)
 app.mount("/knowledge_images", StaticFiles(directory=_kb_images_dir), name="knowledge_images")
+_uploads_dir = os.path.abspath("uploads")
+os.makedirs(_uploads_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=_uploads_dir), name="uploads")
 
 
 # 根路由

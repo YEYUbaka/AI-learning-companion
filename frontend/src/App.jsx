@@ -16,6 +16,7 @@ import SystemConfig from './pages/Admin/SystemConfig';
 import UserManagement from './pages/Admin/UserManagement';
 import APICallLogs from './pages/Admin/APICallLogs';
 import KnowledgeAdmin from './pages/Admin/KnowledgeAdmin';
+import QuestionBankAdmin from './pages/Admin/QuestionBankAdmin';
 import Navbar from './components/Navbar';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminProtectedRoute from './components/AdminProtectedRoute';
@@ -180,6 +181,14 @@ const AppContent = () => {
           element={
             <AdminProtectedRoute>
               <KnowledgeAdmin />
+            </AdminProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/question-bank"
+          element={
+            <AdminProtectedRoute>
+              <QuestionBankAdmin />
             </AdminProtectedRoute>
           }
         />

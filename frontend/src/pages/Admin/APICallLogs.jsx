@@ -153,7 +153,7 @@ const APICallLogs = () => {
                   <option key={source} value={source}>
                     {source === 'user' ? '用户对话' : 
                      source === 'admin_test' ? '管理员测试' :
-                     source === 'quiz' ? 'AI测评' :
+                     source === 'quiz' ? '智能测试' :
                      source === 'learning_map' ? '知识图谱' :
                      source === 'study_plan' ? '学习计划' : source}
                   </option>
@@ -218,7 +218,7 @@ const APICallLogs = () => {
                         <td className="px-4 py-3 text-sm">
                           {log.source === 'user' ? '用户对话' : 
                            log.source === 'admin_test' ? '管理员测试' :
-                           log.source === 'quiz' ? 'AI测评' :
+                            log.source === 'quiz' ? '智能测试' :
                            log.source === 'learning_map' ? '知识图谱' :
                            log.source === 'study_plan' ? '学习计划' : log.source}
                         </td>

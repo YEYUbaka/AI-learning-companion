@@ -5,7 +5,7 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Body, Query, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 from sqlalchemy.orm import Session
 from core.exceptions import UpstreamServiceError
 from database import get_db
@@ -291,6 +291,7 @@ class PaperGenerateRequest(BaseModel):
     total_questions: int = 20
     difficulty_distribution: Optional[Dict[str, int]] = None
     question_type_distribution: Optional[Dict[str, int]] = None
+    question_type_scores: Optional[Dict[str, int]] = None
     knowledge_points: Optional[List[str]] = None
     time_limit: Optional[int] = None
     total_score: int = 100
@@ -298,6 +299,9 @@ class PaperGenerateRequest(BaseModel):
     source_policy: str = "knowledge_first"
     review_level: str = "normal"
     blueprint_only: bool = False
+    allow_ai_fallback: bool = True
+    question_bank_filters: Optional[Dict[str, Any]] = None
+    include_images: bool = True
     user_id: int  # 将user_id包含在请求模型中
 
 
@@ -331,6 +335,7 @@ async def generate_paper(
             "total_questions": request.total_questions,
             "difficulty_distribution": request.difficulty_distribution or {"easy": 30, "medium": 50, "hard": 20},
             "question_type_distribution": request.question_type_distribution or {"choice": 15, "fill": 5},
+            "question_type_scores": request.question_type_scores,
             "knowledge_points": request.knowledge_points,
             "time_limit": request.time_limit,
             "total_score": request.total_score,
@@ -338,6 +343,9 @@ async def generate_paper(
             "source_policy": request.source_policy,
             "review_level": request.review_level,
             "blueprint_only": request.blueprint_only,
+            "allow_ai_fallback": request.allow_ai_fallback,
+            "question_bank_filters": request.question_bank_filters,
+            "include_images": request.include_images,
         }
         
         result = QuizPaperService.generate_custom_paper(db, request.user_id, config)
@@ -555,6 +563,7 @@ class TemplateCreateRequest(BaseModel):
     total_questions: int = 20
     difficulty_distribution: Optional[Dict[str, int]] = None
     question_type_distribution: Optional[Dict[str, int]] = None
+    question_type_scores: Optional[Dict[str, int]] = None
     knowledge_points: Optional[List[str]] = None
     time_limit: Optional[int] = None
     total_score: int = 100
@@ -577,6 +586,7 @@ async def create_template(
             "total_questions": request.total_questions,
             "difficulty_distribution": request.difficulty_distribution,
             "question_type_distribution": request.question_type_distribution,
+            "question_type_scores": request.question_type_scores,
             "knowledge_points": request.knowledge_points,
             "time_limit": request.time_limit,
             "total_score": request.total_score

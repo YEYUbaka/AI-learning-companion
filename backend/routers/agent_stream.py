@@ -79,6 +79,7 @@ async def _produce_agent_events(
             session.id,
             request.goal,
             request.mode,
+            request.context,
         ):
             await queue.put(encode_sse_data(event))
             await asyncio.sleep(0.01)

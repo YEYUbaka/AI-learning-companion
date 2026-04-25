@@ -17,6 +17,8 @@ import {
   getDocumentContent,
 } from '../../api/knowledgeApi';
 
+const getIsMobileLayout = () => typeof window !== 'undefined' && window.innerWidth < 1024;
+
 // ─── 常量定义 ────────────────────────────────────────────────────────────────
 
 const GRADE_LEVELS = ['小学', '初中', '高中', '大学', '通用'];
@@ -305,7 +307,7 @@ function DocumentEditor({ doc, onSave, onCancel, isDark, isNew = false }) {
         />
       </div>
 
-      <div className="flex items-center gap-3 pt-2">
+      <div className="flex flex-wrap items-center gap-3 pt-2">
         <button
           onClick={handleSave}
           disabled={saving}
@@ -444,7 +446,7 @@ function FileUploader({ onUpload, isDark }) {
               </div>
             ))}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={handleUpload}
               disabled={uploading}
@@ -555,7 +557,7 @@ function DocumentDetail({ doc, onEdit, onDelete, onReindex, isDark }) {
       )}
 
       {/* 操作按钮 */}
-      <div className="flex items-center gap-3 pt-2">
+      <div className="flex flex-wrap items-center gap-3 pt-2">
         <button
           onClick={() => onEdit(doc)}
           className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
@@ -627,10 +629,18 @@ export default function KnowledgeAdmin() {
   const [view, setView] = useState('list'); // 'list' | 'upload' | 'create' | 'edit'
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [editingDoc, setEditingDoc] = useState(null);
+  const [isMobileLayout, setIsMobileLayout] = useState(getIsMobileLayout);
+  const [mobileListPanel, setMobileListPanel] = useState('directory');
 
   // 加载数据
   useEffect(() => {
     loadAll();
+  }, []);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobileLayout(getIsMobileLayout());
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const loadAll = async () => {
@@ -726,6 +736,13 @@ export default function KnowledgeAdmin() {
     setView('edit');
   };
 
+  const handleSelectDoc = (doc) => {
+    setSelectedDoc(doc);
+    if (getIsMobileLayout()) {
+      setMobileListPanel('detail');
+    }
+  };
+
   // 样式变量
   const card = isDark
     ? 'bg-slate-800 border border-slate-700 rounded-xl'
@@ -735,9 +752,9 @@ export default function KnowledgeAdmin() {
 
   return (
     <AdminLayout>
-      <div className="p-6 space-y-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {/* 头部 */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
               知识库管理
@@ -746,7 +763,7 @@ export default function KnowledgeAdmin() {
               管理 RAG 向量知识库，支持语义检索的学科知识文档
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={() => setView('create')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -836,6 +853,65 @@ export default function KnowledgeAdmin() {
         {/* 主内容区 */}
         {view === 'list' && (
           <div className={`${card} overflow-hidden`}>
+            {isMobileLayout ? (
+              <div className="space-y-4 p-4">
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {[
+                    { key: 'directory', label: '目录' },
+                    { key: 'detail', label: '详情' },
+                  ].map((panel) => (
+                    <button
+                      key={panel.key}
+                      type="button"
+                      onClick={() => setMobileListPanel(panel.key)}
+                      className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                        mobileListPanel === panel.key
+                          ? 'bg-blue-600 text-white'
+                          : isDark
+                            ? 'bg-slate-700 text-slate-300'
+                            : 'bg-gray-100 text-gray-700'
+                      }`}
+                    >
+                      {panel.label}
+                    </button>
+                  ))}
+                </div>
+
+                {mobileListPanel === 'directory' ? (
+                  <div className={`overflow-hidden rounded-xl border ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
+                    <div className={`border-b px-4 py-3 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
+                      <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-gray-800'}`}>
+                        文档目录
+                      </h2>
+                    </div>
+                    <div className="max-h-[60vh] overflow-y-auto">
+                      <DirectoryTree
+                        docs={docs}
+                        selectedDoc={selectedDoc}
+                        onSelect={handleSelectDoc}
+                        isDark={isDark}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className={`rounded-xl border p-4 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
+                    {loading ? (
+                      <div className={`py-10 text-center text-sm ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
+                        加载中...
+                      </div>
+                    ) : (
+                      <DocumentDetail
+                        doc={selectedDoc}
+                        onEdit={handleEditDoc}
+                        onDelete={handleDelete}
+                        onReindex={handleReindex}
+                        isDark={isDark}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
             <div className="flex">
               {/* 左侧目录树 */}
               <div className={`${sidebarWidth} border-r flex-shrink-0 ${
@@ -850,7 +926,7 @@ export default function KnowledgeAdmin() {
                   <DirectoryTree
                     docs={docs}
                     selectedDoc={selectedDoc}
-                    onSelect={setSelectedDoc}
+                    onSelect={handleSelectDoc}
                     isDark={isDark}
                   />
                 </div>
@@ -873,13 +949,14 @@ export default function KnowledgeAdmin() {
                 )}
               </div>
             </div>
+            )}
           </div>
         )}
 
         {/* 上传视图 */}
         {view === 'upload' && (
           <div className={`${card} p-5`}>
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-gray-800'}`}>
                 上传知识文档
               </h2>
@@ -901,7 +978,7 @@ export default function KnowledgeAdmin() {
         {/* 创建/编辑视图 */}
         {(view === 'create' || view === 'edit') && (
           <div className={`${card} p-5`}>
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-200' : 'text-gray-800'}`}>
                 {view === 'create' ? '新建知识文档' : `编辑：${editingDoc?.title}`}
               </h2>

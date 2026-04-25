@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     AI_TIMEOUT: int = 120  # 秒（试卷生成需要更长时间，33道题可能需要90秒以上）
     AI_MAX_RETRIES: int = 3
     AI_DEFAULT_MAX_TOKENS: int = 16384
+    AI_MAX_TOKEN_LIMIT: int = 1000000
     AI_STREAM_HEARTBEAT_INTERVAL_SECONDS: int = 10
     
     # 文件上传配置

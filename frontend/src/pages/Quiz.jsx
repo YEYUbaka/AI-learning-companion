@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api, {
+import {
   generateQuiz as requestQuizGenerate,
   submitQuiz as requestQuizSubmit,
   regeneratePaperQuestions as requestRegeneratePaperQuestions,
+  exportPaper as requestExportPaper,
 } from '../api/apiClient';
 import { useThemeStore } from '../store/themeStore';
 import PaperGenerator from '../components/PaperGenerator';
@@ -13,6 +14,11 @@ import { normalizeQuizQuestion, normalizeQuizQuestions } from '../utils/quiz';
 
 const PAPER_STORAGE_KEY = 'zhixueban_custom_paper';
 const ANSWER_STORAGE_KEY = 'zhixueban_quiz_progress';
+
+const SOURCE_TYPE_LABELS = {
+  question_bank: '本地题库',
+  ai_fallback: 'AI 补题',
+};
 
 const QUESTION_TYPE_LABELS = {
   choice: '单选题',
@@ -92,6 +98,56 @@ const isQuestionAnswered = (question, answer) => {
 const findFirstUnansweredIndex = (questions = [], answers = []) =>
   questions.findIndex((question, index) => !isQuestionAnswered(question, answers[index]));
 
+const normalizeAssetList = (assets) => (Array.isArray(assets) ? assets.filter(Boolean) : []);
+
+const resolveAssetUrl = (asset) => {
+  if (!asset) return null;
+  if (typeof asset === 'string') return asset;
+
+  const rawValue =
+    asset.preview_url ||
+    asset.image_url ||
+    asset.file_url ||
+    asset.url ||
+    asset.file_path;
+
+  if (!rawValue) return null;
+  if (/^(https?:|data:)/.test(rawValue)) return rawValue;
+  if (rawValue.startsWith('/')) return rawValue;
+  if (rawValue.startsWith('uploads/')) return `/${rawValue}`;
+  return rawValue;
+};
+
+const renderAssetGallery = (assets, palette, title = '题目图片') => {
+  const normalizedAssets = normalizeAssetList(assets)
+    .map((asset, index) => ({
+      key: `${typeof asset === 'string' ? asset : asset.id || asset.file_path || index}-${index}`,
+      url: resolveAssetUrl(asset),
+      label:
+        typeof asset === 'string'
+          ? `${title} ${index + 1}`
+          : asset.file_name || asset.name || `${title} ${index + 1}`,
+    }))
+    .filter((item) => item.url);
+
+  if (!normalizedAssets.length) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4">
+      <div className={`mb-2 text-xs font-medium ${palette.text}`}>{title}</div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {normalizedAssets.map((asset) => (
+          <div key={asset.key} className="overflow-hidden rounded-md border border-black/10 bg-black/5">
+            <img src={asset.url} alt={asset.label} className="max-h-80 w-full object-contain" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 function Quiz() {
   const navigate = useNavigate();
   const { theme } = useThemeStore();
@@ -127,6 +183,9 @@ function Quiz() {
 
   const unansweredCount = Math.max(questions.length - answeredCount, 0);
   const currentQuestion = questions[currentQuestionIndex] || null;
+  const sourceStats = paperData?.source_stats || {};
+  const coverageReport = paperData?.coverage_report || {};
+  const missingRequirements = paperData?.missing_requirements || [];
   const isRegularSetupView = mode === 'regular' && questions.length === 0 && !paperData;
   const isRegularExamView = mode === 'regular' && questions.length > 0 && !paperData;
 
@@ -235,7 +294,9 @@ function Quiz() {
 
   const handleGenerate = async () => {
     if (!topic.trim()) {
-      setError('请输入本次测评主题');
+      const message = '测评知识点不能为空';
+      setError(message);
+      window.alert(message);
       return;
     }
 
@@ -384,10 +445,7 @@ function Quiz() {
 
     try {
       const userId = getUserId();
-      const response = await api.get(
-        `/api/v1/quiz/paper/${paperData.paper_id}/export?user_id=${userId}&format=${format}&include_answer=true`,
-        { responseType: 'blob' }
-      );
+      const response = await requestExportPaper(paperData.paper_id, userId, format, true);
 
       const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
@@ -433,8 +491,9 @@ function Quiz() {
         throw new Error(response.data.message || '重生题目失败');
       }
 
+      const normalizedQuestions = normalizeQuizQuestions(response.data.questions || []);
       setPaperData(response.data);
-      setQuestions(response.data.questions || []);
+      setQuestions(normalizedQuestions);
       setStatusMessage(
         response.data.regenerated_question_ids?.length
           ? `已重生题目：${response.data.regenerated_question_ids.join('、')}`
@@ -681,13 +740,13 @@ function Quiz() {
                   <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${palette.muted}`}>常规测评</div>
                   <h1 className={`mt-3 text-3xl font-bold sm:text-4xl ${palette.title}`}>开始测评</h1>
                   <p className={`mt-4 text-sm leading-7 sm:text-base ${palette.text}`}>
-                    输入练习主题后生成试题，完成作答即可查看结果与解析。
+                    输入测评知识点后生成试题，完成作答即可查看结果与解析。
                   </p>
                 </div>
 
                 <div className="mt-6 space-y-5">
                   <div>
-                    <label className={`mb-2 block text-sm font-medium ${palette.title}`}>测评主题</label>
+                    <label className={`mb-2 block text-sm font-medium ${palette.title}`}>测评知识点</label>
                     <input
                       type="text"
                       value={topic}
@@ -737,7 +796,7 @@ function Quiz() {
                     </p>
                   </div>
 
-                  <button type="button" onClick={handleGenerate} disabled={loading || !topic.trim()} className={palette.primary}>
+                  <button type="button" onClick={handleGenerate} disabled={loading} className={palette.primary}>
                     {loading ? '正在生成测评...' : '开始测评'}
                   </button>
                 </div>
@@ -842,6 +901,7 @@ function Quiz() {
                     {currentQuestion?.question || currentQuestion?.stem || '题目加载中'}
                   </div>
 
+                  {renderAssetGallery(currentQuestion?.question_images, palette)}
                   <div className="mt-6">{renderQuestionInput(currentQuestion, currentQuestionIndex)}</div>
 
                   <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -946,6 +1006,79 @@ function Quiz() {
                 </section>
               ) : null}
 
+              {(paperData.source_stats || paperData.coverage_report) ? (
+                <section className={`${palette.mutedSoft} p-5 sm:p-6`}>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div>
+                      <div className={`text-xs ${palette.muted}`}>本地题数量</div>
+                      <div className={`mt-1 text-xl font-semibold ${palette.title}`}>{sourceStats.local_question_bank ?? 0}</div>
+                    </div>
+                    <div>
+                      <div className={`text-xs ${palette.muted}`}>AI 兜底数量</div>
+                      <div className={`mt-1 text-xl font-semibold ${palette.title}`}>{sourceStats.ai_fallback ?? 0}</div>
+                    </div>
+                    <div>
+                      <div className={`text-xs ${palette.muted}`}>考点覆盖率</div>
+                      <div className={`mt-1 text-xl font-semibold ${palette.title}`}>
+                        {coverageReport.requested_knowledge_points?.length
+                          ? `${coverageReport.covered_knowledge_points?.length || 0}/${coverageReport.requested_knowledge_points.length}`
+                          : '--'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {sourceStats.by_source_type && Object.keys(sourceStats.by_source_type).length ? (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {Object.entries(sourceStats.by_source_type).map(([key, value]) => (
+                        <span key={key} className={`rounded-sm border px-3 py-1.5 text-sm ${palette.info}`}>
+                          {SOURCE_TYPE_LABELS[key] || key}: {value}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {coverageReport.covered_knowledge_points?.length ? (
+                    <div className="mt-4">
+                      <div className={`mb-2 text-xs ${palette.muted}`}>已覆盖考点</div>
+                      <div className="flex flex-wrap gap-2">
+                        {coverageReport.covered_knowledge_points.map((item, index) => (
+                          <span key={`covered-${item}-${index}`} className={`rounded-sm border px-3 py-1.5 text-sm ${palette.info}`}>
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {coverageReport.missing_knowledge_points?.length ? (
+                    <div className="mt-4">
+                      <div className={`mb-2 text-xs ${palette.muted}`}>仍需补足的考点</div>
+                      <div className="flex flex-wrap gap-2">
+                        {coverageReport.missing_knowledge_points.map((item, index) => (
+                          <span key={`missing-point-${item}-${index}`} className={`rounded-sm border px-3 py-1.5 text-sm ${palette.warning}`}>
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+
+              {missingRequirements.length ? (
+                <section className={`${palette.mutedSoft} p-5 sm:p-6`}>
+                  <div className={`text-lg font-semibold ${palette.title}`}>缺口说明</div>
+                  <div className="mt-4 space-y-2">
+                    {missingRequirements.slice(0, 8).map((item, index) => (
+                      <div key={`missing-${item.question_id || index}`} className={`rounded-md border px-4 py-3 text-sm ${palette.warning}`}>
+                        {(item.question_id || `缺口 ${index + 1}`)} · {item.question_type || 'unknown'} · {item.difficulty || 'medium'}
+                        {item.knowledge_points?.length ? ` · ${item.knowledge_points.join(' / ')}` : ''}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
               {paperData.quality_report ? (
                 <section className={`${palette.mutedSoft} p-5 sm:p-6`}>
                   <div className="grid gap-4 md:grid-cols-3">
@@ -1003,6 +1136,7 @@ function Quiz() {
                         <div className={`mt-3 text-sm font-semibold leading-7 ${palette.title}`}>
                           {index + 1}. {question.question || question.stem || '题目'}
                         </div>
+                        {renderAssetGallery(question.question_images, palette)}
                         {question.options?.length ? (
                           <div className="mt-3 grid gap-2">
                             {question.options.map((option, optionIndex) => (

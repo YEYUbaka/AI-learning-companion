@@ -111,6 +111,7 @@ backend/test_*.pdf
 
 # RAG 知识库索引（运行时生成）
 knowledge_base/_index/
+backend/knowledge_base/
 
 # 参赛相关文档（不需要上传）
 documents/
@@ -145,10 +146,14 @@ temp-*.txt
 *.conf
 .playwright-cli/
 .playwright-mcp/
+.qoder/
 AGENTS.md
 _server_apiClient.js
 agent-stream-test.png
 .claude/settings.local.json
+
+# Test artifact outputs
+test-results/
 
 # 前端构建压缩包
 frontend/dist.tar.gz

@@ -1,271 +1,251 @@
 """
-模型注册表
-作者：智学伴开发团队
-目的：统一管理各AI提供商的调用方法，支持fallback策略
-环境变量：从数据库读取（ModelConfig表）
-测试：pytest backend/tests/test_model_registry.py
+Model registry and provider abstraction.
 """
+from __future__ import annotations
+
 import json
+import re
+import threading
 import time
-import httpx
-from typing import Optional, Dict, Any, List, Tuple, Generator
 from abc import ABC, abstractmethod
+from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple
+
+import httpx
+from sqlalchemy.orm import Session
+
+from core.config import settings
 from core.exceptions import UpstreamServiceError
 from core.logger import logger
-from core.config import settings
 from core.security import decrypt_api_key
-from sqlalchemy.orm import Session
 from repositories.model_config_repo import ModelConfigRepository
-import threading
 
 
-class AIProvider(ABC):
-    """AI提供商抽象基类"""
+def _extract_text_from_content_blocks(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") in {"text", "input_text", "output_text"}:
+                parts.append(str(item.get("text") or ""))
+        return "\n".join(part for part in parts if part).strip()
+    if isinstance(content, dict):
+        return str(content.get("text") or "")
+    return str(content)
 
-    @abstractmethod
-    def call(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
-        """调用AI模型"""
-        pass
 
-
-class OpenAICompatProvider(AIProvider):
-    """通用 OpenAI 兼容提供商（支持所有兼容 OpenAI Chat Completions 格式的接口）"""
-
-    def __init__(
-        self,
-        api_key: str,
-        base_url: str,
-        model_name: str,
-        temperature: float = 0.7,
-        max_tokens: int = settings.AI_DEFAULT_MAX_TOKENS,
-        top_p: float = 1.0,
-        extra_headers: Optional[Dict[str, str]] = None,
-        timeout: int = 60,
-    ):
-        self.api_key = api_key
-        # 去除末尾斜杠，call() 内部统一拼接 /chat/completions
-        self.base_url = base_url.rstrip("/")
-        self.model_name = model_name
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.top_p = top_p
-        self.extra_headers = extra_headers or {}
-        self.timeout = timeout
-
-    def call(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
-        """调用 OpenAI 兼容接口"""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            **self.extra_headers,
-        }
-        # Keep the provider payload normalized here so different vendors can
-        # share one request path and one fallback contract upstream.
-        payload = {
-            "model": kwargs.get("model", self.model_name),
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.temperature),
-            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
-            "top_p": kwargs.get("top_p", self.top_p),
-        }
-        endpoint = self.base_url + "/chat/completions"
-        with httpx.Client(timeout=self.timeout) as client:
-            response = client.post(endpoint, json=payload, headers=headers)
-            response.raise_for_status()
-            result = response.json()
-            return {
-                "text": result["choices"][0]["message"]["content"],
-                "usage": result.get("usage", {}),
-                "model": result.get("model", self.model_name),
+def _normalize_messages_to_input_items(messages: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for message in messages or []:
+        normalized.append(
+            {
+                "role": message.get("role", "user"),
+                "content": message.get("content", ""),
             }
-
-    def call_stream(self, messages: List[Dict[str, str]], **kwargs) -> Generator[str, None, None]:
-        """流式调用 OpenAI 兼容接口，产生 SSE 格式数据块"""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            **self.extra_headers,
-        }
-        payload = {
-            "model": kwargs.get("model", self.model_name),
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.temperature),
-            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
-            "top_p": kwargs.get("top_p", self.top_p),
-            "stream": True,
-        }
-        endpoint = self.base_url + "/chat/completions"
-        start_time = time.time()
-
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                with client.stream("POST", endpoint, json=payload, headers=headers) as response:
-                    response.raise_for_status()
-                    model_name = self.model_name
-                    for line in response.iter_lines():
-                        line = line.strip()
-                        if not line or line == "data: [DONE]":
-                            continue
-                        if line.startswith("data: "):
-                            try:
-                                chunk_data = json.loads(line[6:])
-                                delta = chunk_data.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    # Normalize every provider stream to the same SSE token event
-                                    # so the frontend only needs to handle one format.
-                                    yield f'data: {json.dumps({"type": "token", "content": content}, ensure_ascii=False)}\n\n'
-                                if chunk_data.get("model"):
-                                    model_name = chunk_data["model"]
-                            except (json.JSONDecodeError, IndexError, KeyError):
-                                continue
-            latency = (time.time() - start_time) * 1000
-            yield f'data: {json.dumps({"type": "done", "latency_ms": round(latency, 2), "model": model_name}, ensure_ascii=False)}\n\n'
-        except Exception as e:
-            yield f'data: {json.dumps({"type": "error", "message": str(e)[:300]}, ensure_ascii=False)}\n\n'
+        )
+    return normalized
 
 
-class WenxinProvider(AIProvider):
-    """百度文心一言专用提供商（千帆 V2 API，OAuth2 access_token 认证）"""
-
-    _TOKEN_URL = "https://aip.baidubce.com/oauth/2.0/token"
-
-    def __init__(
-        self,
-        api_key: str,
-        secret_key: str,
-        base_url: str,
-        model_name: str,
-        temperature: float = 0.7,
-        max_tokens: int = settings.AI_DEFAULT_MAX_TOKENS,
-        top_p: float = 1.0,
-        timeout: int = 60,
-    ):
-        self.api_key = api_key
-        self.secret_key = secret_key
-        self.base_url = base_url.rstrip("/")
-        self.model_name = model_name
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.top_p = top_p
-        self.timeout = timeout
-        self._access_token: Optional[str] = None
-        self._token_expires_at: float = 0.0
-        self._token_lock = threading.Lock()
-
-    def _get_access_token(self) -> str:
-        with self._token_lock:
-            if self._access_token and time.time() < self._token_expires_at:
-                return self._access_token
-            params = {
-                "grant_type": "client_credentials",
-                "client_id": self.api_key,
-                "client_secret": self.secret_key,
-            }
-            with httpx.Client(timeout=15) as client:
-                resp = client.post(self._TOKEN_URL, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-            if "error" in data:
-                raise RuntimeError(f"百度 OAuth2 获取 token 失败: {data.get('error_description', data['error'])}")
-            self._access_token = data["access_token"]
-            # 提前 60 秒刷新，避免边界问题
-            self._token_expires_at = time.time() + int(data.get("expires_in", 2592000)) - 60
-            return self._access_token
-
-    def _build_headers(self) -> Dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self._get_access_token()}",
-            "Content-Type": "application/json",
-        }
-
-    def call(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
-        headers = self._build_headers()
-        payload = {
-            "model": kwargs.get("model", self.model_name),
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.temperature),
-            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
-            "top_p": kwargs.get("top_p", self.top_p),
-        }
-        endpoint = self.base_url + "/chat/completions"
-        with httpx.Client(timeout=self.timeout) as client:
-            response = client.post(endpoint, json=payload, headers=headers)
-            response.raise_for_status()
-            result = response.json()
-            return {
-                "text": result["choices"][0]["message"]["content"],
-                "usage": result.get("usage", {}),
-                "model": result.get("model", self.model_name),
-            }
-
-    def call_stream(self, messages: List[Dict[str, str]], **kwargs) -> Generator[str, None, None]:
-        try:
-            headers = self._build_headers()
-        except Exception as e:
-            yield f'data: {json.dumps({"type": "error", "message": str(e)[:300]}, ensure_ascii=False)}\n\n'
-            return
-
-        payload = {
-            "model": kwargs.get("model", self.model_name),
-            "messages": messages,
-            "temperature": kwargs.get("temperature", self.temperature),
-            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
-            "top_p": kwargs.get("top_p", self.top_p),
-            "stream": True,
-        }
-        endpoint = self.base_url + "/chat/completions"
-        start_time = time.time()
-
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                with client.stream("POST", endpoint, json=payload, headers=headers) as response:
-                    response.raise_for_status()
-                    model_name = self.model_name
-                    for line in response.iter_lines():
-                        line = line.strip()
-                        if not line or line == "data: [DONE]":
-                            continue
-                        if line.startswith("data: "):
-                            try:
-                                chunk_data = json.loads(line[6:])
-                                delta = chunk_data.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield f'data: {json.dumps({"type": "token", "content": content}, ensure_ascii=False)}\n\n'
-                                if chunk_data.get("model"):
-                                    model_name = chunk_data["model"]
-                            except (json.JSONDecodeError, IndexError, KeyError):
-                                continue
-            latency = (time.time() - start_time) * 1000
-            yield f'data: {json.dumps({"type": "done", "latency_ms": round(latency, 2), "model": model_name}, ensure_ascii=False)}\n\n'
-        except Exception as e:
-            yield f'data: {json.dumps({"type": "error", "message": str(e)[:300]}, ensure_ascii=False)}\n\n'
+def _normalize_response_content_blocks(content: Any) -> List[Dict[str, Any]]:
+    if content is None:
+        return []
+    if isinstance(content, str):
+        return [{"type": "input_text", "text": content}]
+    if isinstance(content, list):
+        blocks: List[Dict[str, Any]] = []
+        for item in content:
+            if isinstance(item, str):
+                blocks.append({"type": "input_text", "text": item})
+                continue
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type in {"text", "input_text"}:
+                blocks.append({"type": "input_text", "text": item.get("text", "")})
+            elif item_type in {"image", "input_image"}:
+                image_url = item.get("image_url") or item.get("url")
+                if isinstance(image_url, dict):
+                    image_url = image_url.get("url")
+                if image_url:
+                    blocks.append({"type": "input_image", "image_url": image_url})
+            elif item_type == "file_reference":
+                file_url = item.get("file_url") or item.get("url") or item.get("file_path")
+                label = item.get("text") or item.get("name") or "File reference"
+                if file_url:
+                    blocks.append({"type": "input_text", "text": f"{label}: {file_url}"})
+            elif item_type == "input_file":
+                file_url = item.get("file_url") or item.get("url")
+                if file_url:
+                    blocks.append({"type": "input_file", "file_url": file_url})
+        return blocks
+    if isinstance(content, dict):
+        return _normalize_response_content_blocks([content])
+    return [{"type": "input_text", "text": str(content)}]
 
 
-# ---------------------------------------------------------------------------
-# 提供商模板（数据驱动，替代硬编码 Provider 类映射）
-# ---------------------------------------------------------------------------
+def _normalize_chat_content_blocks(content: Any) -> List[Dict[str, Any]]:
+    if content is None:
+        return []
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    if isinstance(content, list):
+        blocks: List[Dict[str, Any]] = []
+        for item in content:
+            if isinstance(item, str):
+                blocks.append({"type": "text", "text": item})
+                continue
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type in {"text", "input_text"}:
+                blocks.append({"type": "text", "text": item.get("text", "")})
+            elif item_type in {"image", "input_image"}:
+                image_url = item.get("image_url") or item.get("url")
+                if isinstance(image_url, dict):
+                    image_url = image_url.get("url")
+                if image_url:
+                    blocks.append({"type": "image_url", "image_url": {"url": image_url}})
+            elif item_type == "file_reference":
+                file_url = item.get("file_url") or item.get("url") or item.get("file_path")
+                label = item.get("text") or item.get("name") or "File reference"
+                if file_url:
+                    blocks.append({"type": "text", "text": f"{label}: {file_url}"})
+        return blocks
+    if isinstance(content, dict):
+        return _normalize_chat_content_blocks([content])
+    return [{"type": "text", "text": str(content)}]
+
+
+def _ensure_message_content(
+    content: Any,
+    *,
+    supports_vision: bool,
+) -> Any:
+    chat_blocks = _normalize_chat_content_blocks(content)
+    contains_image = any(block.get("type") == "image_url" for block in chat_blocks)
+    if contains_image and not supports_vision:
+        raise ValueError("Current model does not support image understanding")
+    if not chat_blocks:
+        return ""
+    if len(chat_blocks) == 1 and chat_blocks[0].get("type") == "text":
+        return chat_blocks[0].get("text", "")
+    return chat_blocks
+
+
+def _normalize_input_items(
+    *,
+    messages: Optional[List[Dict[str, Any]]] = None,
+    input_items: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    if input_items is not None:
+        return input_items
+    return _normalize_messages_to_input_items(messages)
+
+
+def _extract_response_text(payload: Dict[str, Any]) -> str:
+    output = payload.get("output") or []
+    texts: List[str] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "message":
+            for content in item.get("content") or []:
+                if isinstance(content, dict) and content.get("type") == "output_text":
+                    texts.append(str(content.get("text") or ""))
+        elif item.get("type") == "output_text":
+            texts.append(str(item.get("text") or ""))
+    if texts:
+        return "\n".join(texts).strip()
+    return str(payload.get("output_text") or "")
+
+
+def _extract_response_tool_calls(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    tool_calls: List[Dict[str, Any]] = []
+    for item in payload.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type in {"function_call", "tool_call"}:
+            tool_calls.append(item)
+            continue
+        if item_type == "message":
+            for content in item.get("content") or []:
+                if isinstance(content, dict) and content.get("type") in {"tool_call", "function_call"}:
+                    tool_calls.append(content)
+    return tool_calls
+
+
+def _flatten_stream_sse_lines(lines: Iterable[str]) -> Iterable[str]:
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line == "data: [DONE]":
+            continue
+        if line.startswith("data: "):
+            yield line[6:]
+
+
+def _parse_doubao_model_version(model_name: str) -> Optional[int]:
+    match = re.search(r"(\d{6})$", model_name or "")
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _infer_doubao_supports_responses(model_name: str, explicit: Optional[bool] = None) -> bool:
+    if explicit is not None:
+        return explicit
+    if not model_name:
+        return True
+    if model_name == "doubao-1-5-pro-32k-character-250715":
+        return False
+    version = _parse_doubao_model_version(model_name)
+    if version is None:
+        return True
+    return version >= 250615
+
+
+def _infer_supports_vision(provider_name: str, model_name: str, explicit: Optional[bool] = None) -> bool:
+    if explicit is not None:
+        return explicit
+    lower_model = (model_name or "").lower()
+    if any(token in lower_model for token in ["vision", "vl", "gpt-4o", "gpt-4.1", "claude-3", "gemini"]):
+        return True
+    return provider_name == "doubao" and "vision" in lower_model
+
 
 def _provider_template(
     *,
     display_name: str,
     default_base_url: str,
     default_model: str,
-    available_models: List[str],
-    requires_extra_headers: bool = False,
-    extra_header_keys: Optional[List[str]] = None,
-    extra_headers: Optional[Dict[str, str]] = None,
+    available_models: Optional[List[str]] = None,
     tool_calling: bool = False,
     reasoning: bool = False,
     long_output: bool = True,
+    supports_responses_api: bool = False,
+    supports_vision: bool = False,
+    supports_previous_response_id: bool = False,
+    native_tools: Optional[List[str]] = None,
+    requires_extra_headers: bool = False,
+    extra_header_keys: Optional[List[str]] = None,
+    extra_headers: Optional[Dict[str, str]] = None,
     default_max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     return {
         "display_name": display_name,
         "default_base_url": default_base_url,
         "default_model": default_model,
-        "available_models": available_models,
+        "available_models": available_models or [],
         "requires_extra_headers": requires_extra_headers,
         "extra_header_keys": extra_header_keys or [],
         "extra_headers": extra_headers or {},
@@ -275,28 +255,28 @@ def _provider_template(
             "tool_calling": tool_calling,
             "reasoning": reasoning,
             "long_output": long_output,
+            "supports_responses_api": supports_responses_api,
+            "supports_vision": supports_vision,
+            "supports_previous_response_id": supports_previous_response_id,
+            "native_tools": native_tools or [],
         },
     }
 
 
-# AI辅助生成: DeepSeek-V3 2025-12 — Provider注册工厂结构与httpx请求实现
-# Prompt: "我正在开发一个支持多AI提供商的学习平台，需要一个统一的Provider注册..."
-# 修改: 增加了PROVIDER_ALIASES别名反向查找、call_with_fallback()容错逻辑、加密密钥解密集成
 PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
     "deepseek": _provider_template(
         display_name="DeepSeek",
         default_base_url="https://api.deepseek.com/v1",
         default_model="deepseek-chat",
-        default_max_tokens=8192,
         available_models=["deepseek-chat", "deepseek-reasoner"],
         tool_calling=True,
         reasoning=True,
     ),
     "zhipu": _provider_template(
-        display_name="智谱AI",
+        display_name="Zhipu",
         default_base_url="https://open.bigmodel.cn/api/paas/v4",
         default_model="glm-4-flash",
-        available_models=["glm-4.7-flash", "glm-4-flash", "glm-4-air", "glm-4", "glm-4-long", "glm-z1-flash", "glm-z1-air"],
+        available_models=["glm-4.7-flash", "glm-4-flash", "glm-4-air", "glm-4"],
         tool_calling=True,
         reasoning=True,
     ),
@@ -322,46 +302,40 @@ PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
         reasoning=True,
     ),
     "moonshot": _provider_template(
-        display_name="月之暗面",
+        display_name="Moonshot",
         default_base_url="https://api.moonshot.cn/v1",
         default_model="moonshot-v1-32k",
         available_models=["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
         reasoning=True,
-        long_output=True,
     ),
     "siliconflow": _provider_template(
-        display_name="硅基流动",
+        display_name="SiliconFlow",
         default_base_url="https://api.siliconflow.cn/v1",
         default_model="Qwen/Qwen2.5-7B-Instruct",
-        available_models=[
-            "Qwen/Qwen2.5-7B-Instruct",
-            "Qwen/Qwen2.5-72B-Instruct",
-            "Qwen/Qwen3-8B",
-            "Qwen/Qwen3-30B-A3B",
-            "deepseek-ai/DeepSeek-V3",
-            "deepseek-ai/DeepSeek-R1",
-            "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-            "THUDM/glm-4-9b-chat",
-            "meta-llama/Meta-Llama-3.1-8B-Instruct",
-            "meta-llama/Meta-Llama-3.1-70B-Instruct",
-            "Pro/Qwen/Qwen2.5-7B-Instruct",
-            "Pro/deepseek-ai/DeepSeek-V3",
-            "Pro/deepseek-ai/DeepSeek-R1",
-        ],
+        available_models=[],
         tool_calling=True,
         reasoning=True,
-        long_output=True,
     ),
     "openrouter": _provider_template(
         display_name="OpenRouter",
         default_base_url="https://openrouter.ai/api/v1",
         default_model="",
         available_models=[],
-        requires_extra_headers=True,
-        extra_header_keys=["HTTP-Referer", "X-Title"],
         tool_calling=True,
         reasoning=True,
-        long_output=True,
+        requires_extra_headers=True,
+        extra_header_keys=["HTTP-Referer", "X-Title"],
+    ),
+    "doubao": _provider_template(
+        display_name="Doubao (Volcengine Ark)",
+        default_base_url="https://ark.cn-beijing.volces.com/api/v3",
+        default_model="",
+        available_models=[],
+        tool_calling=True,
+        reasoning=True,
+        supports_responses_api=True,
+        supports_previous_response_id=True,
+        native_tools=["web_search", "knowledge_search", "image_process", "mcp"],
     ),
     "openai_compat": _provider_template(
         display_name="OpenAI Compatible",
@@ -371,447 +345,350 @@ PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
     ),
 }
 
-# 向后兼容别名（DB 中的旧 provider_name → 新模板 key）
 PROVIDER_ALIASES: Dict[str, str] = {
     "chatglm": "zhipu",
-    "kimi": "moonshot",
     "glm": "zhipu",
+    "kimi": "moonshot",
     "xfy": "xinghuo",
     "xfyun": "xinghuo",
-    # 中文名称映射
-    "星火": "xinghuo",
-    "讯飞星火": "xinghuo",
-    "智谱清言": "zhipu",
+    "siliconflow": "siliconflow",
+    "deepseek": "deepseek",
+    "doubao": "doubao",
+    "ark": "doubao",
+    "volcengine": "doubao",
+    "openai-compatible": "openai_compat",
+    "openai_compat": "openai_compat",
+    "openai compat": "openai_compat",
     "智谱": "zhipu",
-    "文心一言": "wenxin",
-    "百度千帆": "wenxin",
-    "通义千问": "qwen",
-    "月之暗面": "moonshot",
-    "Kimi": "moonshot",
-    "DeepSeek": "deepseek",
-    # 硅基流动
-    "硅基流动": "siliconflow",
-    "SiliconFlow": "siliconflow",
+    "豆包": "doubao",
+    "火山方舟": "doubao",
 }
 
 
-class ModelRegistry:
-    """模型注册表（单例）"""
+class AIProvider(ABC):
+    def __init__(
+        self,
+        *,
+        provider_name: str,
+        api_key: str,
+        base_url: str,
+        model_name: str,
+        temperature: float,
+        max_tokens: int,
+        top_p: float,
+        extra_headers: Optional[Dict[str, str]] = None,
+        timeout: int = 60,
+        capabilities: Optional[Dict[str, Any]] = None,
+    ):
+        self.provider_name = provider_name
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.model_name = model_name
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.top_p = top_p
+        self.extra_headers = extra_headers or {}
+        self.timeout = timeout
+        self.capabilities = capabilities or {}
 
+    def get_capabilities(self) -> Dict[str, Any]:
+        return dict(self.capabilities)
+
+    @abstractmethod
+    def call(
+        self,
+        *,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def call_stream(
+        self,
+        *,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Generator[str, None, None]:
+        raise NotImplementedError("Streaming is not implemented for this provider")
+
+    def call_with_tools(
+        self,
+        *,
+        tools: List[Dict[str, Any]],
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        return self.call(messages=messages, input_items=input_items, tools=tools, **kwargs)
+
+    def _build_headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            **self.extra_headers,
+        }
+
+
+class OpenAICompatProvider(AIProvider):
+    def _build_payload(
+        self,
+        *,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        items = _normalize_input_items(messages=messages, input_items=input_items)
+        normalized_messages: List[Dict[str, Any]] = []
+        for item in items:
+            role = item.get("role", "user")
+            normalized_messages.append(
+                {
+                    "role": role,
+                    "content": _ensure_message_content(
+                        item.get("content"),
+                        supports_vision=bool(self.capabilities.get("supports_vision")),
+                    ),
+                }
+            )
+        payload: Dict[str, Any] = {
+            "model": kwargs.get("model", self.model_name),
+            "messages": normalized_messages,
+            "temperature": kwargs.get("temperature", self.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "top_p": kwargs.get("top_p", self.top_p),
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = kwargs.get("tool_choice", "auto")
+        return payload
+
+    def call(
+        self,
+        *,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        endpoint = self.base_url + "/chat/completions"
+        payload = self._build_payload(messages=messages, input_items=input_items, tools=kwargs.pop("tools", None), **kwargs)
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.post(endpoint, json=payload, headers=self._build_headers())
+            response.raise_for_status()
+            result = response.json()
+        message = ((result.get("choices") or [{}])[0] or {}).get("message", {})
+        return {
+            "text": _extract_text_from_content_blocks(message.get("content")),
+            "usage": result.get("usage", {}),
+            "model": result.get("model", self.model_name),
+            "provider_format": "chat_completions",
+            "tool_calls": message.get("tool_calls") or [],
+        }
+
+    def call_stream(
+        self,
+        *,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Generator[str, None, None]:
+        endpoint = self.base_url + "/chat/completions"
+        payload = self._build_payload(messages=messages, input_items=input_items, tools=kwargs.pop("tools", None), **kwargs)
+        payload["stream"] = True
+        start_time = time.time()
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                with client.stream("POST", endpoint, json=payload, headers=self._build_headers()) as response:
+                    response.raise_for_status()
+                    model_name = self.model_name
+                    for raw_chunk in _flatten_stream_sse_lines(response.iter_lines()):
+                        chunk_data = json.loads(raw_chunk)
+                        choice = (chunk_data.get("choices") or [{}])[0] or {}
+                        delta = choice.get("delta") or {}
+                        content = _extract_text_from_content_blocks(delta.get("content")) or delta.get("content", "")
+                        if content:
+                            yield f'data: {json.dumps({"type": "token", "content": content}, ensure_ascii=False)}\n\n'
+                        if chunk_data.get("model"):
+                            model_name = chunk_data["model"]
+            latency = (time.time() - start_time) * 1000
+            yield f'data: {json.dumps({"type": "done", "latency_ms": round(latency, 2), "model": model_name}, ensure_ascii=False)}\n\n'
+        except Exception as exc:  # pylint: disable=broad-except
+            yield f'data: {json.dumps({"type": "error", "message": str(exc)[:300]}, ensure_ascii=False)}\n\n'
+
+    def call_with_tools(
+        self,
+        *,
+        tools: List[Dict[str, Any]],
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        if not self.capabilities.get("tool_calling"):
+            raise ValueError(f"{self.provider_name} does not support native tool calling")
+        return self.call(messages=messages, input_items=input_items, tools=tools, **kwargs)
+
+
+class ResponsesProvider(AIProvider):
+    def _build_payload(
+        self,
+        *,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        items = _normalize_input_items(messages=messages, input_items=input_items)
+        response_input: List[Dict[str, Any]] = []
+        for item in items:
+            role = item.get("role", "user")
+            blocks = _normalize_response_content_blocks(item.get("content"))
+            contains_image = any(block.get("type") == "input_image" for block in blocks)
+            if contains_image and not self.capabilities.get("supports_vision"):
+                raise ValueError("Current model does not support image understanding")
+            response_input.append({"role": role, "content": blocks})
+
+        payload: Dict[str, Any] = {
+            "model": kwargs.get("model", self.model_name),
+            "input": response_input,
+            "temperature": kwargs.get("temperature", self.temperature),
+            "max_output_tokens": kwargs.get("max_output_tokens", kwargs.get("max_tokens", self.max_tokens)),
+        }
+        instructions = kwargs.get("instructions")
+        if instructions:
+            payload["instructions"] = instructions
+        previous_response_id = kwargs.get("previous_response_id")
+        if previous_response_id and self.capabilities.get("supports_previous_response_id"):
+            payload["previous_response_id"] = previous_response_id
+        if tools:
+            payload["tools"] = tools
+        if "caching" in kwargs:
+            payload["caching"] = kwargs["caching"]
+        if "thinking" in kwargs:
+            payload["thinking"] = kwargs["thinking"]
+        if "store" in kwargs:
+            payload["store"] = kwargs["store"]
+        return payload
+
+    def call(
+        self,
+        *,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        endpoint = self.base_url + "/responses"
+        payload = self._build_payload(messages=messages, input_items=input_items, tools=kwargs.pop("tools", None), **kwargs)
+        with httpx.Client(timeout=self.timeout) as client:
+            response = client.post(endpoint, json=payload, headers=self._build_headers())
+            response.raise_for_status()
+            result = response.json()
+        return {
+            "text": _extract_response_text(result),
+            "usage": result.get("usage", {}),
+            "model": result.get("model", self.model_name),
+            "provider_format": "responses",
+            "response_id": result.get("id"),
+            "tool_calls": _extract_response_tool_calls(result),
+            "raw_response": result,
+        }
+
+    def call_stream(
+        self,
+        *,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Generator[str, None, None]:
+        endpoint = self.base_url + "/responses"
+        payload = self._build_payload(messages=messages, input_items=input_items, tools=kwargs.pop("tools", None), **kwargs)
+        payload["stream"] = True
+        start_time = time.time()
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                with client.stream("POST", endpoint, json=payload, headers=self._build_headers()) as response:
+                    response.raise_for_status()
+                    model_name = self.model_name
+                    for raw_chunk in _flatten_stream_sse_lines(response.iter_lines()):
+                        chunk_data = json.loads(raw_chunk)
+                        delta = chunk_data.get("delta")
+                        if isinstance(delta, str) and delta:
+                            yield f'data: {json.dumps({"type": "token", "content": delta}, ensure_ascii=False)}\n\n'
+                        elif isinstance(delta, dict):
+                            text = delta.get("text") or delta.get("content")
+                            if text:
+                                yield f'data: {json.dumps({"type": "token", "content": text}, ensure_ascii=False)}\n\n'
+                        if chunk_data.get("model"):
+                            model_name = chunk_data["model"]
+            latency = (time.time() - start_time) * 1000
+            yield f'data: {json.dumps({"type": "done", "latency_ms": round(latency, 2), "model": model_name}, ensure_ascii=False)}\n\n'
+        except Exception as exc:  # pylint: disable=broad-except
+            yield f'data: {json.dumps({"type": "error", "message": str(exc)[:300]}, ensure_ascii=False)}\n\n'
+
+    def call_with_tools(
+        self,
+        *,
+        tools: List[Dict[str, Any]],
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        return self.call(messages=messages, input_items=input_items, tools=tools, **kwargs)
+
+
+class WenxinProvider(OpenAICompatProvider):
+    _TOKEN_URL = "https://aip.baidubce.com/oauth/2.0/token"
+
+    def __init__(
+        self,
+        *,
+        secret_key: str,
+        **kwargs: Any,
+    ):
+        super().__init__(**kwargs)
+        self.secret_key = secret_key
+        self._access_token: Optional[str] = None
+        self._token_expires_at: float = 0.0
+        self._token_lock = threading.Lock()
+
+    def _get_access_token(self) -> str:
+        with self._token_lock:
+            if self._access_token and time.time() < self._token_expires_at:
+                return self._access_token
+            params = {
+                "grant_type": "client_credentials",
+                "client_id": self.api_key,
+                "client_secret": self.secret_key,
+            }
+            with httpx.Client(timeout=15) as client:
+                resp = client.post(self._TOKEN_URL, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            if "error" in data:
+                raise RuntimeError(f"Failed to get Wenxin token: {data.get('error_description', data['error'])}")
+            self._access_token = data["access_token"]
+            self._token_expires_at = time.time() + int(data.get("expires_in", 2592000)) - 60
+            return self._access_token
+
+    def _build_headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._get_access_token()}",
+            "Content-Type": "application/json",
+            **self.extra_headers,
+        }
+
+
+class ModelRegistry:
     _instance = None
     _providers: Dict[str, AIProvider] = {}
     _provider_params: Dict[str, Dict[str, Any]] = {}
     _provider_aliases: Dict[str, str] = {}
-    _cache: Dict[str, Any] = {}
-    _cache_ttl: int = 300  # 5分钟
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-
-    def register_provider(
-        self,
-        name: str,
-        provider: AIProvider,
-        params: Optional[Dict[str, Any]] = None,
-        aliases: Optional[List[str]] = None,
-    ):
-        """注册提供商"""
-        canonical_name = self._normalize_provider_name(name)
-        self._providers[canonical_name] = provider
-        self._provider_params[canonical_name] = params or {}
-        self._provider_aliases[canonical_name] = canonical_name
-
-        raw_name = (name or "").strip()
-        if raw_name:
-            self._provider_aliases[raw_name] = canonical_name
-
-        for alias in aliases or []:
-            alias_name = (str(alias) if alias is not None else "").strip()
-            if not alias_name:
-                continue
-            self._provider_aliases[alias_name] = canonical_name
-            normalized_alias = self._normalize_provider_name(alias_name)
-            self._provider_aliases[normalized_alias] = canonical_name
-
-        logger.info(f"已注册AI提供商: {canonical_name}")
-
-    def get_provider(self, name: str) -> Optional[AIProvider]:
-        """获取提供商"""
-        resolved_name = self._resolve_provider_name(name)
-        return self._providers.get(resolved_name)
-
-    def load_from_db(self, db: Session):
-        """从数据库加载配置"""
-        configs = ModelConfigRepository.get_all_enabled(db)
-        self._providers.clear()
-        self._provider_params.clear()
-        self._provider_aliases.clear()
-
-        for config in configs:
-            try:
-                provider = self.build_provider_from_config(config)
-                if provider:
-                    normalized_name = self._normalize_provider_name(config.provider_name)
-                    self.register_provider(
-                        normalized_name,
-                        provider,
-                        aliases=[str(config.id), config.provider_name],
-                    )
-                    logger.info("从数据库加载提供商: %s (id=%s)", config.provider_name, config.id)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error("加载提供商 %s 失败: %s", config.provider_name, e)
-
-    def call_with_fallback(
-        self,
-        messages: List[Dict[str, str]],
-        preferred_provider: Optional[str] = None,
-        allow_fallback: bool = True,
-        **kwargs,
-    ) -> Dict[str, Any]:
-        """调用AI，支持fallback"""
-        # 获取启用的提供商列表（按优先级排序）
-        providers = list(self._providers.keys())
-
-        if preferred_provider:
-            preferred_provider = self._resolve_provider_name(preferred_provider)
-            if preferred_provider not in providers:
-                raise ValueError(f"未启用的模型: {preferred_provider}")
-            providers = [preferred_provider] + [p for p in providers if p != preferred_provider]
-            if not allow_fallback:
-                providers = [preferred_provider]
-        elif not providers:
-            raise ValueError("未配置任何可用模型")
-
-        last_error = None
-        error_details = []
-
-        for provider_name in providers:
-            try:
-                provider = self._providers[provider_name]
-                default_params = self._provider_params.get(provider_name, {})
-                call_kwargs = {**default_params, **kwargs}
-                start_time = time.time()
-                result = provider.call(messages, **call_kwargs)
-                latency = (time.time() - start_time) * 1000
-
-                result["provider"] = provider_name
-                result["latency_ms"] = latency
-                logger.info(f"AI调用成功: {provider_name}, 延迟: {latency:.2f}ms")
-                return result
-            except httpx.HTTPStatusError as e:
-                status_code = e.response.status_code
-                error_msg, category = self._parse_http_error(
-                    provider_name, status_code, e.response
-                )
-                error_details.append(
-                    {
-                        "provider": provider_name,
-                        "error": error_msg,
-                        "status_code": status_code,
-                        "category": category,
-                    }
-                )
-                last_error = error_msg
-                logger.warning(f"AI调用失败: {provider_name}, 错误: {error_msg}")
-                continue
-            except httpx.HTTPError as e:
-                error_msg = f"{provider_name} 网络连接失败，请检查网络或稍后重试"
-                error_details.append(
-                    {
-                        "provider": provider_name,
-                        "error": error_msg,
-                        "status_code": None,
-                        "category": "network",
-                    }
-                )
-                last_error = error_msg
-                logger.warning(f"AI调用失败: {provider_name}, 网络错误: {e}")
-                continue
-            except Exception as e:
-                error_msg, status_code, category = self._classify_generic_error(
-                    provider_name, str(e)
-                )
-                error_details.append(
-                    {
-                        "provider": provider_name,
-                        "error": error_msg,
-                        "status_code": status_code,
-                        "category": category,
-                    }
-                )
-                last_error = error_msg
-                logger.warning(f"AI调用失败: {provider_name}, 错误: {e}")
-                continue
-
-        raise self._build_upstream_error(error_details)
-
-    def _parse_http_error(
-        self, provider_name: str, status_code: int, response
-    ) -> Tuple[str, str]:
-        """解析 HTTP 错误为友好提示"""
-        try:
-            error_data = response.json()
-            detail = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
-        except Exception:
-            detail = ""
-        detail_lower = detail.lower()
-
-        if status_code == 400:
-            if any(token in detail_lower for token in ["invalid", "api", "key", "token"]):
-                return f"{provider_name} API 密钥无效或已过期", "auth"
-            return f"{provider_name} 请求参数错误", "bad_request"
-        elif status_code == 401:
-            return f"{provider_name} 认证失败，请检查 API 密钥", "auth"
-        elif status_code == 403:
-            return f"{provider_name} 无权限访问，请检查账户状态", "auth"
-        elif status_code == 429:
-            return f"{provider_name} 请求过于频繁，请稍后重试", "rate_limit"
-        elif status_code in (500, 502, 503, 504):
-            return f"{provider_name} 服务暂时不可用", "upstream_server"
-        else:
-            return f"{provider_name} 调用失败 (HTTP {status_code})", "other"
-
-    def _classify_generic_error(
-        self, provider_name: str, error_str: str
-    ) -> Tuple[str, Optional[int], str]:
-        """兜底解析非 HTTPStatusError 异常。"""
-        if "401" in error_str or "Unauthorized" in error_str:
-            return f"{provider_name} 认证失败，请检查 API 密钥", 401, "auth"
-        if "403" in error_str or "Forbidden" in error_str:
-            return f"{provider_name} 无权限访问，请检查账户状态", 403, "auth"
-        if "429" in error_str or "Too Many Requests" in error_str:
-            return f"{provider_name} 请求过于频繁，请稍后重试", 429, "rate_limit"
-        if "503" in error_str or "Service Unavailable" in error_str:
-            return f"{provider_name} 服务暂时不可用", 503, "upstream_server"
-        if "500" in error_str or "502" in error_str or "504" in error_str:
-            return f"{provider_name} 服务暂时不可用", 500, "upstream_server"
-        if "400" in error_str or "Bad Request" in error_str:
-            return f"{provider_name} 请求参数错误", 400, "bad_request"
-        return f"{provider_name} 调用失败: {error_str[:100]}", None, "other"
-
-    def _build_upstream_error(self, error_details: List[Dict[str, Any]]) -> UpstreamServiceError:
-        """将上游错误聚合成可返回给路由层的异常。"""
-        if not error_details:
-            return UpstreamServiceError(
-                "AI 服务调用失败，请稍后重试",
-                http_status=503,
-            )
-
-        first_error = error_details[0]
-        auth_errors = [e for e in error_details if e.get("category") == "auth"]
-        rate_errors = [e for e in error_details if e.get("category") == "rate_limit"]
-        network_errors = [e for e in error_details if e.get("category") == "network"]
-        server_errors = [
-            e for e in error_details if e.get("category") == "upstream_server"
-        ]
-        bad_request_errors = [
-            e for e in error_details if e.get("category") == "bad_request"
-        ]
-
-        if auth_errors and len(auth_errors) == len(error_details):
-            upstream_status = self._first_status_code(auth_errors) or 401
-            return UpstreamServiceError(
-                f"AI 上游认证失败（上游 HTTP {upstream_status}），请检查管理后台 API Key 配置",
-                http_status=502,
-                upstream_status=upstream_status,
-                provider=auth_errors[0].get("provider"),
-            )
-
-        if rate_errors:
-            upstream_status = self._first_status_code(rate_errors) or 429
-            return UpstreamServiceError(
-                f"AI 上游限流（上游 HTTP {upstream_status}），请稍后重试",
-                http_status=503,
-                upstream_status=upstream_status,
-                provider=rate_errors[0].get("provider"),
-            )
-
-        if network_errors and len(network_errors) == len(error_details):
-            return UpstreamServiceError(
-                "AI 上游连接失败，请稍后重试",
-                http_status=503,
-                provider=network_errors[0].get("provider"),
-            )
-
-        if server_errors:
-            upstream_status = self._first_status_code(server_errors) or 503
-            http_status = 503 if upstream_status == 503 else 502
-            return UpstreamServiceError(
-                f"AI 上游服务异常（上游 HTTP {upstream_status}），请稍后重试",
-                http_status=http_status,
-                upstream_status=upstream_status,
-                provider=server_errors[0].get("provider"),
-            )
-
-        if bad_request_errors and len(bad_request_errors) == len(error_details):
-            upstream_status = self._first_status_code(bad_request_errors) or 400
-            return UpstreamServiceError(
-                f"AI 上游请求失败（上游 HTTP {upstream_status}），请检查模型配置或稍后重试",
-                http_status=502,
-                upstream_status=upstream_status,
-                provider=bad_request_errors[0].get("provider"),
-            )
-
-        upstream_status = first_error.get("status_code")
-        status_suffix = f"（上游 HTTP {upstream_status}）" if upstream_status else ""
-        return UpstreamServiceError(
-            f"AI 调用失败{status_suffix}：{first_error['error']}",
-            http_status=502,
-            upstream_status=upstream_status,
-            provider=first_error.get("provider"),
-        )
-
-    @staticmethod
-    def _first_status_code(error_details: List[Dict[str, Any]]) -> Optional[int]:
-        for detail in error_details:
-            if detail.get("status_code") is not None:
-                return int(detail["status_code"])
-        return None
-
-    def _build_friendly_error(self, error_details: List[Dict]) -> str:
-        """构建友好的错误提示"""
-        if not error_details:
-            return "AI 服务调用失败，请稍后重试"
-
-        auth_errors = [e for e in error_details if "认证" in e["error"] or "密钥" in e["error"]]
-        rate_errors = [e for e in error_details if "频繁" in e["error"]]
-        server_errors = [e for e in error_details if "服务器" in e["error"] or "不可用" in e["error"]]
-
-        if len(auth_errors) == len(error_details):
-            return "所有 AI 模型的 API 密钥配置有误，请前往管理后台检查配置"
-        elif len(rate_errors) > 0:
-            return "AI 服务请求过于频繁，请稍后重试"
-        elif len(server_errors) > 0:
-            return "AI 服务暂时不可用，请稍后重试"
-        else:
-            return f"AI 调用失败：{error_details[0]['error']}"
-
-    def call_with_function_calling(
-        self,
-        messages: List[Dict[str, str]],
-        tools: List[Dict[str, Any]],
-        preferred_provider: Optional[str] = None,
-        **kwargs,
-    ) -> Dict[str, Any]:
-        """调用支持 Function Calling 的 AI 模型"""
-        fc_providers = ["deepseek", "zhipu", "qwen"]
-
-        providers = list(self._providers.keys())
-
-        if preferred_provider:
-            preferred_provider = self._resolve_provider_name(preferred_provider)
-
-        if preferred_provider and preferred_provider in providers:
-            providers = [preferred_provider] + [p for p in providers if p != preferred_provider]
-        else:
-            fc_available = [p for p in fc_providers if p in providers]
-            other_providers = [p for p in providers if p not in fc_providers]
-            providers = fc_available + other_providers
-
-        if not providers:
-            raise ValueError("未配置任何可用模型")
-
-        last_error = None
-        for provider_name in providers:
-            try:
-                provider = self._providers[provider_name]
-                default_params = self._provider_params.get(provider_name, {})
-
-                if hasattr(provider, "call_with_tools"):
-                    result = provider.call_with_tools(messages, tools, **kwargs)
-                else:
-                    logger.warning(f"{provider_name} 不支持原生 Function Calling，降级到 ReAct")
-                    raise Exception(f"{provider_name} 不支持 Function Calling")
-
-                result["provider"] = provider_name
-                logger.info(f"Function Calling 调用成功: {provider_name}")
-                return result
-
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Function Calling 调用失败: {provider_name}, 错误: {e}")
-                continue
-
-        raise Exception(f"所有 Function Calling 提供商调用失败，最后错误: {last_error}")
-
-    def build_provider_from_config(self, config) -> Optional[AIProvider]:
-        """根据模型配置创建 Provider 实例"""
-        # 解析别名（向后兼容旧 DB 记录）
-        normalized = self._normalize_provider_name(config.provider_name)
-        template = PROVIDER_TEMPLATES.get(normalized, PROVIDER_TEMPLATES["openai_compat"])
-
-        api_key = decrypt_api_key(config.api_key) if config.api_key else ""
-        if not api_key:
-            return None
-
-        params: Dict[str, Any] = config.params if isinstance(config.params, dict) else {}
-        # 兼容 DB 中 model_name / model 两种键名
-        model_name = params.get("model_name") or params.get("model") or template.get("default_model") or ""
-
-        # 优先使用 DB 存储的 base_url，其次使用模板默认值
-        base_url: str = config.base_url or template.get("default_base_url", "")
-
-        # 自动去除末尾的 /chat/completions（DB 中旧数据可能已包含该路径）
-        if base_url.endswith("/chat/completions"):
-            base_url = base_url[: -len("/chat/completions")]
-
-        # 百度文心专用 Provider（OAuth2 token 认证）
-        if normalized == "wenxin":
-            # 新版 IAM key（bce-v3/... 格式）直接用 Bearer 认证，无需 OAuth2
-            if api_key.startswith("bce-v3/"):
-                return OpenAICompatProvider(
-                    api_key=api_key,
-                    base_url=base_url,
-                    model_name=model_name,
-                    temperature=float(params.get("temperature", 0.7)),
-                    max_tokens=int(params.get("max_tokens", template.get("default_max_tokens", settings.AI_DEFAULT_MAX_TOKENS))),
-                    top_p=float(params.get("top_p", 1.0)),
-                    extra_headers={},
-                    timeout=int(params.get("timeout", 120)),
-                )
-            # 旧版 OAuth2 格式：支持 "APIKEY:SECRETKEY" 合并填写（冒号分隔），兼容仅填 api_key + params.secret_key
-            if ":" in api_key:
-                api_key, secret_key = api_key.split(":", 1)
-            else:
-                secret_key = params.get("secret_key", "")
-            return WenxinProvider(
-                api_key=api_key,
-                secret_key=secret_key,
-                base_url=base_url,
-                model_name=model_name,
-                temperature=float(params.get("temperature", 0.7)),
-                max_tokens=int(params.get("max_tokens", template.get("default_max_tokens", settings.AI_DEFAULT_MAX_TOKENS))),
-                top_p=float(params.get("top_p", 1.0)),
-                timeout=int(params.get("timeout", 120)),
-            )
-
-        # 自动升级旧版 Qwen 非兼容接口
-        if normalized == "qwen" and base_url and "compatible-mode" not in base_url:
-            logger.warning(
-                "Qwen 旧版接口已自动升级为 OpenAI 兼容模式: %s -> %s",
-                base_url,
-                "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            )
-            base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-
-        # 合并模板 extra_headers 与用户自定义 extra_headers（用户优先），过滤空值
-        template_extra = template.get("extra_headers", {})
-        param_extra = params.get("extra_headers") or {}
-        extra_headers = {**template_extra, **param_extra}
-        extra_headers = {k: v for k, v in extra_headers.items() if v}
-
-        return OpenAICompatProvider(
-            api_key=api_key,
-            base_url=base_url,
-            model_name=model_name,
-            temperature=float(params.get("temperature", 0.7)),
-            max_tokens=int(params.get("max_tokens", template.get("default_max_tokens", settings.AI_DEFAULT_MAX_TOKENS))),
-            top_p=float(params.get("top_p", 1.0)),
-            extra_headers=extra_headers,
-            timeout=int(params.get("timeout", 120)),
-        )
 
     @staticmethod
     def _normalize_provider_name(name: str) -> str:
@@ -827,7 +704,6 @@ class ModelRegistry:
             return raw
         if raw in self._provider_aliases:
             return self._provider_aliases[raw]
-
         normalized = self._normalize_provider_name(raw)
         if normalized in self._providers:
             return normalized
@@ -835,6 +711,315 @@ class ModelRegistry:
             return self._provider_aliases[normalized]
         return normalized
 
+    def register_provider(
+        self,
+        name: str,
+        provider: AIProvider,
+        params: Optional[Dict[str, Any]] = None,
+        aliases: Optional[List[str]] = None,
+    ) -> None:
+        canonical_name = self._normalize_provider_name(name)
+        self._providers[canonical_name] = provider
+        self._provider_params[canonical_name] = params or {}
+        self._provider_aliases[canonical_name] = canonical_name
+        if name:
+            self._provider_aliases[name] = canonical_name
+        for alias in aliases or []:
+            alias_text = str(alias).strip()
+            if not alias_text:
+                continue
+            self._provider_aliases[alias_text] = canonical_name
+            self._provider_aliases[self._normalize_provider_name(alias_text)] = canonical_name
+        logger.info("Registered AI provider: %s", canonical_name)
 
-# 全局注册表实例
+    def get_provider(self, name: str) -> Optional[AIProvider]:
+        return self._providers.get(self._resolve_provider_name(name))
+
+    def get_provider_capabilities(self, name: str) -> Dict[str, Any]:
+        provider = self.get_provider(name)
+        if provider:
+            return provider.get_capabilities()
+        normalized = self._normalize_provider_name(name)
+        template = PROVIDER_TEMPLATES.get(normalized, PROVIDER_TEMPLATES["openai_compat"])
+        return dict(template.get("capabilities") or {})
+
+    def get_provider_params(self, name: str) -> Dict[str, Any]:
+        resolved = self._resolve_provider_name(name)
+        return dict(self._provider_params.get(resolved, {}))
+
+    def load_from_db(self, db: Session) -> None:
+        configs = ModelConfigRepository.get_all_enabled(db)
+        self._providers.clear()
+        self._provider_params.clear()
+        self._provider_aliases.clear()
+        for config in configs:
+            try:
+                provider = self.build_provider_from_config(config)
+                if provider is None:
+                    continue
+                normalized = self._normalize_provider_name(config.provider_name)
+                self.register_provider(normalized, provider, params=config.params or {}, aliases=[str(config.id), config.provider_name])
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.error("Failed to load provider %s: %s", getattr(config, "provider_name", "unknown"), exc)
+
+    def _call_provider(
+        self,
+        provider_name: str,
+        *,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        with_tools: bool = False,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        provider = self._providers[provider_name]
+        default_params = self._provider_params.get(provider_name, {})
+        call_kwargs = {**default_params, **kwargs}
+        start_time = time.time()
+        if with_tools:
+            result = provider.call_with_tools(messages=messages, input_items=input_items, tools=tools or [], **call_kwargs)
+        else:
+            result = provider.call(messages=messages, input_items=input_items, **call_kwargs)
+        result["provider"] = provider_name
+        result["latency_ms"] = (time.time() - start_time) * 1000
+        return result
+
+    def call_with_fallback(
+        self,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        preferred_provider: Optional[str] = None,
+        allow_fallback: bool = True,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        providers = list(self._providers.keys())
+        if preferred_provider:
+            preferred = self._resolve_provider_name(preferred_provider)
+            if preferred not in providers:
+                raise ValueError(f"Provider not enabled: {preferred_provider}")
+            providers = [preferred] + [item for item in providers if item != preferred]
+            if not allow_fallback:
+                providers = [preferred]
+        if not providers:
+            raise ValueError("No AI providers configured")
+
+        error_details: List[Dict[str, Any]] = []
+        for provider_name in providers:
+            try:
+                return self._call_provider(provider_name, messages=messages, input_items=input_items, **kwargs)
+            except httpx.HTTPStatusError as exc:
+                error_msg, category = self._parse_http_error(provider_name, exc.response.status_code, exc.response)
+                error_details.append({"provider": provider_name, "error": error_msg, "status_code": exc.response.status_code, "category": category})
+                logger.warning("Provider call failed: %s, %s", provider_name, error_msg)
+            except httpx.HTTPError as exc:
+                error_details.append({"provider": provider_name, "error": str(exc), "status_code": None, "category": "network"})
+                logger.warning("Provider call failed: %s, network error: %s", provider_name, exc)
+            except Exception as exc:  # pylint: disable=broad-except
+                error_msg, status_code, category = self._classify_generic_error(provider_name, str(exc))
+                error_details.append({"provider": provider_name, "error": error_msg, "status_code": status_code, "category": category})
+                logger.warning("Provider call failed: %s, %s", provider_name, error_msg)
+        raise self._build_upstream_error(error_details)
+
+    def call_with_function_calling(
+        self,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        preferred_provider: Optional[str] = None,
+        input_items: Optional[List[Dict[str, Any]]] = None,
+        allow_fallback: bool = True,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        tools = tools or []
+        providers = list(self._providers.keys())
+        tool_capable = [name for name in providers if self._providers[name].get_capabilities().get("tool_calling")]
+        fallback_candidates = tool_capable if tool_capable else providers
+
+        if preferred_provider:
+            preferred = self._resolve_provider_name(preferred_provider)
+            if preferred in fallback_candidates:
+                fallback_candidates = [preferred] + [item for item in fallback_candidates if item != preferred]
+            elif not allow_fallback:
+                raise ValueError(f"Provider does not support native tool calling: {preferred_provider}")
+        elif not fallback_candidates:
+            raise ValueError("No providers available")
+
+        error_details: List[Dict[str, Any]] = []
+        for provider_name in fallback_candidates:
+            try:
+                return self._call_provider(
+                    provider_name,
+                    messages=messages,
+                    input_items=input_items,
+                    with_tools=True,
+                    tools=tools,
+                    **kwargs,
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                error_msg, status_code, category = self._classify_generic_error(provider_name, str(exc))
+                error_details.append({"provider": provider_name, "error": error_msg, "status_code": status_code, "category": category})
+                logger.warning("Tool call failed: %s, %s", provider_name, error_msg)
+                if preferred_provider and not allow_fallback:
+                    break
+        raise self._build_upstream_error(error_details)
+
+    def build_provider_from_config(self, config: Any) -> Optional[AIProvider]:
+        normalized = self._normalize_provider_name(config.provider_name)
+        template = PROVIDER_TEMPLATES.get(normalized, PROVIDER_TEMPLATES["openai_compat"])
+        params: Dict[str, Any] = config.params if isinstance(config.params, dict) else {}
+        api_key = decrypt_api_key(config.api_key) if getattr(config, "api_key", None) else ""
+        if not api_key:
+            return None
+
+        model_name = params.get("model_name") or params.get("model") or template.get("default_model") or ""
+        base_url = (getattr(config, "base_url", None) or template.get("default_base_url") or "").rstrip("/")
+        if base_url.endswith("/chat/completions"):
+            base_url = base_url[: -len("/chat/completions")]
+        if base_url.endswith("/responses"):
+            base_url = base_url[: -len("/responses")]
+        if normalized == "qwen" and base_url and "compatible-mode" not in base_url:
+            base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+        template_caps = dict(template.get("capabilities") or {})
+        supports_responses_api = params.get("supports_responses_api")
+        supports_vision = params.get("supports_vision")
+
+        if normalized == "doubao":
+            template_caps["supports_responses_api"] = _infer_doubao_supports_responses(model_name, supports_responses_api)
+        elif supports_responses_api is not None:
+            template_caps["supports_responses_api"] = bool(supports_responses_api)
+
+        template_caps["supports_vision"] = _infer_supports_vision(normalized, model_name, supports_vision)
+        if "native_tools" in params and isinstance(params["native_tools"], list):
+            template_caps["native_tools"] = params["native_tools"]
+
+        extra_headers = {**template.get("extra_headers", {}), **(params.get("extra_headers") or {})}
+        extra_headers = {key: value for key, value in extra_headers.items() if value}
+
+        provider_kwargs = {
+            "provider_name": normalized,
+            "api_key": api_key,
+            "base_url": base_url,
+            "model_name": model_name,
+            "temperature": float(params.get("temperature", 0.7)),
+            "max_tokens": int(params.get("max_tokens", template.get("default_max_tokens", settings.AI_DEFAULT_MAX_TOKENS))),
+            "top_p": float(params.get("top_p", 1.0)),
+            "extra_headers": extra_headers,
+            "timeout": int(params.get("timeout", 120)),
+            "capabilities": template_caps,
+        }
+
+        if normalized == "wenxin" and not api_key.startswith("bce-v3/"):
+            secret_key = params.get("secret_key", "")
+            if ":" in api_key:
+                api_key, secret_key = api_key.split(":", 1)
+                provider_kwargs["api_key"] = api_key
+            return WenxinProvider(secret_key=secret_key, **provider_kwargs)
+
+        if normalized == "doubao" and template_caps.get("supports_responses_api"):
+            return ResponsesProvider(**provider_kwargs)
+        return OpenAICompatProvider(**provider_kwargs)
+
+    def _parse_http_error(self, provider_name: str, status_code: int, response: httpx.Response) -> Tuple[str, str]:
+        try:
+            error_data = response.json()
+            detail = error_data.get("error", {}).get("message") or error_data.get("message") or ""
+        except Exception:  # pylint: disable=broad-except
+            detail = ""
+        detail_lower = detail.lower()
+        if status_code == 400:
+            if any(token in detail_lower for token in ["invalid", "api", "key", "token"]):
+                return f"{provider_name} API key is invalid or expired", "auth"
+            return f"{provider_name} request parameters are invalid", "bad_request"
+        if status_code == 401:
+            return f"{provider_name} authentication failed", "auth"
+        if status_code == 403:
+            return f"{provider_name} access forbidden", "auth"
+        if status_code == 429:
+            return f"{provider_name} rate limited", "rate_limit"
+        if status_code in {500, 502, 503, 504}:
+            return f"{provider_name} service is temporarily unavailable", "upstream_server"
+        return f"{provider_name} call failed (HTTP {status_code})", "other"
+
+    def _classify_generic_error(self, provider_name: str, error_str: str) -> Tuple[str, Optional[int], str]:
+        lowered = (error_str or "").lower()
+        if "401" in lowered or "unauthorized" in lowered:
+            return f"{provider_name} authentication failed", 401, "auth"
+        if "403" in lowered or "forbidden" in lowered:
+            return f"{provider_name} access forbidden", 403, "auth"
+        if "429" in lowered or "too many requests" in lowered:
+            return f"{provider_name} rate limited", 429, "rate_limit"
+        if any(token in lowered for token in ["503", "service unavailable"]):
+            return f"{provider_name} service unavailable", 503, "upstream_server"
+        if any(token in lowered for token in ["500", "502", "504"]):
+            return f"{provider_name} service unavailable", 500, "upstream_server"
+        if "400" in lowered or "bad request" in lowered:
+            return f"{provider_name} request parameters are invalid", 400, "bad_request"
+        if "image understanding" in lowered or "does not support image" in lowered:
+            return str(error_str), 400, "bad_request"
+        return f"{provider_name} call failed: {error_str[:120]}", None, "other"
+
+    @staticmethod
+    def _first_status_code(error_details: List[Dict[str, Any]]) -> Optional[int]:
+        for detail in error_details:
+            if detail.get("status_code") is not None:
+                return int(detail["status_code"])
+        return None
+
+    def _build_upstream_error(self, error_details: List[Dict[str, Any]]) -> UpstreamServiceError:
+        if not error_details:
+            return UpstreamServiceError("AI service call failed", http_status=503)
+
+        auth_errors = [item for item in error_details if item.get("category") == "auth"]
+        rate_errors = [item for item in error_details if item.get("category") == "rate_limit"]
+        network_errors = [item for item in error_details if item.get("category") == "network"]
+        server_errors = [item for item in error_details if item.get("category") == "upstream_server"]
+        bad_request_errors = [item for item in error_details if item.get("category") == "bad_request"]
+        first_error = error_details[0]
+
+        if auth_errors and len(auth_errors) == len(error_details):
+            upstream_status = self._first_status_code(auth_errors) or 401
+            return UpstreamServiceError(
+                "All configured AI providers failed authentication",
+                http_status=502,
+                upstream_status=upstream_status,
+                provider=auth_errors[0].get("provider"),
+            )
+        if rate_errors:
+            upstream_status = self._first_status_code(rate_errors) or 429
+            return UpstreamServiceError(
+                "AI provider rate limited the request",
+                http_status=503,
+                upstream_status=upstream_status,
+                provider=rate_errors[0].get("provider"),
+            )
+        if network_errors and len(network_errors) == len(error_details):
+            return UpstreamServiceError(
+                "Unable to connect to AI provider",
+                http_status=503,
+                provider=network_errors[0].get("provider"),
+            )
+        if server_errors:
+            upstream_status = self._first_status_code(server_errors) or 503
+            return UpstreamServiceError(
+                "AI provider is temporarily unavailable",
+                http_status=503 if upstream_status == 503 else 502,
+                upstream_status=upstream_status,
+                provider=server_errors[0].get("provider"),
+            )
+        if bad_request_errors and len(bad_request_errors) == len(error_details):
+            upstream_status = self._first_status_code(bad_request_errors) or 400
+            return UpstreamServiceError(
+                bad_request_errors[0]["error"],
+                http_status=400,
+                upstream_status=upstream_status,
+                provider=bad_request_errors[0].get("provider"),
+            )
+        return UpstreamServiceError(
+            first_error["error"],
+            http_status=502,
+            upstream_status=first_error.get("status_code"),
+            provider=first_error.get("provider"),
+        )
+
+
 registry = ModelRegistry()

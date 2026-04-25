@@ -55,6 +55,8 @@ class RAGService:
         "算法",
         "数据结构",
         "面试",
+        "八股",
+        "八股文",
     )
     K12_SUBJECT_ALIASES = {
         "数学": ("数学", "函数", "方程", "几何", "代数", "三角函数", "概率", "统计"),
@@ -67,6 +69,32 @@ class RAGService:
         "地理": ("地理", "气候", "经纬网", "地图"),
         "政治": ("政治", "思想品德", "思政"),
         "道德与法治": ("道德与法治", "道法", "法治"),
+    }
+    UNIVERSITY_GRADE_LEVELS = {"\u5927\u5b66"}
+    UNIVERSITY_MATH_TERMS = (
+        "\u9ad8\u6570",
+        "\u9ad8\u7b49\u6570\u5b66",
+        "\u5fae\u79ef\u5206",
+        "\u7ebf\u6027\u4ee3\u6570",
+        "\u6982\u7387\u8bba",
+        "\u5927\u5b66\u6570\u5b66",
+        "\u8003\u7814\u6570\u5b66",
+        "\u9ad8\u7b49\u4ee3\u6570",
+    )
+    QUERY_STOP_TERMS = {
+        "\u63a8\u8350",
+        "\u5e2e\u6211",
+        "\u51e0\u4e2a",
+        "\u54ea\u4e9b",
+        "\u6709\u54ea\u4e9b",
+        "\u597d\u7684",
+        "\u4e00\u4e2a",
+        "\u4e00\u4e9b",
+        "up\u4e3b",
+        "up",
+        "\u8001\u5e08",
+        "\u535a\u4e3b",
+        "\u8d44\u6e90",
     }
     _client = None
     _collection = None
@@ -87,6 +115,11 @@ class RAGService:
         if not query_text:
             return None
 
+        if any(term in query_text for term in cls.UNIVERSITY_MATH_TERMS):
+            return "\u5927\u5b66"
+        if any(term in query_text for term in ("\u5927\u5b66", "\u672c\u79d1", "\u4e13\u4e1a\u8bfe", "\u8003\u7814", "\u9ad8\u7b49\u6570\u5b66")):
+            return "\u5927\u5b66"
+
         if any(term in query_text for term in ("小学", "小升初", "一至六年级", "1-6年级")):
             return "小学"
         if any(term in query_text for term in ("初中", "中考", "七年级", "八年级", "九年级", "初一", "初二", "初三")):
@@ -101,6 +134,9 @@ class RAGService:
         if not query_text:
             return None
 
+        if any(term in query_text for term in cls.UNIVERSITY_MATH_TERMS):
+            return "\u6570\u5b66"
+
         for subject, aliases in cls.K12_SUBJECT_ALIASES.items():
             if any(alias in query_text for alias in aliases):
                 return subject
@@ -111,6 +147,110 @@ class RAGService:
         grade_level = (metadata.get("grade_level") or "").strip()
         subject = (metadata.get("subject") or "").strip()
         return grade_level in cls.K12_GRADE_LEVELS or subject in cls.K12_SUBJECTS
+
+    @classmethod
+    def _extract_query_keywords(cls, query: str) -> List[str]:
+        raw_terms = re.findall(r"[A-Za-z][A-Za-z0-9.+#-]*|[\u4e00-\u9fff]{2,}", query or "")
+        keywords: List[str] = []
+        for term in raw_terms:
+            normalized = term.strip()
+            if not normalized:
+                continue
+            if normalized in cls.QUERY_STOP_TERMS or normalized.lower() in cls.QUERY_STOP_TERMS:
+                continue
+            keywords.append(normalized)
+        return keywords
+
+    @classmethod
+    def _matches_query_grade_level(
+        cls,
+        query: str,
+        metadata: Dict[str, Any],
+        doc_text: str,
+        expected_grade_level: Optional[str] = None,
+    ) -> bool:
+        grade_level = expected_grade_level or cls.infer_grade_level_from_query(query)
+        if not grade_level:
+            return True
+
+        metadata_grade_level = (metadata.get("grade_level") or "").strip()
+        if metadata_grade_level:
+            return metadata_grade_level == grade_level
+
+        haystack = " ".join(
+            [
+                str(metadata.get("title") or ""),
+                str(metadata.get("topic") or ""),
+                str(metadata.get("section_title") or ""),
+                doc_text[:240],
+            ]
+        )
+        return grade_level in haystack or not cls._is_k12_metadata(metadata)
+
+    @classmethod
+    def _keyword_overlap_score(cls, query: str, metadata: Dict[str, Any], doc_text: str) -> int:
+        keywords = cls._extract_query_keywords(query)
+        if not keywords:
+            return 0
+
+        title = str(metadata.get("title") or "")
+        topic = str(metadata.get("topic") or "")
+        section_title = str(metadata.get("section_title") or "")
+        haystack = f"{title} {topic} {section_title} {doc_text[:400]}".lower()
+
+        score = 0
+        for keyword in keywords:
+            lowered = keyword.lower()
+            if lowered in haystack:
+                score += 1
+            if lowered and lowered in title.lower():
+                score += 2
+            if lowered and lowered in topic.lower():
+                score += 2
+            if lowered and lowered in section_title.lower():
+                score += 1
+        return score
+
+    @classmethod
+    def _passes_min_relevance(
+        cls,
+        query: str,
+        metadata: Dict[str, Any],
+        doc_text: str,
+        distance: float,
+        expected_grade_level: Optional[str] = None,
+        expected_subject: Optional[str] = None,
+    ) -> bool:
+        overlap_score = cls._keyword_overlap_score(query, metadata, doc_text)
+        grade_level = expected_grade_level or cls.infer_grade_level_from_query(query)
+        subject = expected_subject or cls.infer_subject_from_query(query)
+
+        if grade_level or subject:
+            return overlap_score >= 2 or distance <= 0.45
+
+        return overlap_score >= 1 or distance <= 0.35
+
+    @classmethod
+    def _rank_result(
+        cls,
+        query: str,
+        metadata: Dict[str, Any],
+        doc_text: str,
+        distance: float,
+        expected_grade_level: Optional[str] = None,
+        expected_subject: Optional[str] = None,
+    ) -> float:
+        overlap_score = cls._keyword_overlap_score(query, metadata, doc_text)
+        ranking_score = overlap_score * 10 - float(distance or 0)
+
+        metadata_grade_level = (metadata.get("grade_level") or "").strip()
+        metadata_subject = (metadata.get("subject") or "").strip()
+        if expected_grade_level and metadata_grade_level == expected_grade_level:
+            ranking_score += 5
+        if expected_subject and metadata_subject == expected_subject:
+            ranking_score += 5
+
+        return ranking_score
 
     @classmethod
     def _matches_query_subject(
@@ -401,16 +541,18 @@ class RAGService:
                 where = {"$and": filters}
 
             # 查询
+            requested_results = max(1, n_results)
+            overfetch_limit = min(max(requested_results * 4, 20), max(1, collection.count()))
             kwargs = {
                 "query_texts": [query],
-                "n_results": min(n_results, max(1, collection.count()))
+                "n_results": overfetch_limit
             }
             if where:
                 kwargs["where"] = where
 
             results = collection.query(**kwargs)
 
-            search_results = []
+            ranked_results = []
             if not results["documents"] or not results["documents"][0]:
                 return []
 
@@ -430,6 +572,22 @@ class RAGService:
                     expected_subject=effective_subject,
                 ):
                     continue
+                if not cls._matches_query_grade_level(
+                    query,
+                    metadata,
+                    doc_text,
+                    expected_grade_level=effective_grade_level,
+                ):
+                    continue
+                if not cls._passes_min_relevance(
+                    query,
+                    metadata,
+                    doc_text,
+                    distance,
+                    expected_grade_level=effective_grade_level,
+                    expected_subject=effective_subject,
+                ):
+                    continue
 
                 image_paths = []
                 try:
@@ -437,22 +595,33 @@ class RAGService:
                 except Exception:
                     pass
 
-                search_results.append(SearchResult(
-                    document_id=int(metadata["document_id"]) if metadata.get("document_id") else None,
-                    chunk_index=int(metadata["chunk_index"]) if metadata.get("chunk_index") else None,
-                    text=doc_text,
-                    title=metadata.get("title", ""),
-                    grade_level=metadata.get("grade_level") or None,
-                    subject=metadata.get("subject") or None,
-                    topic=metadata.get("topic") or None,
-                    difficulty=metadata.get("difficulty") or None,
-                    source=metadata.get("source") or None,
-                    section_title=metadata.get("section_title") or None,
-                    image_paths=image_paths,
-                    distance=distance
+                ranked_results.append((
+                    cls._rank_result(
+                        query,
+                        metadata,
+                        doc_text,
+                        distance,
+                        expected_grade_level=effective_grade_level,
+                        expected_subject=effective_subject,
+                    ),
+                    SearchResult(
+                        document_id=int(metadata["document_id"]) if metadata.get("document_id") else None,
+                        chunk_index=int(metadata["chunk_index"]) if metadata.get("chunk_index") else None,
+                        text=doc_text,
+                        title=metadata.get("title", ""),
+                        grade_level=metadata.get("grade_level") or None,
+                        subject=metadata.get("subject") or None,
+                        topic=metadata.get("topic") or None,
+                        difficulty=metadata.get("difficulty") or None,
+                        source=metadata.get("source") or None,
+                        section_title=metadata.get("section_title") or None,
+                        image_paths=image_paths,
+                        distance=distance
+                    )
                 ))
 
-            return search_results
+            ranked_results.sort(key=lambda item: item[0], reverse=True)
+            return [result for _, result in ranked_results[:requested_results]]
 
         except Exception as e:
             logger.error(f"RAG 搜索失败: {e}", exc_info=True)

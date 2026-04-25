@@ -17,7 +17,7 @@ try:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image as RLImage
     from reportlab.lib import colors
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
@@ -62,6 +62,97 @@ _registered_font_name = None
 
 
 class PaperExporter:
+    @staticmethod
+    def _normalize_export_questions(questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        normalized_questions: List[Dict[str, Any]] = []
+        for question in questions or []:
+            stem = question.get("question") or question.get("stem") or ""
+            normalized_questions.append(
+                {
+                    **question,
+                    "question": stem,
+                    "stem": question.get("stem") or stem,
+                    "points": max(1, int(question.get("points") or 1)),
+                    "question_images": question.get("question_images") or [],
+                    "answer_images": question.get("answer_images") or [],
+                    "solution_images": question.get("solution_images") or [],
+                }
+            )
+        return normalized_questions
+
+    @staticmethod
+    def _normalize_answer_key(answer_key: Any) -> Dict[str, Dict[str, Any]]:
+        if isinstance(answer_key, dict):
+            return {
+                str(key): value
+                for key, value in answer_key.items()
+                if isinstance(value, dict)
+            }
+        if isinstance(answer_key, list):
+            normalized: Dict[str, Dict[str, Any]] = {}
+            for index, item in enumerate(answer_key, start=1):
+                if isinstance(item, dict):
+                    normalized[str(index)] = item
+            return normalized
+        return {}
+
+    @staticmethod
+    def _resolve_asset_path(asset: Any) -> Optional[str]:
+        if not asset:
+            return None
+        if isinstance(asset, str):
+            candidate = asset
+        elif isinstance(asset, dict):
+            candidate = (
+                asset.get("file_path")
+                or asset.get("local_path")
+                or asset.get("path")
+                or asset.get("preview_url")
+                or asset.get("image_url")
+                or asset.get("file_url")
+            )
+        else:
+            candidate = str(asset)
+
+        if not candidate:
+            return None
+
+        if candidate.startswith(("http://", "https://", "data:")):
+            return None
+
+        normalized = candidate.lstrip("/")
+        if os.path.isabs(candidate) and os.path.exists(candidate):
+            return candidate
+        if os.path.exists(candidate):
+            return candidate
+        if os.path.exists(normalized):
+            return normalized
+        return None
+
+    @staticmethod
+    def _append_images_to_pdf_story(story: List[Any], assets: List[Any], max_width: float = 14 * cm, max_height: float = 8 * cm) -> None:
+        for asset in assets or []:
+            image_path = PaperExporter._resolve_asset_path(asset)
+            if not image_path:
+                continue
+            try:
+                story.append(RLImage(image_path, width=max_width, height=max_height))
+                story.append(Spacer(1, 0.3 * cm))
+            except Exception as exc:
+                logger.warning("Failed to render paper image in PDF export: %s", exc)
+
+    @staticmethod
+    def _append_images_to_word_doc(doc, assets: List[Any], width_inches: float = 4.8) -> None:
+        for asset in assets or []:
+            image_path = PaperExporter._resolve_asset_path(asset)
+            if not image_path:
+                continue
+            try:
+                paragraph = doc.add_paragraph()
+                run = paragraph.add_run()
+                run.add_picture(image_path, width=Inches(width_inches))
+            except Exception as exc:
+                logger.warning("Failed to render paper image in Word export: %s", exc)
     """试卷导出类"""
     
     @staticmethod
@@ -381,7 +472,7 @@ class PaperExporter:
                 story.append(Spacer(1, 1*cm))
             
             # 添加题目
-            questions = paper_data.get("questions", [])
+            questions = PaperExporter._normalize_export_questions(paper_data.get("questions", []))
             for i, q in enumerate(questions, 1):
                 # 获取题型标签
                 q_type = q.get('type', '')
@@ -408,6 +499,7 @@ class PaperExporter:
                 story.append(Spacer(1, 0.3*cm))
 
                 # 显示选项（单选题和多选题）
+                PaperExporter._append_images_to_pdf_story(story, q.get("question_images"))
                 if q_type in ['choice', 'multiple_choice'] and q.get('options'):
                     options = q.get('options', [])
                     for opt in options:
@@ -421,11 +513,17 @@ class PaperExporter:
                 story.append(Paragraph("<b>参考答案</b>", title_style))
                 story.append(Spacer(1, 0.5*cm))
                 
-                answer_key = paper_data.get("answer_key", {})
+                answer_key = PaperExporter._normalize_answer_key(paper_data.get("answer_key"))
                 for i, q in enumerate(questions, 1):
                     answer = answer_key.get(str(i), {}).get("answer", "")
                     story.append(Paragraph(f"<b>{i}.</b> {answer}", normal_style))
                     story.append(Spacer(1, 0.3*cm))
+                    PaperExporter._append_images_to_pdf_story(
+                        story,
+                        (q.get("answer_images") or []) + (q.get("solution_images") or []),
+                        max_width=12 * cm,
+                        max_height=7 * cm,
+                    )
             
             # 生成PDF
             doc.build(story)
@@ -489,7 +587,7 @@ class PaperExporter:
             doc.add_paragraph()  # 空行
             
             # 添加题目
-            questions = paper_data.get("questions", [])
+            questions = PaperExporter._normalize_export_questions(paper_data.get("questions", []))
             for i, q in enumerate(questions, 1):
                 # 获取题型标签
                 q_type = q.get('type', '')
@@ -545,6 +643,7 @@ class PaperExporter:
                 question_para.add_run(f"（{q.get('points', 5)}分）").italic = True
 
                 # 显示选项（单选题和多选题）
+                PaperExporter._append_images_to_word_doc(doc, q.get("question_images"))
                 if q_type in ['choice', 'multiple_choice'] and q.get('options'):
                     for opt in q.get('options', []):
                         opt_para = doc.add_paragraph(style='List Bullet')
@@ -582,7 +681,7 @@ class PaperExporter:
                 doc.add_page_break()
                 doc.add_heading("参考答案", 1)
                 
-                answer_key = paper_data.get("answer_key", {}) or {}
+                answer_key = PaperExporter._normalize_answer_key(paper_data.get("answer_key"))
                 for i, q in enumerate(questions, 1):
                     answer = answer_key.get(str(i), {}).get("answer", "") if answer_key.get(str(i)) else ""
                     answer = str(answer) if answer is not None else ""
@@ -615,6 +714,14 @@ class PaperExporter:
                             answer_para.add_run(part_text)
             
             # 保存文档
+            if paper_data.get("answer_key"):
+                for q in questions:
+                    PaperExporter._append_images_to_word_doc(
+                        doc,
+                        (q.get("answer_images") or []) + (q.get("solution_images") or []),
+                        width_inches=4.2,
+                    )
+
             doc.save(output_path)
             logger.info(f"试卷Word导出成功: {output_path}")
             return output_path

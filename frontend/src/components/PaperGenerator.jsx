@@ -10,12 +10,23 @@ import {
   deleteTemplate,
   generatePaper as requestGeneratePaper,
 } from '../api/apiClient';
+import { getKnowledgeCatalog } from '../api/knowledgeApi';
 import { useThemeStore } from '../store/themeStore';
 import { getUserId } from '../utils/auth';
 import logger from '../utils/logger';
 
 const GRADE_OPTIONS = ['小学', '初中', '高中', '大学'];
 const ALL_QUESTION_TYPE_KEYS = ['choice', 'multiple_choice', 'fill', 'judge', 'essay', 'calculation', 'comprehensive', 'composition'];
+const DEFAULT_QUESTION_TYPE_SCORES = {
+  choice: 5,
+  multiple_choice: 6,
+  fill: 5,
+  judge: 2,
+  essay: 10,
+  calculation: 10,
+  comprehensive: 12,
+  composition: 20,
+};
 
 const QUESTION_TYPES = [
   { key: 'choice', label: '单选题' },
@@ -124,6 +135,76 @@ const ensureCompleteDistribution = (distribution = {}) => {
     next[key] = Math.max(0, Number(distribution[key]) || 0);
   });
   return next;
+};
+
+const ensureQuestionTypeScores = (scores = {}) => {
+  const next = {};
+  ALL_QUESTION_TYPE_KEYS.forEach((key) => {
+    next[key] = Math.max(1, Number(scores[key]) || DEFAULT_QUESTION_TYPE_SCORES[key] || 1);
+  });
+  return next;
+};
+
+const calculateTotalScore = (distribution = {}, scores = {}) =>
+  ALL_QUESTION_TYPE_KEYS.reduce((sum, key) => {
+    const count = Math.max(0, Number(distribution[key]) || 0);
+    const score = Math.max(1, Number(scores[key]) || DEFAULT_QUESTION_TYPE_SCORES[key] || 1);
+    return sum + count * score;
+  }, 0);
+
+const normalizePaperConfig = (partialConfig = {}) => {
+  const questionTypeDistribution = ensureCompleteDistribution(partialConfig.question_type_distribution);
+  const questionTypeScores = ensureQuestionTypeScores(partialConfig.question_type_scores);
+
+  return {
+    ...partialConfig,
+    question_type_distribution: questionTypeDistribution,
+    question_type_scores: questionTypeScores,
+    total_score: calculateTotalScore(questionTypeDistribution, questionTypeScores),
+  };
+};
+
+const buildKnowledgeCatalogTree = (documents = []) => {
+  const gradeMap = new Map();
+
+  (documents || []).forEach((doc) => {
+    const grade = (doc.grade_level || '未分段').trim();
+    const subject = (doc.subject || '未分类').trim();
+    const topic = (doc.topic || '未分类知识点').trim();
+
+    if (!gradeMap.has(grade)) {
+      gradeMap.set(grade, new Map());
+    }
+
+    const subjectMap = gradeMap.get(grade);
+    if (!subjectMap.has(subject)) {
+      subjectMap.set(subject, new Map());
+    }
+
+    const topicMap = subjectMap.get(subject);
+    if (!topicMap.has(topic)) {
+      topicMap.set(topic, []);
+    }
+
+    topicMap.get(topic).push(doc);
+  });
+
+  return Array.from(gradeMap.entries()).map(([grade, subjectMap]) => ({
+    grade,
+    subjects: Array.from(subjectMap.entries()).map(([subject, topicMap]) => ({
+      subject,
+      topics: Array.from(topicMap.entries()).map(([topic, docs]) => ({
+        topic,
+        docs,
+      })),
+    })),
+  }));
+};
+
+const formatKnowledgeCatalogValue = (doc = {}) => {
+  const topic = (doc.topic || '').trim();
+  const title = (doc.title || '').trim();
+  return topic || title;
 };
 
 const buildDistributionFromWeights = (weights, totalQuestions) => {
@@ -238,22 +319,24 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
     return preset.difficulty || SUBJECT_CATEGORY_PRESETS.general.difficulty;
   };
 
-  const [config, setConfig] = useState({
+  const [config, setConfig] = useState(() => normalizePaperConfig({
     title: '',
     subject: '',
     grade_level: '高中',
     total_questions: 20,
     difficulty_distribution: { easy: 30, medium: 50, hard: 20 },
-    question_type_distribution: ensureCompleteDistribution(getDefaultDistribution('高中', 20, '')),
+    question_type_distribution: getDefaultDistribution('高中', 20, ''),
+    question_type_scores: DEFAULT_QUESTION_TYPE_SCORES,
     knowledge_points: [],
     time_limit: 90,
-    total_score: 100,
     use_template: false,
     mode: 'teacher',
     source_policy: 'knowledge_first',
     review_level: 'strict',
     blueprint_only: false,
-  });
+    allow_ai_fallback: true,
+    include_images: true,
+  }));
 
   const [userTemplates, setUserTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
@@ -268,6 +351,9 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
   const [statusMessage, setStatusMessage] = useState('');
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [showAllQuestionTypes, setShowAllQuestionTypes] = useState(false);
+  const [knowledgeCatalog, setKnowledgeCatalog] = useState([]);
+  const [loadingKnowledgeCatalog, setLoadingKnowledgeCatalog] = useState(false);
+  const [showKnowledgeCatalog, setShowKnowledgeCatalog] = useState(false);
 
   const subjectOptions = useMemo(
     () => SUBJECT_OPTIONS_BY_GRADE[config.grade_level] || [],
@@ -299,6 +385,14 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
 
   const distributionSum = Object.values(config.question_type_distribution).reduce((sum, count) => sum + count, 0);
   const hiddenQuestionTypeCount = QUESTION_TYPES.length - visibleQuestionTypes.length;
+  const computedTotalScore = useMemo(
+    () => calculateTotalScore(config.question_type_distribution, config.question_type_scores),
+    [config.question_type_distribution, config.question_type_scores]
+  );
+  const knowledgeCatalogTree = useMemo(
+    () => buildKnowledgeCatalogTree(knowledgeCatalog),
+    [knowledgeCatalog]
+  );
 
   const fetchTemplates = async () => {
     try {
@@ -314,13 +408,13 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
   };
 
   const requestRecommendation = async ({ gradeLevel, subject, totalQuestions, timeLimit, title }) => {
-    const fallback = {
+    const fallback = normalizePaperConfig({
       total_questions: totalQuestions,
       question_type_distribution: getDefaultDistribution(gradeLevel, totalQuestions, subject),
+      question_type_scores: config.question_type_scores,
       difficulty_distribution: getDefaultDifficultyDistribution(gradeLevel, subject),
       time_limit: timeLimit,
-      total_score: config.total_score,
-    };
+    });
 
     try {
       const response = await getRecommendedTemplate(
@@ -333,18 +427,19 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
       );
 
       if (response?.data?.success && response?.data?.recommendation) {
-        return {
+        return normalizePaperConfig({
           ...fallback,
           ...response.data.recommendation,
-          question_type_distribution: ensureCompleteDistribution(
-            response.data.recommendation.question_type_distribution || fallback.question_type_distribution
-          ),
+          question_type_distribution:
+            response.data.recommendation.question_type_distribution || fallback.question_type_distribution,
+          question_type_scores:
+            response.data.recommendation.question_type_scores || fallback.question_type_scores,
           difficulty_distribution: {
             easy: clampPercentage(response.data.recommendation.difficulty_distribution?.easy ?? fallback.difficulty_distribution.easy),
             medium: clampPercentage(response.data.recommendation.difficulty_distribution?.medium ?? fallback.difficulty_distribution.medium),
             hard: clampPercentage(response.data.recommendation.difficulty_distribution?.hard ?? fallback.difficulty_distribution.hard),
           },
-        };
+        });
       }
     } catch (err) {
       logger.error('获取推荐模板失败', err);
@@ -358,6 +453,36 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
   }, []);
 
   useEffect(() => {
+    setConfig((prev) => (prev.total_score === computedTotalScore ? prev : { ...prev, total_score: computedTotalScore }));
+  }, [computedTotalScore]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadKnowledgeCatalog = async () => {
+      try {
+        setLoadingKnowledgeCatalog(true);
+        const response = await getKnowledgeCatalog(config.grade_level || undefined, config.subject || undefined);
+        if (!active) return;
+        setKnowledgeCatalog(response?.documents || []);
+      } catch (err) {
+        if (!active) return;
+        logger.error('获取知识点目录失败', err);
+        setKnowledgeCatalog([]);
+      } finally {
+        if (active) {
+          setLoadingKnowledgeCatalog(false);
+        }
+      }
+    };
+
+    void loadKnowledgeCatalog();
+    return () => {
+      active = false;
+    };
+  }, [config.grade_level, config.subject]);
+
+  useEffect(() => {
     const initRecommendation = async () => {
       const recommendation = await requestRecommendation({
         gradeLevel: '高中',
@@ -369,10 +494,13 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
 
       setConfig((prev) => ({
         ...prev,
-        question_type_distribution: ensureCompleteDistribution(recommendation.question_type_distribution),
+        ...normalizePaperConfig({
+          ...prev,
+          question_type_distribution: recommendation.question_type_distribution,
+          question_type_scores: recommendation.question_type_scores || prev.question_type_scores,
+        }),
         difficulty_distribution: recommendation.difficulty_distribution,
         time_limit: recommendation.time_limit || prev.time_limit,
-        total_score: recommendation.total_score || prev.total_score,
       }));
     };
 
@@ -381,7 +509,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
 
   const handleSelectTemplate = (template) => {
     setSelectedTemplate(template.id);
-    setConfig((prev) => ({
+    setConfig((prev) => normalizePaperConfig({
       ...prev,
       title: template.paper_title || prev.title,
       subject: template.subject || prev.subject,
@@ -392,10 +520,10 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         medium: clampPercentage(template.difficulty_distribution?.medium ?? prev.difficulty_distribution.medium),
         hard: clampPercentage(template.difficulty_distribution?.hard ?? prev.difficulty_distribution.hard),
       },
-      question_type_distribution: ensureCompleteDistribution(template.question_type_distribution || prev.question_type_distribution),
+      question_type_distribution: template.question_type_distribution || prev.question_type_distribution,
+      question_type_scores: template.question_type_scores || prev.question_type_scores,
       knowledge_points: template.knowledge_points || prev.knowledge_points,
       time_limit: template.time_limit || prev.time_limit,
-      total_score: template.total_score || prev.total_score,
       use_template: true,
     }));
     setError('');
@@ -453,9 +581,10 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         total_questions: config.total_questions,
         difficulty_distribution: config.difficulty_distribution,
         question_type_distribution: config.question_type_distribution,
+        question_type_scores: config.question_type_scores,
         knowledge_points: config.knowledge_points?.length ? config.knowledge_points : undefined,
         time_limit: config.time_limit || undefined,
-        total_score: config.total_score,
+        total_score: computedTotalScore,
         paper_title: config.title || undefined,
         user_id: userId,
       });
@@ -487,13 +616,13 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
       title: config.title,
     });
 
-    setConfig((prev) => ({
+    setConfig((prev) => normalizePaperConfig({
       ...prev,
       total_questions: nextTotal,
-      question_type_distribution: ensureCompleteDistribution(recommendation.question_type_distribution),
+      question_type_distribution: recommendation.question_type_distribution,
+      question_type_scores: recommendation.question_type_scores || prev.question_type_scores,
       difficulty_distribution: recommendation.difficulty_distribution,
       time_limit: recommendation.time_limit || prev.time_limit,
-      total_score: recommendation.total_score || prev.total_score,
     }));
   };
 
@@ -507,14 +636,14 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
       title: config.title,
     });
 
-    setConfig((prev) => ({
+    setConfig((prev) => normalizePaperConfig({
       ...prev,
       grade_level: newGradeLevel,
       subject: nextSubject,
-      question_type_distribution: ensureCompleteDistribution(recommendation.question_type_distribution),
+      question_type_distribution: recommendation.question_type_distribution,
+      question_type_scores: recommendation.question_type_scores || prev.question_type_scores,
       difficulty_distribution: recommendation.difficulty_distribution,
       time_limit: recommendation.time_limit || prev.time_limit,
-      total_score: recommendation.total_score || prev.total_score,
     }));
 
     setShowAllQuestionTypes(false);
@@ -531,13 +660,13 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
       title: config.title,
     });
 
-    setConfig((prev) => ({
+    setConfig((prev) => normalizePaperConfig({
       ...prev,
       subject: normalized,
-      question_type_distribution: ensureCompleteDistribution(recommendation.question_type_distribution),
+      question_type_distribution: recommendation.question_type_distribution,
+      question_type_scores: recommendation.question_type_scores || prev.question_type_scores,
       difficulty_distribution: recommendation.difficulty_distribution,
       time_limit: recommendation.time_limit || prev.time_limit,
-      total_score: recommendation.total_score || prev.total_score,
     }));
 
     setShowAllQuestionTypes(false);
@@ -546,10 +675,21 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
 
   const handleQuestionTypeChange = (key, value) => {
     const nextValue = Math.max(0, Math.min(config.total_questions, parseInt(value, 10) || 0));
-    setConfig((prev) => ({
+    setConfig((prev) => normalizePaperConfig({
       ...prev,
       question_type_distribution: {
         ...prev.question_type_distribution,
+        [key]: nextValue,
+      },
+    }));
+  };
+
+  const handleQuestionTypeScoreChange = (key, value) => {
+    const nextValue = Math.max(1, Math.min(100, parseInt(value, 10) || 1));
+    setConfig((prev) => normalizePaperConfig({
+      ...prev,
+      question_type_scores: {
+        ...prev.question_type_scores,
         [key]: nextValue,
       },
     }));
@@ -577,9 +717,9 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
       }
     }
 
-    setConfig((prev) => ({
+    setConfig((prev) => normalizePaperConfig({
       ...prev,
-      question_type_distribution: ensureCompleteDistribution(nextDistribution),
+      question_type_distribution: nextDistribution,
     }));
   };
 
@@ -595,12 +735,12 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         title: config.title,
       });
 
-      setConfig((prev) => ({
+      setConfig((prev) => normalizePaperConfig({
         ...prev,
-        question_type_distribution: ensureCompleteDistribution(recommendation.question_type_distribution),
+        question_type_distribution: recommendation.question_type_distribution,
+        question_type_scores: recommendation.question_type_scores || prev.question_type_scores,
         difficulty_distribution: recommendation.difficulty_distribution,
         time_limit: recommendation.time_limit || prev.time_limit,
-        total_score: recommendation.total_score || prev.total_score,
       }));
     } catch (err) {
       logger.error('刷新推荐失败', err);
@@ -610,14 +750,23 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
     }
   };
 
-  const addKnowledgePoint = () => {
-    const value = knowledgePointInput.trim();
+  const addKnowledgePoint = (rawValue = knowledgePointInput) => {
+    const value = rawValue.trim();
     if (!value) return;
     setConfig((prev) => ({
       ...prev,
-      knowledge_points: [...prev.knowledge_points, value],
+      knowledge_points: prev.knowledge_points.includes(value)
+        ? prev.knowledge_points
+        : [...prev.knowledge_points, value],
     }));
     setKnowledgePointInput('');
+  };
+
+  const handleSelectKnowledgeCatalogItem = (doc) => {
+    const nextValue = formatKnowledgeCatalogValue(doc);
+    if (!nextValue) return;
+    addKnowledgePoint(nextValue);
+    setShowKnowledgeCatalog(false);
   };
 
   const removeKnowledgePoint = (index) => {
@@ -651,7 +800,15 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
 
       const response = await requestGeneratePaper({
         ...config,
+        total_score: computedTotalScore,
         user_id: userId,
+        allow_ai_fallback: Boolean(config.allow_ai_fallback),
+        include_images: Boolean(config.include_images),
+        question_bank_filters: {
+          grade_level: config.grade_level || undefined,
+          subject: config.subject || undefined,
+          status: 'active',
+        },
       });
 
       if (response.data.success) {
@@ -943,18 +1100,14 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
               </div>
 
               <div className={`${palette.soft} p-4 sm:col-span-2 xl:col-span-1`}>
-                <label className={palette.label}>总分</label>
+                <label className={palette.label}>总分（自动计算）</label>
                 <input
                   type="number"
-                  min="20"
-                  max="300"
-                  value={config.total_score}
-                  onChange={(e) => setConfig((prev) => ({
-                    ...prev,
-                    total_score: Math.max(20, Math.min(300, parseInt(e.target.value, 10) || prev.total_score)),
-                  }))}
-                  className={`${palette.input} mt-2 text-center font-semibold`}
+                  value={computedTotalScore}
+                  readOnly
+                  className={`${palette.input} mt-2 cursor-not-allowed text-center font-semibold ${isDark ? 'opacity-80' : 'bg-slate-50'}`}
                 />
+                <p className={`mt-2 text-xs ${palette.muted}`}>按题量与每题分值自动汇总，无需手动维护。</p>
               </div>
             </div>
 
@@ -1053,6 +1206,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
           <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
             {visibleQuestionTypes.map((type) => {
               const count = config.question_type_distribution[type.key] || 0;
+              const score = config.question_type_scores[type.key] || DEFAULT_QUESTION_TYPE_SCORES[type.key] || 1;
               const percentage = config.total_questions > 0 ? Math.round((count / config.total_questions) * 100) : 0;
               return (
                 <div key={type.key} className={`${palette.soft} p-3 sm:p-4`}>
@@ -1062,14 +1216,31 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
                       {percentage}%
                     </span>
                   </div>
-                  <input
-                    type="number"
-                    min="0"
-                    max={config.total_questions}
-                    value={count}
-                    onChange={(e) => handleQuestionTypeChange(type.key, e.target.value)}
-                    className={`${palette.input} mt-3 px-3 py-2.5 text-center text-base font-semibold`}
-                  />
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <div className={`mb-1 text-xs ${palette.muted}`}>题量</div>
+                      <input
+                        type="number"
+                        min="0"
+                        max={config.total_questions}
+                        value={count}
+                        onChange={(e) => handleQuestionTypeChange(type.key, e.target.value)}
+                        className={`${palette.input} px-3 py-2.5 text-center text-base font-semibold`}
+                      />
+                    </div>
+                    <div>
+                      <div className={`mb-1 text-xs ${palette.muted}`}>每题分值</div>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={score}
+                        onChange={(e) => handleQuestionTypeScoreChange(type.key, e.target.value)}
+                        className={`${palette.input} px-3 py-2.5 text-center text-base font-semibold`}
+                      />
+                    </div>
+                  </div>
+                  <div className={`mt-3 text-xs ${palette.text}`}>小计 {count * score} 分</div>
                 </div>
               );
             })}
@@ -1094,27 +1265,108 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
             <p className={`mt-1 text-sm ${palette.text}`}>
               {subjectPreset.knowledgeLabel}会直接影响命题覆盖范围，建议按章节、专题或能力点拆开填写。
             </p>
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-              <input
-                type="text"
-                value={knowledgePointInput}
-                onChange={(e) => setKnowledgePointInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addKnowledgePoint();
-                  }
-                }}
-                placeholder={subjectPreset.knowledgePlaceholder}
-                className={`${palette.input} flex-1`}
-              />
-              <button
-                type="button"
-                onClick={addKnowledgePoint}
-                className={palette.secondaryButton}
-              >
-                添加
-              </button>
+            <div className="mt-4 flex flex-col gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <input
+                  type="text"
+                  value={knowledgePointInput}
+                  onChange={(e) => setKnowledgePointInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addKnowledgePoint();
+                    }
+                  }}
+                  placeholder={subjectPreset.knowledgePlaceholder}
+                  className={`${palette.input} flex-1`}
+                />
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={addKnowledgePoint}
+                    className={palette.secondaryButton}
+                  >
+                    添加
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowKnowledgeCatalog((prev) => !prev)}
+                    className={palette.secondaryButton}
+                  >
+                    {showKnowledgeCatalog ? '收起目录' : '从知识库选择'}
+                  </button>
+                </div>
+              </div>
+
+              {showKnowledgeCatalog ? (
+                <div className={`${palette.soft} max-h-80 overflow-auto p-4`}>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <div className={`text-sm font-semibold ${palette.title}`}>知识点树形目录</div>
+                      <p className={`mt-1 text-xs ${palette.text}`}>
+                        按“学段 / 科目 / 知识点”展开，点击最末级条目即可加入当前试卷。
+                      </p>
+                    </div>
+                    <div className={`text-xs ${palette.muted}`}>
+                      {loadingKnowledgeCatalog ? '加载中...' : `${knowledgeCatalog.length} 条可选`}
+                    </div>
+                  </div>
+
+                  {loadingKnowledgeCatalog ? (
+                    <div className={`rounded-md border border-dashed p-4 text-sm ${palette.text} ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
+                      正在加载知识点目录...
+                    </div>
+                  ) : knowledgeCatalogTree.length > 0 ? (
+                    <div className="space-y-3">
+                      {knowledgeCatalogTree.map((gradeNode) => (
+                        <details key={gradeNode.grade} className={`${palette.soft} p-3`} open>
+                          <summary className={`cursor-pointer list-none text-sm font-semibold ${palette.title}`}>
+                            {gradeNode.grade}
+                          </summary>
+                          <div className="mt-3 space-y-3">
+                            {gradeNode.subjects.map((subjectNode) => (
+                              <details key={`${gradeNode.grade}-${subjectNode.subject}`} className={`${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-md border p-3`} open>
+                                <summary className={`cursor-pointer list-none text-sm font-medium ${palette.title}`}>
+                                  {subjectNode.subject}
+                                </summary>
+                                <div className="mt-3 space-y-3">
+                                  {subjectNode.topics.map((topicNode) => (
+                                    <details key={`${gradeNode.grade}-${subjectNode.subject}-${topicNode.topic}`} className={`${isDark ? 'border-slate-800 bg-slate-950/30' : 'border-slate-200 bg-slate-50/80'} rounded-md border p-3`} open>
+                                      <summary className={`cursor-pointer list-none text-sm ${palette.text}`}>
+                                        {topicNode.topic}
+                                      </summary>
+                                      <div className="mt-3 flex flex-wrap gap-2">
+                                        {topicNode.docs.map((doc) => {
+                                          const value = formatKnowledgeCatalogValue(doc);
+                                          const active = config.knowledge_points.includes(value);
+                                          return (
+                                            <button
+                                              key={doc.id}
+                                              type="button"
+                                              onClick={() => handleSelectKnowledgeCatalogItem(doc)}
+                                              className={active ? palette.chipActive : palette.chip}
+                                            >
+                                              {doc.title || value}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </details>
+                                  ))}
+                                </div>
+                              </details>
+                            ))}
+                          </div>
+                        </details>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className={`rounded-md border border-dashed p-4 text-sm ${palette.text} ${isDark ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'}`}>
+                      当前筛选条件下还没有可用知识点，可以先手动输入，或到知识库中补充资料后再回来选择。
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
 
             {config.knowledge_points.length > 0 ? (
@@ -1228,6 +1480,36 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className={`${palette.soft} p-4`}>
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(config.allow_ai_fallback)}
+                    onChange={(e) => setConfig((prev) => ({ ...prev, allow_ai_fallback: e.target.checked }))}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className={`block text-sm font-medium ${palette.title}`}>题库不足时允许 AI 补题</span>
+                    <span className={`mt-1 block text-xs ${palette.text}`}>只补缺口题，已抽中的本地题不会被重写，补题来源会标记为 AI fallback。</span>
+                  </span>
+                </label>
+              </div>
+
+              <div className={`${palette.soft} p-4`}>
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(config.include_images)}
+                    onChange={(e) => setConfig((prev) => ({ ...prev, include_images: e.target.checked }))}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className={`block text-sm font-medium ${palette.title}`}>组卷时包含题目图片</span>
+                    <span className={`mt-1 block text-xs ${palette.text}`}>题库中已有图片时一并渲染；没有图片的题目不会被强行补图。</span>
+                  </span>
+                </label>
               </div>
 
               <div className={`${palette.soft} p-4`}>

@@ -133,24 +133,38 @@ function Dashboard() {
     <div className={`min-h-screen ${isDark ? 'bg-[#0b1120]' : 'bg-[#f0f5ff]'}`}>
       <div className="container-xl px-4 py-8 space-y-8">
         {/* Hero 区域 - 渐变背景 */}
-        <div className="hero-gradient rounded-2xl p-8 text-white relative overflow-hidden">
+        <div
+          className={`rounded-2xl p-8 relative overflow-hidden border ${
+            isDark
+              ? 'hero-gradient text-white border-transparent'
+              : 'bg-[linear-gradient(135deg,#f7f2e8_0%,#f2eadb_55%,#ebe1cf_100%)] text-slate-900 border-[#e5d8bc] shadow-sm'
+          }`}
+        >
           {/* 装饰性背景元素 */}
-          <div className="absolute top-0 right-0 w-64 h-64 opacity-10">
+          <div className={`absolute top-0 right-0 w-64 h-64 ${isDark ? 'opacity-10' : 'opacity-30'}`}>
             <svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="100" cy="100" r="80" stroke="white" strokeWidth="2" />
-              <circle cx="100" cy="100" r="60" stroke="white" strokeWidth="1.5" />
-              <circle cx="100" cy="100" r="40" stroke="white" strokeWidth="1" />
-              <circle cx="100" cy="100" r="20" fill="white" opacity="0.3" />
+              <circle cx="100" cy="100" r="80" stroke={isDark ? 'white' : '#b89c6c'} strokeWidth="2" />
+              <circle cx="100" cy="100" r="60" stroke={isDark ? 'white' : '#b89c6c'} strokeWidth="1.5" />
+              <circle cx="100" cy="100" r="40" stroke={isDark ? 'white' : '#b89c6c'} strokeWidth="1" />
+              <circle cx="100" cy="100" r="20" fill={isDark ? 'white' : '#c9ab77'} opacity="0.22" />
             </svg>
           </div>
           <div className="relative z-10">
-            <AppBadge variant="ai" size="sm" className="mb-4 bg-white/20 text-white border-white/30">
+            <AppBadge
+              variant="ai"
+              size="sm"
+              className={`mb-4 ${
+                isDark
+                  ? 'bg-white/20 text-white border-white/30'
+                  : 'bg-white/70 text-[#7b6240] border-[#dcc9a6]'
+              }`}
+            >
               AI 驱动
             </AppBadge>
             <h1 className="text-3xl md:text-4xl font-bold mb-3 font-heading">
               欢迎来到智学伴
             </h1>
-            <p className="text-lg text-white/80 max-w-xl">
+            <p className={`text-lg max-w-xl ${isDark ? 'text-white/80' : 'text-slate-600'}`}>
               AI 驱动的个性化学习平台，根据你的学习进度和目标，智能生成学习计划和测验
             </p>
           </div>

@@ -16,6 +16,15 @@ export const getKnowledgeStats = async () => {
   return res.data;
 };
 
+export const getKnowledgeCatalog = async (gradeLevel, subject) => {
+  const params = new URLSearchParams();
+  if (gradeLevel) params.append('grade_level', gradeLevel);
+  if (subject) params.append('subject', subject);
+  const query = params.toString();
+  const res = await apiClient.get(`/api/v1/knowledge/catalog${query ? `?${query}` : ''}`);
+  return res.data;
+};
+
 export const listDocuments = async () => {
   const res = await apiClient.get('/api/v1/knowledge/documents');
   return res.data;
