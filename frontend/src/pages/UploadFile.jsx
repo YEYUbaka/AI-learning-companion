@@ -116,9 +116,8 @@ function UploadFile() {
     try {
       const user_id = getUserId();
       
-      // 获取文件文本内容（从上传结果中获取预览，实际应该从服务器获取完整内容）
-      // 这里简化处理，实际应该有一个接口获取完整文件内容
-      const fileText = uploadResult?.text_preview || '';
+      // 获取文件完整文本内容，用于 AI 分析
+      const fileText = uploadResult?.text_content || uploadResult?.text_preview || '';
 
       const response = await requestPlan({
         user_id: user_id,

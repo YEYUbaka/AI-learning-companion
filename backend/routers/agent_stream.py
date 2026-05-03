@@ -6,7 +6,7 @@ import json
 from contextlib import suppress
 from typing import AsyncGenerator, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -15,7 +15,6 @@ from core.config import settings
 from core.logger import logger
 from core.security import get_current_user
 from database import get_db
-from repositories.agent_repo import AgentRepository
 from services.agent_service import AgentService
 
 
@@ -50,9 +49,11 @@ async def stream_with_heartbeat(
 
 
 class AgentTaskStreamRequest(BaseModel):
-    goal: str
+    goal: Optional[str] = None
+    message: Optional[str] = None
     mode: str = "react"
     context: Optional[dict] = None
+    session_id: Optional[int] = None
 
 
 async def _produce_agent_events(
@@ -62,29 +63,55 @@ async def _produce_agent_events(
     user_id: int,
 ) -> None:
     try:
-        session = AgentRepository.create_session(
-            db,
-            user_id=user_id,
-            session_type=request.mode,
-            goal=request.goal,
-            context=request.context,
-        )
-        await queue.put(
-            encode_sse_data({"type": "session_created", "session_id": session.id})
-        )
+        message = (request.message or request.goal or "").strip()
+        if not message:
+            raise HTTPException(status_code=400, detail="message 不能为空")
 
         agent_service = AgentService(db)
+        session, event_type, turn_index = agent_service.create_or_resume_session(
+            user_id=user_id,
+            message=message,
+            mode=request.mode,
+            context=request.context,
+            session_id=request.session_id,
+        )
+        await queue.put(
+            encode_sse_data(
+                {
+                    "type": event_type,
+                    "session_id": session.id,
+                    "turn_index": turn_index,
+                }
+            )
+        )
+        await queue.put(
+            encode_sse_data(
+                {
+                    "type": "user_message",
+                    "session_id": session.id,
+                    "turn_index": turn_index,
+                    "content": message,
+                    "attachments": (request.context or {}).get("attachments") or [],
+                }
+            )
+        )
+
         async for event in agent_service.execute_task_stream(
             user_id,
             session.id,
-            request.goal,
+            message,
             request.mode,
             request.context,
+            turn_index=turn_index,
         ):
+            if event.get("type") in {"final_answer", "thought", "action", "observation"}:
+                event.setdefault("turn_index", turn_index)
             await queue.put(encode_sse_data(event))
             await asyncio.sleep(0.01)
 
         await queue.put("data: [DONE]\n\n")
+    except HTTPException as exc:
+        await queue.put(encode_sse_data({"type": "error", "error": exc.detail}))
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("流式任务执行失败: %s", exc)
         await queue.put(encode_sse_data({"type": "error", "error": str(exc)}))

@@ -219,7 +219,7 @@ async def test_model_stream(
 
     def generate():
         try:
-            yield from provider.call_stream(test_messages)
+            yield from provider.call_stream(messages=test_messages)
         except Exception as e:
             yield f'data: {json.dumps({"type": "error", "message": str(e)[:300]}, ensure_ascii=False)}\n\n'
 

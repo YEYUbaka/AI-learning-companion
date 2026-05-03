@@ -7,6 +7,7 @@ import asyncio
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+import httpx
 from sqlalchemy.orm import Session
 
 from core.config import settings
@@ -17,7 +18,7 @@ from repositories.api_call_repo import APICallRepository
 from repositories.model_config_repo import ModelConfigRepository
 from services.prompt_service import PromptService
 from utils.markdown_sanitizer import clean_ai_response
-from utils.model_registry import registry
+from utils.model_registry import registry, _summarize_http_error
 
 
 DEFAULT_SYSTEM_PROMPT = "You are a professional AI learning assistant."
@@ -48,9 +49,38 @@ class AIService:
             logger.warning("Failed to record API call: %s", exc)
 
     @staticmethod
-    def get_provider_capabilities(provider: Optional[str]) -> Dict[str, Any]:
+    def _refresh_provider_from_db(db: Session, provider: Optional[str]) -> None:
+        if not provider:
+            return
+        try:
+            config = ModelConfigRepository.get_by_provider(db, provider)
+            if not config or not config.enabled:
+                return
+            runtime_provider = registry.build_provider_from_config(config)
+            if runtime_provider is None:
+                return
+            registry.register_provider(
+                provider,
+                runtime_provider,
+                params=config.params or {},
+                aliases=[str(config.id), config.provider_name],
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("Failed to refresh provider %s from DB before request: %s", provider, exc)
+
+    @staticmethod
+    def get_provider_capabilities(provider: Optional[str], db: Optional[Session] = None) -> Dict[str, Any]:
         if not provider:
             return {}
+        if db is not None:
+            try:
+                config = ModelConfigRepository.get_by_provider(db, provider)
+                if config and config.enabled:
+                    runtime_provider = registry.build_provider_from_config(config)
+                    if runtime_provider is not None:
+                        return runtime_provider.get_capabilities()
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.warning("Failed to resolve live provider capabilities for %s: %s", provider, exc)
         return registry.get_provider_capabilities(provider)
 
     @staticmethod
@@ -150,6 +180,7 @@ class AIService:
         )
 
         try:
+            AIService._refresh_provider_from_db(db, provider)
             result = registry.call_with_fallback(
                 input_items=request_items,
                 preferred_provider=provider,
@@ -219,6 +250,7 @@ class AIService:
         )
 
         try:
+            AIService._refresh_provider_from_db(db, provider)
             result = registry.call_with_function_calling(
                 input_items=request_items,
                 tools=tools,
@@ -312,6 +344,18 @@ class AIService:
                 "latency_ms": latency,
                 "error": None,
                 "capabilities": provider_instance.get_capabilities(),
+            }
+        except httpx.HTTPStatusError as exc:
+            message, _ = _summarize_http_error(provider_name, exc.response)
+            logger.error("Test model call failed: %s", message)
+            AIService._record_api_call(db, provider_name, source="admin_test", success=False)
+            return {
+                "success": False,
+                "provider": provider_name,
+                "raw_response": "",
+                "cleaned_text": "",
+                "latency_ms": 0,
+                "error": message,
             }
         except Exception as exc:  # pylint: disable=broad-except
             logger.error("Test model call failed: %s", exc)

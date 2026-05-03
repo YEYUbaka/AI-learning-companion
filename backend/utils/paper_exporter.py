@@ -10,6 +10,7 @@ import tempfile
 import base64
 from typing import Dict, List, Any, Tuple, Optional
 from datetime import datetime
+from xml.sax.saxutils import escape as xml_escape
 from core.logger import logger
 
 # 尝试导入reportlab（PDF导出）
@@ -93,6 +94,8 @@ class PaperExporter:
             for index, item in enumerate(answer_key, start=1):
                 if isinstance(item, dict):
                     normalized[str(index)] = item
+                elif isinstance(item, str):
+                    normalized[str(index)] = {"answer": item}
             return normalized
         return {}
 
@@ -121,12 +124,16 @@ class PaperExporter:
             return None
 
         normalized = candidate.lstrip("/")
+        upload_relative = normalized[len("uploads/"):] if normalized.startswith("uploads/") else normalized
+        upload_candidate = os.path.join("uploads", upload_relative)
         if os.path.isabs(candidate) and os.path.exists(candidate):
             return candidate
         if os.path.exists(candidate):
             return candidate
         if os.path.exists(normalized):
             return normalized
+        if os.path.exists(upload_candidate):
+            return upload_candidate
         return None
 
     @staticmethod
@@ -136,7 +143,11 @@ class PaperExporter:
             if not image_path:
                 continue
             try:
-                story.append(RLImage(image_path, width=max_width, height=max_height))
+                from PIL import Image as PILImage
+                with PILImage.open(image_path) as pil_img:
+                    img_w, img_h = pil_img.size
+                scale = min(max_width / max(img_w, 1), max_height / max(img_h, 1), 1)
+                story.append(RLImage(image_path, width=img_w * scale, height=img_h * scale))
                 story.append(Spacer(1, 0.3 * cm))
             except Exception as exc:
                 logger.warning("Failed to render paper image in PDF export: %s", exc)
@@ -175,10 +186,14 @@ class PaperExporter:
             
             # 清理LaTeX公式
             latex_formula = latex_formula.strip()
-            # 移除可能存在的$符号
-            if latex_formula.startswith('$') and latex_formula.endswith('$'):
+            # 移除可能存在的公式定界符
+            if latex_formula.startswith('$$') and latex_formula.endswith('$$'):
+                latex_formula = latex_formula[2:-2]
+            elif latex_formula.startswith('$') and latex_formula.endswith('$'):
                 latex_formula = latex_formula[1:-1]
-            elif latex_formula.startswith('$$') and latex_formula.endswith('$$'):
+            elif latex_formula.startswith('\\[') and latex_formula.endswith('\\]'):
+                latex_formula = latex_formula[2:-2]
+            elif latex_formula.startswith('\\(') and latex_formula.endswith('\\)'):
                 latex_formula = latex_formula[2:-2]
             
             # 创建临时文件（如果没有提供路径）
@@ -312,6 +327,146 @@ class PaperExporter:
             # 如果处理失败，返回原文本
             logger.warning(f"LaTeX转换失败，使用原文本: {e}")
             return [(text, False, None)]
+
+    @staticmethod
+    def _detect_latex_in_text(text: str) -> List[Tuple[str, bool]]:
+        """Detect LaTeX formulas in text and return segments.
+
+        Returns list of (segment_text, is_latex) tuples.
+        """
+        if not text:
+            return [("", False)]
+
+        segments: List[Tuple[str, bool]] = []
+        pattern = re.compile(
+            r'(\$\$[\s\S]+?\$\$|\$[^$\n]+\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\\begin\{[A-Za-z*]+\}[\s\S]+?\\end\{[A-Za-z*]+\})'
+        )
+
+        parts = pattern.split(text)
+        for part in parts:
+            if not part:
+                continue
+            stripped = part.strip()
+            is_latex = bool(
+                (stripped.startswith("$") and stripped.endswith("$"))
+                or (stripped.startswith("\\[") and stripped.endswith("\\]"))
+                or (stripped.startswith("\\(") and stripped.endswith("\\)"))
+                or stripped.startswith("\\begin{")
+            )
+            segments.append((part, is_latex))
+
+        if not segments:
+            segments = [(text, False)]
+        return segments
+
+    @staticmethod
+    def _add_text_with_latex_to_story(
+        story,
+        text,
+        para_style,
+        chinese_font,
+        image_max_width=14 * cm,
+        prefix_markup: str = "",
+        suffix_markup: str = "",
+    ):
+        """Add text (possibly containing LaTeX) to a ReportLab story list.
+
+        Text segments become Paragraphs; LaTeX formulas are rendered as images
+        via _render_latex_to_image and inserted as Image flowables.
+        """
+        if text is None:
+            text = ""
+        if not str(text).strip() and (prefix_markup or suffix_markup):
+            story.append(Paragraph(f"{prefix_markup}{suffix_markup}", para_style))
+            return
+        if not str(text).strip():
+            return
+
+        segments = [
+            (segment_text, is_latex)
+            for segment_text, is_latex in PaperExporter._detect_latex_in_text(str(text))
+            if segment_text.strip()
+        ]
+        if not segments:
+            if prefix_markup or suffix_markup:
+                story.append(Paragraph(f"{prefix_markup}{suffix_markup}", para_style))
+            return
+
+        prefix_pending = prefix_markup
+        suffix_pending = suffix_markup
+        for index, (segment_text, is_latex) in enumerate(segments):
+            if not segment_text.strip():
+                continue
+            has_later_text = any(not later_is_latex and later_text.strip() for later_text, later_is_latex in segments[index + 1:])
+
+            if is_latex:
+                if prefix_pending:
+                    story.append(Paragraph(prefix_pending, para_style))
+                    prefix_pending = ""
+                image_path = PaperExporter._render_latex_to_image(segment_text)
+                if image_path:
+                    try:
+                        from reportlab.platypus import Image
+                        from PIL import Image as PILImage
+                        with PILImage.open(image_path) as pil_img:
+                            img_w, img_h = pil_img.size
+                        aspect = img_h / max(img_w, 1)
+                        target_w = min(image_max_width, img_w)
+                        target_h = target_w * aspect
+                        story.append(Image(image_path, width=target_w, height=target_h))
+                        story.append(Spacer(1, 0.15 * cm))
+                    except Exception:
+                        fallback = PaperExporter._latex_fallback_text(segment_text)
+                        if fallback:
+                            story.append(Paragraph(xml_escape(fallback), para_style))
+                else:
+                    fallback = PaperExporter._latex_fallback_text(segment_text)
+                    if fallback:
+                        story.append(Paragraph(xml_escape(fallback), para_style))
+                if suffix_pending and not has_later_text:
+                    story.append(Paragraph(suffix_pending, para_style))
+                    suffix_pending = ""
+            else:
+                escaped_text = xml_escape(segment_text).replace("\n", "<br/>")
+                paragraph_text = f"{prefix_pending}{escaped_text}"
+                prefix_pending = ""
+                if suffix_pending and not has_later_text:
+                    paragraph_text = f"{paragraph_text}{suffix_pending}"
+                    suffix_pending = ""
+                story.append(Paragraph(paragraph_text, para_style))
+
+        if suffix_pending:
+            story.append(Paragraph(suffix_pending, para_style))
+
+    @staticmethod
+    def _latex_fallback_text(latex_str: str) -> str:
+        """Convert simple LaTeX to readable plain text when rendering fails."""
+        text = latex_str.strip()
+        for dollar in ("$$", "$"):
+            if text.startswith(dollar) and text.endswith(dollar):
+                text = text[len(dollar):-len(dollar)].strip()
+                break
+        for bracket in (("\\[", "\\]"), ("\\(", "\\)")):
+            if text.startswith(bracket[0]) and text.endswith(bracket[1]):
+                text = text[len(bracket[0]):-len(bracket[1])].strip()
+                break
+        text = re.sub(r"\\begin\{([A-Za-z*]+)\}", r"\1: ", text)
+        text = re.sub(r"\\end\{[A-Za-z*]+\}", "", text)
+
+        replacements = {
+            "\\frac": "", "\\sqrt": "√", "\\sum": "Σ", "\\int": "∫",
+            "\\pi": "π", "\\infty": "∞", "\\alpha": "α", "\\beta": "β",
+            "\\gamma": "γ", "\\theta": "θ", "\\lambda": "λ", "\\mu": "μ",
+            "\\sigma": "σ", "\\omega": "ω", "\\Delta": "Δ", "\\times": "×",
+            "\\div": "÷", "\\pm": "±", "\\cdot": "·", "\\leq": "≤",
+            "\\geq": "≥", "\\neq": "≠", "\\approx": "≈", "\\rightarrow": "→",
+            "\\Rightarrow": "⇒", "\\sin": "sin", "\\cos": "cos", "\\tan": "tan",
+            "\\log": "log", "\\ln": "ln", "\\lim": "lim",
+        }
+        for latex, plain in replacements.items():
+            text = text.replace(latex, plain)
+        text = re.sub(r"[{}_^]", "", text)
+        return text.strip()
     
     @staticmethod
     def _register_chinese_font():
@@ -445,7 +600,7 @@ class PaperExporter:
             
             # 添加标题
             title = paper_data.get("title", "试卷")
-            story.append(Paragraph(title, title_style))
+            story.append(Paragraph(xml_escape(str(title)), title_style))
             story.append(Spacer(1, 0.5*cm))
             
             # 添加试卷信息
@@ -474,7 +629,6 @@ class PaperExporter:
             # 添加题目
             questions = PaperExporter._normalize_export_questions(paper_data.get("questions", []))
             for i, q in enumerate(questions, 1):
-                # 获取题型标签
                 q_type = q.get('type', '')
                 type_label = ''
                 if q_type == 'choice':
@@ -490,20 +644,41 @@ class PaperExporter:
                 elif q_type == 'calculation':
                     type_label = '计算题'
 
-                # 题目编号和内容
-                question_text = f"<b>{i}. {q.get('question', '')}</b>"
+                question_suffix = ""
                 if type_label:
-                    question_text += f" <i>（{type_label}）</i>"
-                question_text += f" <i>（{q.get('points', 5)}分）</i>"
-                story.append(Paragraph(question_text, normal_style))
+                    question_suffix += f" <i>（{xml_escape(type_label)}）</i>"
+                question_suffix += f" <i>（{q.get('points', 5)}分）</i>"
+                PaperExporter._add_text_with_latex_to_story(
+                    story,
+                    q.get("question", ""),
+                    normal_style,
+                    chinese_font,
+                    prefix_markup=f"<b>{i}.</b> ",
+                    suffix_markup=question_suffix,
+                )
                 story.append(Spacer(1, 0.3*cm))
 
-                # 显示选项（单选题和多选题）
                 PaperExporter._append_images_to_pdf_story(story, q.get("question_images"))
+
                 if q_type in ['choice', 'multiple_choice'] and q.get('options'):
                     options = q.get('options', [])
                     for opt in options:
-                        story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;{opt}", normal_style))
+                        PaperExporter._add_text_with_latex_to_story(
+                            story,
+                            opt,
+                            normal_style,
+                            chinese_font,
+                            prefix_markup="&nbsp;&nbsp;&nbsp;&nbsp;",
+                        )
+
+                if q.get('explanation'):
+                    PaperExporter._add_text_with_latex_to_story(
+                        story,
+                        q["explanation"],
+                        normal_style,
+                        chinese_font,
+                        prefix_markup="<b>解析：</b>",
+                    )
 
                 story.append(Spacer(1, 0.5*cm))
             
@@ -516,7 +691,13 @@ class PaperExporter:
                 answer_key = PaperExporter._normalize_answer_key(paper_data.get("answer_key"))
                 for i, q in enumerate(questions, 1):
                     answer = answer_key.get(str(i), {}).get("answer", "")
-                    story.append(Paragraph(f"<b>{i}.</b> {answer}", normal_style))
+                    PaperExporter._add_text_with_latex_to_story(
+                        story,
+                        str(answer) if answer is not None else "",
+                        normal_style,
+                        chinese_font,
+                        prefix_markup=f"<b>{i}.</b> ",
+                    )
                     story.append(Spacer(1, 0.3*cm))
                     PaperExporter._append_images_to_pdf_story(
                         story,

@@ -6,12 +6,20 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from core.security import get_current_admin
 from database import get_db
 from services.question_bank_service import QuestionBankService
+from utils.question_bank_constants import (
+    DIFFICULTY_LEVELS,
+    GRADE_LEVELS,
+    QUESTION_TYPES,
+    SUBJECTS,
+    normalize_grade_level,
+    normalize_subject,
+)
 
 
 router = APIRouter(prefix="/api/v1/question-bank", tags=["question-bank"])
@@ -32,6 +40,26 @@ class QuestionBankItemRequest(BaseModel):
     status: str = "active"
     metadata: Optional[Dict[str, Any]] = None
     expected_updated_at: Optional[str] = None
+
+    @field_validator("grade_level")
+    @classmethod
+    def validate_grade_level(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return None
+        normalized = normalize_grade_level(v)
+        if normalized is None:
+            raise ValueError(f"Invalid grade_level: '{v}'. Valid values: {GRADE_LEVELS}")
+        return normalized
+
+    @field_validator("subject")
+    @classmethod
+    def validate_subject(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return None
+        normalized = normalize_subject(v)
+        if normalized is None:
+            raise ValueError(f"Invalid subject: '{v}'. Valid values: {SUBJECTS}")
+        return normalized
 
 
 @router.get("/items")
@@ -153,3 +181,14 @@ async def upload_question_bank_asset(
         db=db,
     )
     return {"success": True, "asset": asset}
+
+
+@router.get("/constants")
+async def get_question_bank_constants():
+    return {
+        "success": True,
+        "grade_levels": GRADE_LEVELS,
+        "subjects": SUBJECTS,
+        "question_types": QUESTION_TYPES,
+        "difficulty_levels": DIFFICULTY_LEVELS,
+    }

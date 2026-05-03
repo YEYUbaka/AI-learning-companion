@@ -16,6 +16,7 @@ from database import engine, Base
 from routers import auth, ai, files, plan, quiz, analytics, admin, learning_map, chat, agent, knowledge, question_bank
 from routers import agent_stream
 from core.logger import logger, log_file, error_log_file
+from core.config import settings
 from core.security_middleware import SecurityMiddleware
 
 logger.info("=" * 60)
@@ -32,10 +33,12 @@ app = FastAPI(
 )
 
 # 配置 CORS（允许跨域请求）- 必须在其他中间件之前
+_cors_origins_raw = getattr(settings, "CORS_ORIGINS", ["*"])
+_cors_origins = _cors_origins_raw if isinstance(_cors_origins_raw, list) else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应指定具体域名
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=True if _cors_origins != ["*"] else False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

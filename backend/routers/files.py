@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api/v1/files", tags=["files"])
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+DOC_FORMAT_ERROR = "暂不支持 .doc 格式上传，请将文件另存为 .docx 后重新上传。"
 DOCUMENT_EXTENSIONS = {".pdf", ".txt", ".md", ".markdown", ".docx", ".pptx"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 ALLOWED_EXTENSIONS = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS
@@ -65,6 +66,11 @@ def _build_attachment_payload(
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     file_ext = os.path.splitext(file.filename or "")[1].lower()
+    if file_ext == ".doc":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=DOC_FORMAT_ERROR,
+        )
     if file_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -119,6 +125,7 @@ async def upload_file(file: UploadFile = File(...)):
                 "mime_type": mime_type,
                 "preview_url": preview_url,
                 "text_length": text_length,
+                "text_content": text_content,
                 "text_preview": text_content[:200] + "..." if text_content and len(text_content) > 200 else text_content,
                 "attachment": attachment,
                 "message": "file uploaded successfully",

@@ -1,71 +1,360 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { useThemeStore } from '../store/themeStore';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ChatSender } from '@tdesign-react/chat';
+import '@tdesign-react/chat/es/style/index.js';
 import agentApi from '../api/agentApi';
 import apiClient from '../api/apiClient';
 import AgentStepViewer from '../components/AgentStepViewer';
+import { useThemeStore } from '../store/themeStore';
 import logger from '../utils/logger';
+import {
+  applyStreamEventToTimeline,
+  buildOptimisticAssistantMessage,
+  buildOptimisticUserMessage,
+  getNextTurnIndex,
+  normalizeSession,
+} from '../utils/agentTimeline';
 
 const ACCEPTED_FILE_TYPES = '.png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.md,.markdown,.docx,.pptx';
+const DOC_UPLOAD_ERROR = '暂不支持 .doc 格式上传，请将文件另存为 .docx 后重新上传。';
 
-const isImageAttachment = (attachment) =>
-  attachment?.file_type === 'image' || attachment?.type === 'image';
+const SUGGESTED_PROMPTS = [
+  '帮我把这份资料整理成复习提纲',
+  '看图解答这道数学题并给出步骤',
+  '根据上传的文件生成一套练习题',
+];
 
-const getAttachmentPreview = (attachment) =>
-  attachment?.image_url || attachment?.file_url || attachment?.preview_url || null;
+const statusLabelMap = {
+  running: '进行中',
+  completed: '已完成',
+  failed: '失败',
+  interrupted: '已中断',
+};
 
-const buildAttachmentFromResponse = (data) => {
+const getStatusTone = (status, isDark) => {
+  const toneMap = {
+    running: isDark ? 'bg-amber-400/15 text-amber-200' : 'bg-amber-50 text-amber-700',
+    completed: isDark ? 'bg-emerald-400/15 text-emerald-200' : 'bg-emerald-50 text-emerald-700',
+    failed: isDark ? 'bg-rose-400/15 text-rose-200' : 'bg-rose-50 text-rose-700',
+    interrupted: isDark ? 'bg-orange-400/15 text-orange-200' : 'bg-orange-50 text-orange-700',
+  };
+
+  return toneMap[status] || toneMap.running;
+};
+
+const formatSessionDate = (value) => {
+  if (!value) return '';
+
+  try {
+    return new Date(value).toLocaleString('zh-CN', {
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return value;
+  }
+};
+
+const getSessionInitial = (title = '') => {
+  const cleanTitle = String(title).trim();
+  if (!cleanTitle) return 'A';
+  return cleanTitle.slice(0, 1).toUpperCase();
+};
+
+const buildAttachmentIdentity = (attachment = {}) =>
+  attachment.local_key
+  || attachment.file_path
+  || `${attachment.file_name || attachment.name || 'attachment'}-${attachment.size || attachment.text_length || 0}`;
+
+const getFileExtension = (fileName = '') => {
+  const parts = String(fileName).split('.');
+  return parts.length > 1 ? `.${parts.pop().toLowerCase()}` : '';
+};
+
+const buildAttachmentFromResponse = (data, originalFile) => {
   const attachment = data?.attachment || {};
+  const localKey = originalFile
+    ? `${originalFile.name}-${originalFile.size}-${originalFile.lastModified}`
+    : attachment.file_path || attachment.file_name || attachment.name || `attachment-${Date.now()}`;
+
   return {
     ...attachment,
-    name: attachment.name || data?.file_name || 'attachment',
-    file_name: attachment.file_name || data?.file_name || 'attachment',
+    local_key: localKey,
+    size: attachment.size || originalFile?.size || data?.text_length || 0,
+    name: attachment.name || data?.file_name || originalFile?.name || 'attachment',
+    file_name: attachment.file_name || data?.file_name || originalFile?.name || 'attachment',
     file_path: attachment.file_path || data?.file_path,
     file_type: attachment.file_type || data?.file_type || 'file',
-    mime_type: attachment.mime_type || data?.mime_type,
+    mime_type: attachment.mime_type || data?.mime_type || originalFile?.type,
     preview_url: attachment.preview_url || data?.preview_url,
     image_url: attachment.image_url || data?.preview_url || attachment.file_url,
     text_length: data?.text_length || 0,
+    text_content: data?.text_content || '',
+    text_preview: data?.text_preview || '',
+    upload_status: 'parsed',
+    raw: originalFile || null,
   };
 };
 
 const mergeAttachments = (previous, nextAttachment) => {
-  const uniqueKey = nextAttachment.file_path || nextAttachment.file_name || nextAttachment.name;
-  const filtered = previous.filter((item) => {
-    const currentKey = item.file_path || item.file_name || item.name;
-    return currentKey !== uniqueKey;
-  });
+  const nextKey = buildAttachmentIdentity(nextAttachment);
+  const filtered = previous.filter((item) => buildAttachmentIdentity(item) !== nextKey);
   return [...filtered, nextAttachment];
 };
 
+const extractFilesFromClipboardEvent = (event) => {
+  const clipboardItems = Array.from(event.clipboardData?.items || []);
+  const clipboardFiles = clipboardItems
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+
+  if (clipboardFiles.length > 0) {
+    return clipboardFiles;
+  }
+
+  return Array.from(event.clipboardData?.files || []);
+};
+
+const inferAttachmentType = (attachment) => {
+  if (attachment?.file_type === 'image' || String(attachment?.mime_type || '').startsWith('image/')) {
+    return 'image';
+  }
+
+  const extension = String(attachment?.file_name || attachment?.name || '')
+    .split('.')
+    .pop()
+    ?.toLowerCase();
+
+  if (extension === 'pdf') return 'pdf';
+  if (extension === 'docx') return 'doc';
+  if (extension === 'ppt' || extension === 'pptx') return 'ppt';
+  if (extension === 'txt' || extension === 'md' || extension === 'markdown') return 'txt';
+
+  return 'txt';
+};
+
+const toSenderAttachment = (attachment) => ({
+  key: buildAttachmentIdentity(attachment),
+  name: attachment.file_name || attachment.name,
+  url: attachment.image_url || attachment.preview_url || attachment.file_url,
+  size: attachment.size || attachment.text_length || 0,
+  status: attachment.upload_status === 'uploading' ? 'progress' : 'success',
+  type: attachment.mime_type,
+  fileType: inferAttachmentType(attachment),
+  raw: attachment.raw || null,
+  response: attachment,
+});
+
+const buildOptimisticSession = ({ message, mode, attachments, existingSession }) => {
+  const now = new Date().toISOString();
+  const baseTimeline = Array.isArray(existingSession?.timeline) ? existingSession.timeline : [];
+  const nextTurnIndex = getNextTurnIndex(baseTimeline);
+  const userMessage = buildOptimisticUserMessage(message, attachments, nextTurnIndex);
+  const assistantMessage = buildOptimisticAssistantMessage(nextTurnIndex);
+
+  return normalizeSession({
+    ...(existingSession || {}),
+    title: existingSession?.title || message.slice(0, 80),
+    goal: existingSession?.goal || message,
+    session_type: mode,
+    status: 'running',
+    created_at: existingSession?.created_at || now,
+    updated_at: now,
+    timeline: [...baseTimeline, userMessage, assistantMessage],
+  });
+};
+
+const BrandMark = ({ isDark, className = 'h-10 w-10' }) => (
+  <div
+    className={`flex ${className} items-center justify-center rounded-2xl border ${
+      isDark
+        ? 'border-white/10 bg-white/[0.06] text-slate-100'
+        : 'border-slate-200 bg-white text-slate-900'
+    }`}
+  >
+    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.8}
+        d="M8 7h8M8 12h5m-5 5h8M6 4h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2z"
+      />
+    </svg>
+  </div>
+);
+
+const SidebarToggleIcon = ({ collapsed }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    className={`h-[18px] w-[18px] transition-transform duration-200 ${collapsed ? 'scale-x-[-1]' : ''}`}
+    aria-hidden="true"
+  >
+    <rect x="3.5" y="4" width="17" height="16" rx="3.5" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M8.5 4.75v14.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M13.5 12h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M15.5 10l-2 2 2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const AttachmentPlusIcon = ({ active = false }) => (
+  <span
+    className={`flex size-4 items-center justify-center text-current transition-transform duration-300 ease-out ${
+      active ? 'rotate-45' : 'rotate-0'
+    }`}
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 16 16" className="size-4">
+      <path
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth="0.457"
+        d="M7.5 8.5V15h1V8.5H15v-1H8.5V1h-1v6.5H1v1z"
+      />
+    </svg>
+  </span>
+);
+
+const SenderAttachmentTrigger = ({ isDark, active, onClick, slot = 'footer-prefix' }) => (
+  <button
+    slot={slot}
+    type="button"
+    onClick={onClick}
+    className={`agent-chat-attachment-trigger inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition ${
+      isDark
+        ? 'text-slate-300 hover:bg-white/[0.06] hover:text-white'
+        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+    }`}
+    aria-label="添加附件"
+    title="添加附件"
+  >
+    <AttachmentPlusIcon active={active} />
+  </button>
+);
+
+const SessionListItem = ({ session, isActive, isDark, collapsed, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`w-full overflow-hidden rounded-2xl text-left transition ${
+      isActive
+        ? isDark
+          ? 'bg-white/10 text-white'
+          : 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200'
+        : isDark
+          ? 'text-slate-300 hover:bg-white/[0.06]'
+          : 'text-slate-700 hover:bg-white hover:shadow-sm'
+    } ${collapsed ? 'flex h-12 items-center justify-center p-0' : 'px-3 py-3'}`}
+    title={session.title || session.goal}
+  >
+    {collapsed ? (
+      <div
+        className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
+          isActive
+            ? isDark
+              ? 'bg-cyan-400/15 text-cyan-200'
+              : 'bg-cyan-100 text-cyan-700'
+            : isDark
+              ? 'bg-white/[0.06] text-slate-200'
+              : 'bg-slate-100 text-slate-600'
+        }`}
+      >
+        <span className="text-sm font-semibold">
+          {getSessionInitial(session.title || session.goal)}
+        </span>
+      </div>
+    ) : (
+      <>
+        <div className="truncate text-sm font-medium">{session.title || session.goal}</div>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className={`rounded-full px-2.5 py-1 text-[11px] ${getStatusTone(session.status, isDark)}`}>
+            {statusLabelMap[session.status] || session.status}
+          </span>
+          <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+            {formatSessionDate(session.updated_at || session.created_at)}
+          </span>
+        </div>
+      </>
+    )}
+  </button>
+);
+
+const ModeSwitch = ({ mode, setMode, isDark, disabled }) => (
+  <div
+    className={`inline-flex items-center rounded-full border p-1 ${
+      isDark ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-white'
+    }`}
+  >
+    {[
+      { value: 'react', label: 'ReAct' },
+      { value: 'cot', label: 'CoT' },
+    ].map((item) => {
+      const active = mode === item.value;
+      return (
+        <button
+          key={item.value}
+          type="button"
+          disabled={disabled}
+          onClick={() => setMode(item.value)}
+          className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+            active
+              ? isDark
+                ? 'bg-white text-slate-950'
+                : 'bg-slate-900 text-white'
+              : isDark
+                ? 'text-slate-300 hover:bg-white/[0.06]'
+                : 'text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          {item.label}
+        </button>
+      );
+    })}
+  </div>
+);
+
 const AgentChat = () => {
-  const [goal, setGoal] = useState('');
+  const { theme } = useThemeStore();
+  const isDark = theme === 'dark';
+
+  const [draftMessage, setDraftMessage] = useState('');
   const [mode, setMode] = useState('react');
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [tools, setTools] = useState([]);
+  const [isComposerDragActive, setIsComposerDragActive] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [currentSession, setCurrentSession] = useState(null);
   const [attachments, setAttachments] = useState([]);
   const [error, setError] = useState(null);
   const [streamRecovery, setStreamRecovery] = useState(null);
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const [mobileSections, setMobileSections] = useState({
-    tools: false,
-    history: false,
-  });
+  const [attachmentActionActive, setAttachmentActionActive] = useState(false);
+  const [expandedAttachments, setExpandedAttachments] = useState({});
 
   const fileInputRef = useRef(null);
+  const senderWrapperRef = useRef(null);
+  const messageListRef = useRef(null);
   const activeStreamRef = useRef(null);
   const activeStreamRunIdRef = useRef(0);
   const userScrolledUpRef = useRef(false);
-
-  const { theme } = useThemeStore();
-  const isDark = theme === 'dark';
+  const answerAnimationRef = useRef(null);
 
   useEffect(() => {
-    void loadTools();
-    void loadSessions();
+    document.documentElement.classList.add('agent-chat-page');
+    document.body.classList.add('agent-chat-page');
 
+    return () => {
+      document.documentElement.classList.remove('agent-chat-page');
+      document.body.classList.remove('agent-chat-page');
+    };
+  }, []);
+
+  useEffect(() => {
+    void loadSessions();
     return () => {
       cancelActiveStream();
     };
@@ -75,21 +364,16 @@ const AgentChat = () => {
     activeStreamRunIdRef.current += 1;
     activeStreamRef.current?.abort?.();
     activeStreamRef.current = null;
-  };
-
-  const loadTools = async () => {
-    try {
-      const data = await agentApi.listTools();
-      setTools(data.tools || []);
-    } catch (err) {
-      logger.error('Failed to load agent tools', err);
+    if (answerAnimationRef.current) {
+      window.clearInterval(answerAnimationRef.current);
+      answerAnimationRef.current = null;
     }
   };
 
   const loadSessions = async () => {
     try {
-      const data = await agentApi.getUserSessions(10, 0);
-      setSessions(data.sessions || []);
+      const data = await agentApi.getUserSessions(20, 0);
+      setSessions((data.sessions || []).map(normalizeSession));
     } catch (err) {
       logger.error('Failed to load agent sessions', err);
     }
@@ -97,7 +381,13 @@ const AgentChat = () => {
 
   const handleFilesUpload = async (fileList) => {
     const files = Array.from(fileList || []);
-    if (!files.length) {
+    if (!files.length) return;
+
+    if (files.some((file) => getFileExtension(file.name) === '.doc')) {
+      setError(DOC_UPLOAD_ERROR);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       return;
     }
 
@@ -106,18 +396,31 @@ const AgentChat = () => {
 
     try {
       for (const file of files) {
+        const pendingAttachment = {
+          local_key: `${file.name}-${file.size}-${file.lastModified}`,
+          name: file.name,
+          file_name: file.name,
+          size: file.size,
+          file_type: inferAttachmentType({ mime_type: file.type }),
+          mime_type: file.type,
+          upload_status: 'uploading',
+          raw: file,
+        };
+        setAttachments((previous) => mergeAttachments(previous, pendingAttachment));
+
         const formData = new FormData();
         formData.append('file', file);
         const response = await apiClient.post('/api/v1/files/upload', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
-        const normalizedAttachment = buildAttachmentFromResponse(response.data);
+        const normalizedAttachment = buildAttachmentFromResponse(response.data, file);
         setAttachments((previous) => mergeAttachments(previous, normalizedAttachment));
       }
     } catch (err) {
       logger.error('Failed to upload agent attachment', err);
-      setError(err.response?.data?.detail || '附件上传失败，请稍后重试');
+      setError(err.response?.data?.detail || '附件上传失败，请稍后重试。');
     } finally {
+      setAttachmentActionActive(false);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -125,190 +428,258 @@ const AgentChat = () => {
     }
   };
 
+  const handleComposerPaste = async (event) => {
+    if (loading || uploading) return;
+    const clipboardFiles = extractFilesFromClipboardEvent(event);
+    if (!clipboardFiles.length) return;
+
+    event.preventDefault();
+    await handleFilesUpload(clipboardFiles);
+  };
+
   const handleFileDrop = async (event) => {
     event.preventDefault();
-    if (loading || uploading) {
-      return;
-    }
+    setIsComposerDragActive(false);
+    if (loading || uploading) return;
     await handleFilesUpload(event.dataTransfer.files);
   };
 
-  const handleFileInputChange = async (event) => {
-    await handleFilesUpload(event.target.files);
-  };
-
-  const handleRemoveAttachment = (indexToRemove) => {
-    setAttachments((previous) => previous.filter((_, index) => index !== indexToRemove));
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
-  const handleGoalKeyDown = (event) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent?.isComposing) {
-      return;
-    }
-
+  const handleComposerDragEnter = (event) => {
     event.preventDefault();
-    void handleSubmit({ preventDefault: () => {} });
+    if (loading || uploading) return;
+    setIsComposerDragActive(true);
   };
 
-  const handleSubmit = async (event) => {
+  const handleComposerDragLeave = (event) => {
     event.preventDefault();
-    if (!goal.trim()) {
-      return;
+    if (!senderWrapperRef.current?.contains(event.relatedTarget)) {
+      setIsComposerDragActive(false);
     }
+  };
+
+  const handleSenderFileRemove = (event) => {
+    const restItems = Array.isArray(event?.detail) ? event.detail : [];
+    const restKeys = new Set(restItems.map((item) => item.key || `${item.name}-${item.size || 0}`));
+    setAttachments((previous) => previous.filter((item) => restKeys.has(buildAttachmentIdentity(item))));
+  };
+
+  const toggleAttachmentPreview = (attachmentKey) => {
+    setExpandedAttachments((prev) => ({
+      ...prev,
+      [attachmentKey]: !prev[attachmentKey],
+    }));
+  };
+
+  const triggerAttachmentPicker = () => {
+    setAttachmentActionActive(true);
+    fileInputRef.current?.click();
+    window.setTimeout(() => {
+      setAttachmentActionActive(false);
+    }, 260);
+  };
+
+  const handleStopStream = () => {
+    cancelActiveStream();
+    setLoading(false);
+    setCurrentSession((previous) => (
+      previous
+        ? normalizeSession({
+            ...previous,
+            status: previous.status === 'completed' ? previous.status : 'interrupted',
+          })
+        : previous
+    ));
+  };
+
+  const scrollToBottom = (behavior = 'smooth') => {
+    const container = messageListRef.current;
+    if (!container) return;
+    userScrolledUpRef.current = false;
+    setShowScrollToBottom(false);
+    container.scrollTo({ top: container.scrollHeight, behavior });
+  };
+
+  const updateScrollToBottomVisibility = () => {
+    const container = messageListRef.current;
+    if (!container) return;
+
+    const threshold = 120;
+    const nearBottom = container.scrollHeight - (container.scrollTop + container.clientHeight) < threshold;
+    userScrolledUpRef.current = !nearBottom;
+    setShowScrollToBottom(!nearBottom);
+  };
+
+  useEffect(() => {
+    const container = messageListRef.current;
+    if (!container) return undefined;
+
+    const handleScroll = () => {
+      updateScrollToBottomVisibility();
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    requestAnimationFrame(handleScroll);
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, [currentSession?.session_id, currentSession?.timeline?.length]);
+
+  useEffect(() => {
+    if (!currentSession) return;
+
+    if (!userScrolledUpRef.current) {
+      requestAnimationFrame(() => {
+        scrollToBottom(loading ? 'auto' : 'smooth');
+      });
+    }
+  }, [currentSession?.timeline?.length, currentSession?.status, loading]);
+
+  const appendStreamEvent = (eventPayload) => {
+    setCurrentSession((previous) => {
+      if (!previous) return previous;
+
+      return normalizeSession({
+        ...previous,
+        status: eventPayload.type === 'completed' ? 'completed' : previous.status,
+        timeline: applyStreamEventToTimeline(previous.timeline || [], eventPayload),
+      });
+    });
+  };
+
+  const animateFinalAnswer = (eventPayload) => {
+    if (answerAnimationRef.current) {
+      window.clearInterval(answerAnimationRef.current);
+      answerAnimationRef.current = null;
+    }
+
+    const fullText = eventPayload.content || '';
+    const chunks = fullText.match(/[\s\S]{1,28}/g) || [''];
+    let chunkIndex = 0;
+    let nextContent = '';
+
+    setCurrentSession((previous) => {
+      if (!previous) return previous;
+
+      return normalizeSession({
+        ...previous,
+        timeline: applyStreamEventToTimeline(previous.timeline || [], {
+          ...eventPayload,
+          content: '',
+        }),
+      });
+    });
+
+    answerAnimationRef.current = window.setInterval(() => {
+      nextContent += chunks[chunkIndex] || '';
+      chunkIndex += 1;
+
+      setCurrentSession((previous) => {
+        if (!previous) return previous;
+
+        return normalizeSession({
+          ...previous,
+          timeline: (previous.timeline || []).map((item) => (
+            item.role === 'assistant' && item.turn_index === eventPayload.turn_index
+              ? {
+                  ...item,
+                  content: nextContent,
+                  quality_status: eventPayload.quality_status,
+                  confidence: eventPayload.confidence,
+                  evidence: eventPayload.evidence || [],
+                  fallback_used: eventPayload.fallback_used || false,
+                }
+              : item
+          )),
+        });
+      });
+
+      if (chunkIndex >= chunks.length) {
+        window.clearInterval(answerAnimationRef.current);
+        answerAnimationRef.current = null;
+        appendStreamEvent(eventPayload);
+      }
+    }, 18);
+  };
+
+  const submitCurrentMessage = async () => {
+    const message = draftMessage.trim();
+    if (!message) return;
 
     cancelActiveStream();
     const streamRunId = activeStreamRunIdRef.current;
-    const finalGoal = goal.trim();
-    const requestContext = attachments.length ? { attachments } : null;
+    const requestAttachments = [...attachments];
+    const requestContext = { attachments: requestAttachments };
+    const nextSession = buildOptimisticSession({
+      message,
+      mode,
+      attachments: requestAttachments,
+      existingSession: currentSession,
+    });
 
+    setCurrentSession(nextSession);
+    setDraftMessage('');
+    setAttachments([]);
     setLoading(true);
     setError(null);
     setStreamRecovery(null);
 
-    const tempSession = {
-      goal: finalGoal,
-      session_type: mode,
-      status: 'running',
-      steps: [],
-      tool_calls: [],
-      context: requestContext,
-    };
-    setCurrentSession(tempSession);
-
     try {
-      activeStreamRef.current = agentApi.createTaskStream(
-        finalGoal,
+      activeStreamRef.current = agentApi.createTaskStream({
+        message,
         mode,
-        requestContext,
-        (eventPayload) => {
-          if (activeStreamRunIdRef.current !== streamRunId) {
-            return;
+        context: requestContext,
+        sessionId: currentSession?.session_id || null,
+        onMessage: (eventPayload) => {
+          if (activeStreamRunIdRef.current !== streamRunId) return;
+
+          switch (eventPayload.type) {
+            case 'session_created':
+            case 'session_resumed':
+              setCurrentSession((previous) => (
+                previous
+                  ? normalizeSession({
+                      ...previous,
+                      session_id: eventPayload.session_id,
+                      status: 'running',
+                    })
+                  : previous
+              ));
+              return;
+            case 'user_message':
+              return;
+            case 'completed':
+              setCurrentSession((previous) => (
+                previous
+                  ? normalizeSession({ ...previous, status: 'completed' })
+                  : previous
+              ));
+              return;
+            case 'failed':
+            case 'error':
+              setError(eventPayload.error || '任务执行失败。');
+              setCurrentSession((previous) => (
+                previous
+                  ? normalizeSession({ ...previous, status: 'failed' })
+                  : previous
+              ));
+              return;
+            case 'final_answer':
+              animateFinalAnswer(eventPayload);
+              return;
+            default:
+              appendStreamEvent(eventPayload);
           }
-
-          setCurrentSession((previous) => {
-            if (!previous) {
-              return previous;
-            }
-
-            const nextSession = {
-              ...previous,
-              steps: [...(previous.steps || [])],
-              tool_calls: [...(previous.tool_calls || [])],
-            };
-
-            switch (eventPayload.type) {
-              case 'session_created':
-                setStreamRecovery(null);
-                return { ...nextSession, session_id: eventPayload.session_id };
-              case 'goal':
-                nextSession.steps.push({
-                  step_number: eventPayload.step_number,
-                  step_type: 'goal',
-                  content: eventPayload.content,
-                  extra_data: {
-                    trace_id: eventPayload.trace_id,
-                  },
-                  created_at: new Date().toISOString(),
-                });
-                return nextSession;
-              case 'thought':
-                nextSession.steps.push({
-                  step_number: eventPayload.step_number,
-                  step_type: 'thought',
-                  content: eventPayload.content,
-                  extra_data: {
-                    trace_id: eventPayload.trace_id,
-                    quality_status: eventPayload.quality_status,
-                    confidence: eventPayload.confidence,
-                  },
-                  created_at: new Date().toISOString(),
-                });
-                return nextSession;
-              case 'action':
-                nextSession.steps.push({
-                  step_number: eventPayload.step_number,
-                  step_type: 'action',
-                  content: `${eventPayload.tool_name}: ${JSON.stringify(eventPayload.tool_input)}`,
-                  extra_data: {
-                    trace_id: eventPayload.trace_id,
-                    tool_name: eventPayload.tool_name,
-                    tool_input: eventPayload.tool_input,
-                  },
-                  created_at: new Date().toISOString(),
-                });
-                nextSession.tool_calls.push({
-                  tool_name: eventPayload.tool_name,
-                  status: 'pending',
-                  input_params: eventPayload.tool_input,
-                });
-                return nextSession;
-              case 'observation': {
-                const updatedToolCalls = [...nextSession.tool_calls];
-                if (updatedToolCalls.length > 0) {
-                  updatedToolCalls[updatedToolCalls.length - 1] = {
-                    ...updatedToolCalls[updatedToolCalls.length - 1],
-                    status: eventPayload.result?.success ? 'success' : 'failed',
-                    output_result: eventPayload.result,
-                  };
-                }
-
-                nextSession.steps.push({
-                  step_number: eventPayload.step_number,
-                  step_type: 'observation',
-                  content: JSON.stringify(eventPayload.result),
-                  extra_data: {
-                    trace_id: eventPayload.trace_id,
-                    ...(eventPayload.result || {}),
-                  },
-                  created_at: new Date().toISOString(),
-                });
-                nextSession.tool_calls = updatedToolCalls;
-                return nextSession;
-              }
-              case 'final_answer':
-                nextSession.steps.push({
-                  step_number: eventPayload.step_number,
-                  step_type: 'final_answer',
-                  content: eventPayload.content,
-                  extra_data: {
-                    trace_id: eventPayload.trace_id,
-                    quality_status: eventPayload.quality_status,
-                    confidence: eventPayload.confidence,
-                    evidence: eventPayload.evidence || [],
-                    fallback_used: eventPayload.fallback_used || false,
-                  },
-                  created_at: new Date().toISOString(),
-                });
-                return nextSession;
-              case 'completed':
-                return { ...nextSession, status: 'completed' };
-              case 'failed':
-                setError(eventPayload.error || '任务执行失败');
-                return { ...nextSession, status: 'failed' };
-              case 'error':
-                setError(eventPayload.error || '任务执行失败');
-                return { ...nextSession, status: 'failed' };
-              default:
-                return nextSession;
-            }
-          });
         },
-        () => {
-          if (activeStreamRunIdRef.current !== streamRunId) {
-            return;
-          }
+        onComplete: () => {
+          if (activeStreamRunIdRef.current !== streamRunId) return;
           setLoading(false);
           setStreamRecovery(null);
           activeStreamRef.current = null;
           void loadSessions();
         },
-        (streamError) => {
-          if (activeStreamRunIdRef.current !== streamRunId) {
-            return;
-          }
+        onError: (streamError) => {
+          if (activeStreamRunIdRef.current !== streamRunId) return;
 
           setLoading(false);
           activeStreamRef.current = null;
@@ -319,22 +690,22 @@ const AgentChat = () => {
             });
             setCurrentSession((previous) => (
               previous
-                ? {
+                ? normalizeSession({
                     ...previous,
                     session_id: previous.session_id || streamError.sessionId,
                     status: previous.status === 'completed' ? previous.status : 'interrupted',
-                  }
+                  })
                 : previous
             ));
           }
-          setError(streamError.message || '任务执行失败');
-        }
-      );
+          setError(streamError.message || '任务执行失败。');
+        },
+      });
     } catch (err) {
       logger.error('Failed to start agent task stream', err);
       setLoading(false);
       activeStreamRef.current = null;
-      setError(err.message || '任务执行失败');
+      setError(err.message || '任务执行失败。');
     }
   };
 
@@ -344,473 +715,759 @@ const AgentChat = () => {
       setLoading(false);
       setError(null);
       setStreamRecovery(null);
+      setAttachments([]);
       const session = await agentApi.getSession(sessionId);
-      setCurrentSession(session);
-      setAttachments(session?.context?.attachments || []);
+      setCurrentSession(normalizeSession(session));
+      setMode(session?.session_type || 'react');
+      setMobileSidebarOpen(false);
     } catch (err) {
       logger.error('Failed to load agent session', err);
-      setError('会话加载失败');
+      setError('会话加载失败。');
     }
   };
 
   const handleResumeSession = async () => {
-    if (!streamRecovery?.sessionId) {
-      return;
-    }
+    if (!streamRecovery?.sessionId) return;
     await handleLoadSession(streamRecovery.sessionId);
     await loadSessions();
   };
 
-  const toggleMobileSection = (sectionKey) => {
-    setMobileSections((previous) => ({
-      ...previous,
-      [sectionKey]: !previous[sectionKey],
-    }));
+  const handleNewChat = () => {
+    cancelActiveStream();
+    setCurrentSession(null);
+    setDraftMessage('');
+    setAttachments([]);
+    setError(null);
+    setLoading(false);
+    setStreamRecovery(null);
+    setMobileSidebarOpen(false);
   };
 
-  const getMobileSectionClass = (sectionKey) =>
-    mobileSections[sectionKey] ? 'block lg:block' : 'hidden lg:block';
+  const handleToggleThinking = (messageId) => {
+    setCurrentSession((previous) => (
+      previous
+        ? normalizeSession({
+            ...previous,
+            timeline: (previous.timeline || []).map((item) => (
+              item.id === messageId
+                ? { ...item, thinking_expanded: !item.thinking_expanded }
+                : item
+            )),
+          })
+        : previous
+    ));
+  };
 
-  const isNearPageBottom = () => {
-    if (typeof window === 'undefined') {
-      return true;
+  const filteredSessions = useMemo(() => {
+    const keyword = historyQuery.trim().toLowerCase();
+    if (!keyword) return sessions;
+
+    return sessions.filter((session) =>
+      [session.title, session.goal]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(keyword)),
+    );
+  }, [historyQuery, sessions]);
+
+  const senderAttachments = useMemo(
+    () => attachments.map(toSenderAttachment),
+    [attachments],
+  );
+  const buildSenderActions = (presets = []) => presets.map((item) => {
+    if (item.name !== 'attachment') {
+      return item;
     }
-    const threshold = 120;
-    const scrollElement = document.documentElement;
-    return scrollElement.scrollHeight - (window.scrollY + window.innerHeight) < threshold;
-  };
 
-  const isMobileViewport = () => {
-    if (typeof window === 'undefined') {
-      return false;
-    }
-    return window.innerWidth < 1024;
-  };
-
-  const updateScrollToBottomVisibility = () => {
-    const shouldShow = Boolean(currentSession) && !isNearPageBottom();
-    userScrolledUpRef.current = shouldShow;
-    setShowScrollToBottom(shouldShow);
-  };
-
-  const scrollToBottom = (behavior = 'smooth') => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    userScrolledUpRef.current = false;
-    setShowScrollToBottom(false);
-    const scrollElement = document.documentElement;
-    window.scrollTo({ top: scrollElement.scrollHeight, behavior });
-  };
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return undefined;
-    }
-
-    const handleWindowScroll = () => {
-      updateScrollToBottomVisibility();
+    return {
+      ...item,
+      render: (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            triggerAttachmentPicker();
+          }}
+          className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
+            isDark
+              ? 'text-slate-300 hover:bg-white/[0.06] hover:text-white'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+          }`}
+          aria-label="添加附件"
+          title="添加附件"
+        >
+          <AttachmentPlusIcon active={attachmentActionActive} />
+        </button>
+      ),
     };
+  });
 
-    window.addEventListener('scroll', handleWindowScroll, { passive: true });
-    window.addEventListener('resize', handleWindowScroll);
-    requestAnimationFrame(handleWindowScroll);
-
-    return () => {
-      window.removeEventListener('scroll', handleWindowScroll);
-      window.removeEventListener('resize', handleWindowScroll);
-    };
-  }, [currentSession?.session_id]);
-
-  useEffect(() => {
-    if (!currentSession) {
-      userScrolledUpRef.current = false;
-      setShowScrollToBottom(false);
-      return;
-    }
-
-    if (!isMobileViewport()) {
-      requestAnimationFrame(() => {
-        updateScrollToBottomVisibility();
-      });
-      return;
-    }
-
-    if (!userScrolledUpRef.current) {
-      requestAnimationFrame(() => {
-        scrollToBottom(loading ? 'auto' : 'smooth');
-      });
-      return;
-    }
-
-    requestAnimationFrame(() => {
-      updateScrollToBottomVisibility();
-    });
-  }, [currentSession?.session_id, currentSession?.steps?.length, currentSession?.tool_calls?.length, loading]);
-
-  const cardClass = `${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border rounded-xl shadow-sm p-4 sm:p-6`;
+  const activeSessionId = currentSession?.session_id;
+  const hasConversation = Boolean((currentSession?.timeline || []).length);
+  const desktopSidebarWidth = desktopSidebarCollapsed ? 0 : 280;
+  const pageBackground = isDark ? 'bg-[#0a0f18]' : 'bg-[#fbfcff]';
+  const sidebarScrollbarClass = isDark ? 'scrollbar-qw-dark' : 'scrollbar-qw-light';
+  const sidebarSurface = isDark
+    ? 'border-white/8 bg-[#0d1420] text-white'
+    : 'border-slate-200 bg-[#f8f9fb] text-slate-900';
+  const panelSurface = isDark
+    ? 'border-white/10 bg-[#0f1724]'
+    : 'border-slate-200 bg-white';
 
   return (
-    <div className={`min-h-screen ${isDark ? 'bg-slate-900' : 'bg-gray-50'}`}>
-      <div className="mx-auto max-w-7xl px-3 py-4 sm:px-4 sm:py-8">
-        <div className="mb-8">
-          <h1 className={`mb-2 text-2xl font-bold sm:text-3xl ${isDark ? 'text-white' : 'text-gray-900'}`}>
-            智学智能助手
-          </h1>
-          <p className={`${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
-            支持文本任务、文档附件和图片理解。图片会直接作为多模态上下文提交给支持视觉的模型。
-          </p>
-        </div>
+    <div className={`agent-chat-page-shell h-[calc(100vh-4rem)] overflow-hidden ${pageBackground}`}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept={ACCEPTED_FILE_TYPES}
+        className="hidden"
+        onChange={(event) => {
+          void handleFilesUpload(event.target.files || []);
+        }}
+      />
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div className="order-2 space-y-6 lg:order-1 lg:col-span-1">
-            <div className={cardClass}>
-              <h2 className={`mb-4 text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>
-                创建任务
-              </h2>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className={`mb-2 block text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
-                    任务目标
-                  </label>
-                  <textarea
-                    value={goal}
-                    onChange={(event) => setGoal(event.target.value)}
-                    onKeyDown={handleGoalKeyDown}
-                    placeholder="例如：分析这张几何题图片并给出解题思路；或结合附件总结学习重点。"
-                    className={`w-full rounded-lg border px-3 py-2 focus:outline-none ${
-                      isDark
-                        ? 'border-slate-600 bg-slate-700 text-white placeholder-slate-500'
-                        : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'
-                    }`}
-                    rows={4}
-                    disabled={loading}
-                  />
-                </div>
-
-                <div>
-                  <label className={`mb-2 block text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
-                    附件
-                  </label>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    accept={ACCEPTED_FILE_TYPES}
-                    onChange={handleFileInputChange}
-                    className="hidden"
-                    disabled={loading || uploading}
-                  />
-                  <div
-                    onClick={() => {
-                      if (!loading && !uploading) {
-                        fileInputRef.current?.click();
-                      }
-                    }}
-                    onDrop={(event) => {
-                      void handleFileDrop(event);
-                    }}
-                    onDragOver={(event) => event.preventDefault()}
-                    className={`cursor-pointer rounded-lg border-2 border-dashed p-4 text-center transition-colors ${
-                      uploading
-                        ? 'cursor-not-allowed opacity-60'
-                        : isDark
-                          ? 'border-slate-600 text-slate-400 hover:border-slate-400'
-                          : 'border-gray-300 text-gray-500 hover:border-gray-400'
-                    }`}
-                  >
-                    {uploading ? (
-                      <div className="flex items-center justify-center gap-2">
-                        <div className={`h-4 w-4 animate-spin rounded-full border-b-2 ${isDark ? 'border-blue-400' : 'border-blue-600'}`} />
-                        <span className="text-sm">附件上传中...</span>
-                      </div>
-                    ) : (
-                      <>
-                        <svg className="mx-auto mb-2 h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={1.5}
-                            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                          />
-                        </svg>
-                        <p className="text-sm">点击或拖拽上传图片、PDF、DOCX、PPTX、TXT、MD</p>
-                        <p className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-gray-400'}`}>
-                          单个文件最大 10MB。图片不会被静默忽略，模型不支持视觉时会明确报错。
-                        </p>
-                      </>
-                    )}
+      <div
+        className="hidden h-full transition-[grid-template-columns] duration-300 ease-out lg:grid"
+        style={{ gridTemplateColumns: `${desktopSidebarWidth}px minmax(0, 1fr)` }}
+      >
+        <aside
+          className={`min-w-0 overflow-hidden transition-all duration-300 ease-out ${
+            desktopSidebarCollapsed ? 'pointer-events-none opacity-0' : 'opacity-100'
+          }`}
+          aria-hidden={desktopSidebarCollapsed}
+        >
+          <div className={`flex h-full min-h-0 flex-col border-r ${sidebarSurface}`}>
+            <div className="px-4 pb-3 pt-4">
+              <div className="flex min-w-0 items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <BrandMark isDark={isDark} className="h-10 w-10" />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">Agent 助手</div>
+                    <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>历史会话</div>
                   </div>
-
-                  {attachments.length > 0 ? (
-                    <div className="mt-3 space-y-3">
-                      {attachments.map((attachment, index) => {
-                        const preview = getAttachmentPreview(attachment);
-                        const isImage = isImageAttachment(attachment);
-                        return (
-                          <div
-                            key={`${attachment.file_path || attachment.file_name || attachment.name}-${index}`}
-                            className={`rounded-lg border p-3 ${
-                              isDark ? 'border-slate-700 bg-slate-700/30' : 'border-gray-200 bg-gray-50'
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className={`truncate text-sm font-medium ${isDark ? 'text-slate-100' : 'text-gray-800'}`}>
-                                  {attachment.file_name || attachment.name}
-                                </div>
-                                <div className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
-                                  {isImage ? '图片附件' : '文档附件'}
-                                  {attachment.mime_type ? ` · ${attachment.mime_type}` : ''}
-                                  {!isImage && attachment.text_length
-                                    ? ` · 已提取 ${Number(attachment.text_length).toLocaleString()} 字`
-                                    : ''}
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveAttachment(index)}
-                                disabled={loading}
-                                className={`rounded p-1 transition-colors ${
-                                  isDark ? 'text-slate-400 hover:text-red-400' : 'text-gray-400 hover:text-red-500'
-                                }`}
-                                aria-label="删除附件"
-                              >
-                                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
-                            </div>
-                            {isImage && preview ? (
-                              <div className="mt-3 overflow-hidden rounded-lg border border-black/5">
-                                <img src={preview} alt={attachment.file_name || attachment.name} className="max-h-56 w-full object-contain bg-black/5" />
-                              </div>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-
-                <div>
-                  <label className={`mb-2 block text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
-                    执行模式
-                  </label>
-                  <select
-                    value={mode}
-                    onChange={(event) => setMode(event.target.value)}
-                    className={`w-full rounded-lg border px-3 py-2 focus:outline-none ${
-                      isDark ? 'border-slate-600 bg-slate-700 text-white' : 'border-gray-300 bg-white text-gray-900'
-                    }`}
-                    disabled={loading}
-                  >
-                    <option value="react">ReAct</option>
-                    <option value="cot">Chain of Thought</option>
-                  </select>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading || !goal.trim()}
-                  className="w-full rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {loading ? '执行中...' : '开始执行'}
-                </button>
-              </form>
-            </div>
-
-            <div className={cardClass}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>可用工具</h2>
-                  <p className={`mt-1 text-xs lg:hidden ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {tools.length ? `${tools.length} 个工具可用` : '暂无可用工具'}
-                  </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => toggleMobileSection('tools')}
-                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm lg:hidden ${
-                    isDark ? 'bg-slate-700 text-slate-200' : 'bg-gray-100 text-gray-700'
+                  onClick={() => setDesktopSidebarCollapsed(true)}
+                  className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition ${
+                    isDark
+                      ? 'text-slate-300 hover:bg-white/[0.06] hover:text-white'
+                      : 'text-slate-600 hover:bg-white hover:text-slate-900'
                   }`}
+                  aria-label="收起侧边栏"
+                  title="收起侧边栏"
                 >
-                  <span>{mobileSections.tools ? '收起' : '展开'}</span>
-                  <svg className={`h-4 w-4 transition-transform ${mobileSections.tools ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
+                  <SidebarToggleIcon collapsed={false} />
                 </button>
-              </div>
-              <div className={`${getMobileSectionClass('tools')} mt-4 space-y-2`}>
-                {tools.map((tool, index) => (
-                  <div
-                    key={`${tool.name}-${index}`}
-                    className={`rounded-lg border p-3 ${isDark ? 'border-slate-700 bg-slate-700/30' : 'border-gray-200 bg-gray-50'}`}
-                  >
-                    <div className={`text-sm font-medium ${isDark ? 'text-slate-200' : 'text-gray-800'}`}>{tool.name}</div>
-                    <div className={`mt-1 text-xs ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>{tool.description}</div>
-                    <div className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>分类: {tool.category}</div>
-                  </div>
-                ))}
               </div>
             </div>
 
-            <div className={cardClass}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>历史会话</h2>
-                  <p className={`mt-1 text-xs lg:hidden ${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {sessions.length ? `${sessions.length} 条最近记录` : '暂无历史记录'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => toggleMobileSection('history')}
-                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm lg:hidden ${
-                    isDark ? 'bg-slate-700 text-slate-200' : 'bg-gray-100 text-gray-700'
+            <div className="space-y-4 px-3">
+              <button
+                type="button"
+                onClick={handleNewChat}
+                className={`flex w-full items-center gap-2 rounded-[20px] border px-4 py-3 transition ${
+                  isDark
+                    ? 'border-white/10 bg-white/[0.08] text-slate-100 hover:bg-white/[0.12]'
+                    : 'border-slate-300 bg-slate-200 text-slate-800 hover:bg-slate-300'
+                }`}
+                title="新建对话"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                <span className="text-sm font-medium">新建对话</span>
+              </button>
+
+              <div className={`flex items-center rounded-2xl border px-3 ${panelSurface}`}>
+                <svg className={`h-4 w-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M10 18a8 8 0 100-16 8 8 0 000 16z" />
+                </svg>
+                <input
+                  value={historyQuery}
+                  onChange={(event) => setHistoryQuery(event.target.value)}
+                  placeholder="搜索会话"
+                  className={`h-11 w-full bg-transparent px-3 text-sm outline-none ${
+                    isDark ? 'text-white placeholder:text-slate-500' : 'text-slate-900 placeholder:text-slate-400'
                   }`}
-                >
-                  <span>{mobileSections.history ? '收起' : '展开'}</span>
-                  <svg className={`h-4 w-4 transition-transform ${mobileSections.history ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
+                />
               </div>
-              <div className={`${getMobileSectionClass('history')} mt-4 space-y-2`}>
-                {sessions.length === 0 ? (
-                  <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>暂无历史会话</p>
+            </div>
+
+            <div className={`mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-5 ${sidebarScrollbarClass}`}>
+              <div className={`mb-3 px-1 text-[11px] font-medium uppercase tracking-[0.18em] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                最近
+              </div>
+
+              <div className="space-y-2">
+                {filteredSessions.length === 0 ? (
+                  <div className={`rounded-2xl px-4 py-5 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    暂无会话记录
+                  </div>
                 ) : (
-                  sessions.map((session) => (
-                    <button
+                  filteredSessions.map((session) => (
+                    <SessionListItem
                       key={session.session_id}
+                      session={session}
+                      isDark={isDark}
+                      collapsed={false}
+                      isActive={Boolean(activeSessionId && session.session_id === activeSessionId)}
                       onClick={() => {
                         void handleLoadSession(session.session_id);
                       }}
-                      className={`w-full rounded-lg border p-3 text-left transition-colors ${
-                        isDark ? 'border-slate-700 hover:bg-slate-700/60' : 'border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className={`truncate text-sm font-medium ${isDark ? 'text-slate-200' : 'text-gray-800'}`}>
-                        {session.goal}
-                      </div>
-                      <div className="mt-1 flex items-center justify-between">
-                        <span
-                          className={`rounded px-2 py-0.5 text-xs ${
-                            session.status === 'completed'
-                              ? 'bg-green-100 text-green-800'
-                              : session.status === 'failed'
-                                ? 'bg-red-100 text-red-800'
-                                : session.status === 'interrupted'
-                                  ? 'bg-orange-100 text-orange-800'
-                                  : 'bg-yellow-100 text-yellow-800'
-                          }`}
-                        >
-                          {session.status}
-                        </span>
-                        <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
-                          {new Date(session.created_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </button>
+                    />
                   ))
                 )}
               </div>
             </div>
           </div>
+        </aside>
 
-          <div className="order-1 min-w-0 lg:order-2 lg:col-span-2">
-            <div className={cardClass}>
-              <h2 className={`mb-4 text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>执行过程</h2>
+        <main className="flex min-h-0 flex-col">
+          <header className="flex h-16 items-center justify-between px-6">
+            <div className="flex min-w-0 items-center gap-3">
+              {desktopSidebarCollapsed ? (
+                <button
+                  type="button"
+                  onClick={() => setDesktopSidebarCollapsed(false)}
+                  className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition ${
+                    isDark
+                      ? 'text-slate-300 hover:bg-white/[0.06] hover:text-white'
+                      : 'text-slate-600 hover:bg-white hover:text-slate-900'
+                  }`}
+                  aria-label="展开侧边栏"
+                  title="展开侧边栏"
+                >
+                  <SidebarToggleIcon collapsed />
+                </button>
+              ) : null}
 
-              {error ? (
-                <div className={`mb-4 rounded-lg border p-4 ${isDark ? 'border-red-700 bg-red-900/20' : 'border-red-200 bg-red-50'}`}>
-                  <div className="flex items-start">
-                    <svg className={`mr-3 mt-0.5 h-5 w-5 flex-shrink-0 ${isDark ? 'text-red-400' : 'text-red-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <div className="flex-1">
-                      <h3 className={`mb-1 text-sm font-semibold ${isDark ? 'text-red-400' : 'text-red-800'}`}>执行失败</h3>
-                      <p className={`text-sm ${isDark ? 'text-red-300' : 'text-red-700'}`}>{error}</p>
-                      {streamRecovery?.recoverable ? (
-                        <button onClick={() => void handleResumeSession()} className="mt-3 text-xs text-red-500 underline hover:text-red-400">
-                          重新加载会话
-                        </button>
-                      ) : null}
+              <div className="min-w-0">
+                {hasConversation ? (
+                  <>
+                    <div className={`truncate text-sm font-semibold sm:text-base ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      {currentSession?.title || 'Agent 助手'}
                     </div>
+                    <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>多轮对话进行中</div>
+                  </>
+                ) : (
+                  <div className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                    Agent 助手
                   </div>
-                </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {currentSession?.status ? (
+                <span className={`hidden rounded-full px-3 py-1 text-xs sm:inline-flex ${getStatusTone(currentSession.status, isDark)}`}>
+                  {statusLabelMap[currentSession.status] || currentSession.status}
+                </span>
               ) : null}
+              <button
+                type="button"
+                onClick={handleNewChat}
+                className={`inline-flex h-10 items-center rounded-full px-4 text-sm ${
+                  isDark
+                    ? 'bg-white/[0.06] text-slate-100 hover:bg-white/[0.1]'
+                    : 'bg-white text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                新对话
+              </button>
+            </div>
+          </header>
 
-              {loading ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="text-center">
-                    <div className={`mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 ${isDark ? 'border-blue-400' : 'border-blue-600'}`} />
-                    <p className={`${isDark ? 'text-slate-400' : 'text-gray-600'}`}>智能助手正在思考和执行...</p>
-                  </div>
-                </div>
+          {error ? (
+            <div className={`mx-auto mb-4 w-full max-w-[820px] rounded-lg px-4 py-3 text-sm ${
+              isDark ? 'bg-rose-500/10 text-rose-200' : 'bg-rose-50 text-rose-700'
+            }`}>
+              <div className="font-medium">当前任务执行失败</div>
+              <div className="mt-1 leading-7">{error}</div>
+              {streamRecovery?.recoverable ? (
+                <button
+                  type="button"
+                  onClick={() => void handleResumeSession()}
+                  className="mt-2 text-xs font-medium underline"
+                >
+                  重新加载该会话
+                </button>
               ) : null}
+            </div>
+          ) : null}
 
-              {!loading && !currentSession && !error ? (
-                <div className={`py-12 text-center ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
-                  <p>输入任务目标并点击开始执行。</p>
-                  <p className="mt-2 text-sm">也可以从左侧打开历史会话继续查看。</p>
-                </div>
-              ) : null}
-
-              {currentSession ? (
-                <div>
-                  <div className={`mb-6 border-b pb-4 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <h3 className={`break-words font-semibold ${isDark ? 'text-white' : 'text-gray-800'}`}>{currentSession.goal}</h3>
-                        <p className={`mt-1 text-sm ${isDark ? 'text-slate-400' : 'text-gray-600'}`}>
-                          模式: {currentSession.session_type} | 状态: {currentSession.status}
-                        </p>
-                      </div>
-                      <span
-                        className={`shrink-0 rounded px-3 py-1 text-sm ${
-                          currentSession.status === 'completed'
-                            ? 'bg-green-100 text-green-800'
-                            : currentSession.status === 'failed'
-                              ? 'bg-red-100 text-red-800'
-                              : currentSession.status === 'interrupted'
-                                ? 'bg-orange-100 text-orange-800'
-                                : 'bg-yellow-100 text-yellow-800'
-                        }`}
-                      >
-                        {currentSession.status}
-                      </span>
-                    </div>
-                  </div>
-
+          {hasConversation ? (
+            <div className="relative min-h-0 flex-1">
+              <div ref={messageListRef} className={`h-full overflow-y-auto ${isDark ? 'scrollbar-qw-dark' : 'scrollbar-qw-light'}`}>
+                <div className="mx-auto w-full max-w-[820px] px-6 pb-[220px] pt-3">
                   <AgentStepViewer
-                    steps={currentSession.steps}
-                    toolCalls={currentSession.tool_calls}
+                    timeline={currentSession?.timeline || []}
                     isDark={isDark}
+                    loading={loading}
+                    onToggleThinking={handleToggleThinking}
                   />
                 </div>
-              ) : null}
+              </div>
+
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-6 pb-5">
+                <div className="mx-auto w-full max-w-[820px]">
+                  <div className="pointer-events-auto mb-3 flex items-center justify-end px-1">
+                    <ModeSwitch mode={mode} setMode={setMode} isDark={isDark} disabled={loading} />
+                  </div>
+
+                  {attachments.filter((a) => a.file_type === 'document' && a.text_preview).length > 0 && (
+                    <div
+                      className={`pointer-events-auto mx-auto mb-3 w-full max-w-[820px] rounded-lg border p-3 ${
+                        isDark ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-slate-50'
+                      }`}
+                    >
+                      {attachments
+                        .filter((a) => a.file_type === 'document' && a.text_preview)
+                        .map((att) => {
+                          const key = buildAttachmentIdentity(att);
+                          const isExpanded = expandedAttachments[key];
+                          return (
+                            <div key={key} className="text-xs">
+                              <div className="flex items-center justify-between">
+                                <span className={`truncate font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                                  {att.file_name} ({att.text_length || 0} 字符已解析)
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleAttachmentPreview(key)}
+                                  className="ml-2 shrink-0 text-sky-500 hover:text-sky-400"
+                                >
+                                  {isExpanded ? '收起' : '展开预览'}
+                                </button>
+                              </div>
+                              {isExpanded && (
+                                <div
+                                  className={`mt-2 max-h-40 overflow-y-auto rounded border p-2 text-xs leading-relaxed whitespace-pre-wrap ${
+                                    isDark
+                                      ? 'border-white/10 bg-white/[0.06] text-slate-300'
+                                      : 'border-slate-200 bg-white text-slate-600'
+                                  }`}
+                                >
+                                  {att.text_preview}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+
+                  <div
+                    ref={senderWrapperRef}
+                    onPaste={(event) => { void handleComposerPaste(event); }}
+                    onDrop={(event) => { void handleFileDrop(event); }}
+                    onDragEnter={handleComposerDragEnter}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      if (!loading && !uploading) setIsComposerDragActive(true);
+                    }}
+                    onDragLeave={handleComposerDragLeave}
+                    className={`pointer-events-auto overflow-hidden rounded-[24px] border backdrop-blur-2xl transition ${
+                      isComposerDragActive
+                        ? isDark
+                          ? 'border-cyan-400/60 bg-cyan-400/10 shadow-[0_0_0_3px_rgba(34,211,238,0.16)]'
+                          : 'border-cyan-400 bg-cyan-50 shadow-[0_0_0_3px_rgba(34,211,238,0.16)]'
+                        : isDark
+                          ? 'border-white/10 bg-[#0f1724]/92 shadow-[0_18px_50px_rgba(2,6,23,0.42)]'
+                          : 'border-slate-200/90 bg-white/95 shadow-[0_14px_44px_rgba(15,23,42,0.10)]'
+                    }`}
+                  >
+                    <ChatSender
+                      className="agent-chat-sender"
+                      value={draftMessage}
+                      placeholder="给 Agent 发送消息"
+                      loading={loading || uploading}
+                      actions={(presets) => presets.filter((item) => item.name !== 'attachment')}
+                      autosize={{ minRows: 3, maxRows: 8 }}
+                      readyToSend={(value) => Boolean(String(value || '').trim())}
+                      attachmentsProps={{
+                        items: senderAttachments,
+                        overflow: 'scrollX',
+                        removable: true,
+                      }}
+                      onChange={(event) => setDraftMessage(event.detail || '')}
+                      onSend={() => {
+                        void submitCurrentMessage();
+                      }}
+                      onStop={handleStopStream}
+                      onFileRemove={handleSenderFileRemove}
+                    >
+                      <SenderAttachmentTrigger
+                        isDark={isDark}
+                        active={attachmentActionActive}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          triggerAttachmentPicker();
+                        }}
+                      />
+                    </ChatSender>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-12">
+              <div className="w-full max-w-[900px]">
+                <div className="mb-8 text-center">
+                  <h1 className={`text-3xl font-semibold tracking-tight sm:text-4xl ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                    今天想让 Agent 帮你做什么？
+                  </h1>
+                  <p className={`mx-auto mt-4 max-w-2xl text-sm leading-7 sm:text-base ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    支持文本、图片、文件、多轮追问、思考过程和工具调用，都会留在同一条会话里。
+                  </p>
+                </div>
+
+                <div className="mx-auto max-w-[820px]">
+                  <div className="mb-3 flex items-center justify-end">
+                    <ModeSwitch mode={mode} setMode={setMode} isDark={isDark} disabled={loading} />
+                  </div>
+
+                  <div
+                    ref={senderWrapperRef}
+                    onPaste={(event) => { void handleComposerPaste(event); }}
+                    onDrop={(event) => { void handleFileDrop(event); }}
+                    onDragEnter={handleComposerDragEnter}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      if (!loading && !uploading) setIsComposerDragActive(true);
+                    }}
+                    onDragLeave={handleComposerDragLeave}
+                    className={`overflow-hidden rounded-[24px] border transition ${
+                      isComposerDragActive
+                        ? isDark
+                          ? 'border-cyan-400/60 bg-cyan-400/10 shadow-[0_0_0_3px_rgba(34,211,238,0.16)]'
+                          : 'border-cyan-400 bg-cyan-50 shadow-[0_0_0_3px_rgba(34,211,238,0.16)]'
+                        : panelSurface
+                    }`}
+                  >
+                    <ChatSender
+                      className="agent-chat-sender"
+                      value={draftMessage}
+                      placeholder="给 Agent 发送消息"
+                      loading={loading || uploading}
+                      actions={(presets) => presets.filter((item) => item.name !== 'attachment')}
+                      autosize={{ minRows: 4, maxRows: 8 }}
+                      readyToSend={(value) => Boolean(String(value || '').trim())}
+                      attachmentsProps={{
+                        items: senderAttachments,
+                        overflow: 'scrollX',
+                        removable: true,
+                      }}
+                      onChange={(event) => setDraftMessage(event.detail || '')}
+                      onSend={() => {
+                        void submitCurrentMessage();
+                      }}
+                      onStop={handleStopStream}
+                      onFileRemove={handleSenderFileRemove}
+                    >
+                      <SenderAttachmentTrigger
+                        isDark={isDark}
+                        active={attachmentActionActive}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          triggerAttachmentPicker();
+                        }}
+                      />
+                    </ChatSender>
+                  </div>
+                </div>
+
+                <div className="mx-auto mt-5 flex max-w-[820px] flex-wrap justify-center gap-2.5">
+                  {SUGGESTED_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => setDraftMessage(prompt)}
+                      className={`rounded-lg px-3.5 py-2 text-sm transition ${
+                        isDark
+                          ? 'bg-white/[0.05] text-slate-200 hover:bg-white/[0.09]'
+                          : 'bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 hover:text-slate-900'
+                      }`}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showScrollToBottom && hasConversation ? (
+            <button
+              type="button"
+              onClick={() => scrollToBottom('smooth')}
+              className={`fixed bottom-40 right-6 z-30 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white shadow-lg ${
+                isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-900 hover:bg-slate-700'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+              </svg>
+              <span>回到底部</span>
+            </button>
+          ) : null}
+        </main>
+      </div>
+
+      <div className="flex h-full flex-col lg:hidden">
+        <div className={`fixed inset-y-14 left-0 z-50 w-[286px] border-r transition-transform duration-300 ${sidebarSurface} ${
+          mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}>
+          <div className="flex items-center justify-between px-4 pb-3 pt-4">
+            <div className="flex items-center gap-3">
+              <BrandMark isDark={isDark} className="h-10 w-10" />
+              <div>
+                <div className="text-sm font-semibold">Agent 助手</div>
+                <div className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>历史会话</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMobileSidebarOpen(false)}
+              className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${
+                isDark ? 'text-slate-300 hover:bg-white/[0.06]' : 'text-slate-500 hover:bg-white'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="space-y-4 px-3">
+            <button
+              type="button"
+              onClick={handleNewChat}
+              className={`flex w-full items-center justify-center gap-2 rounded-[20px] border px-4 py-3 transition ${
+                isDark
+                  ? 'border-white/10 bg-white/[0.08] text-slate-100 hover:bg-white/[0.12]'
+                  : 'border-slate-300 bg-slate-200 text-slate-800 hover:bg-slate-300'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              <span className="text-sm font-medium">新建对话</span>
+            </button>
+
+            <div className={`flex items-center rounded-2xl border px-3 ${panelSurface}`}>
+              <svg className={`h-4 w-4 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M10 18a8 8 0 100-16 8 8 0 000 16z" />
+              </svg>
+              <input
+                value={historyQuery}
+                onChange={(event) => setHistoryQuery(event.target.value)}
+                placeholder="搜索会话"
+                className={`h-11 w-full bg-transparent px-3 text-sm outline-none ${
+                  isDark ? 'text-white placeholder:text-slate-500' : 'text-slate-900 placeholder:text-slate-400'
+                }`}
+              />
+            </div>
+          </div>
+
+          <div className={`mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-5 ${sidebarScrollbarClass}`}>
+            <div className="space-y-2">
+              {filteredSessions.length === 0 ? (
+                <div className={`rounded-2xl px-4 py-5 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  暂无会话记录
+                </div>
+              ) : (
+                filteredSessions.map((session) => (
+                  <SessionListItem
+                    key={session.session_id}
+                    session={session}
+                    isDark={isDark}
+                    collapsed={false}
+                    isActive={Boolean(activeSessionId && session.session_id === activeSessionId)}
+                    onClick={() => {
+                      void handleLoadSession(session.session_id);
+                    }}
+                  />
+                ))
+              )}
             </div>
           </div>
         </div>
-      </div>
 
-      {showScrollToBottom && currentSession ? (
-        <button
-          onClick={() => scrollToBottom('smooth')}
-          className={`fixed right-4 z-50 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white shadow-lg transition-all hover:scale-105 sm:right-6 ${
-            isDark ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-500 hover:bg-blue-600'
-          }`}
-          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 1rem)' }}
-          aria-label="回到底部"
-          title="回到底部"
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-          </svg>
-          <span>回到底部</span>
-        </button>
-      ) : null}
+        {mobileSidebarOpen ? (
+          <button
+            type="button"
+            aria-label="关闭历史侧栏"
+            className="fixed inset-0 z-40 bg-slate-950/45"
+            onClick={() => setMobileSidebarOpen(false)}
+          />
+        ) : null}
+
+        <header className="flex h-16 items-center justify-between px-4">
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen(true)}
+            className={`inline-flex h-10 w-10 items-center justify-center rounded-xl ${
+              isDark ? 'text-white hover:bg-white/[0.06]' : 'text-slate-700 hover:bg-white'
+            }`}
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleNewChat}
+            className={`inline-flex h-10 items-center rounded-full px-4 text-sm ${
+              isDark ? 'bg-white/[0.06] text-slate-100 hover:bg-white/[0.1]' : 'bg-white text-slate-700 shadow-sm ring-1 ring-slate-200'
+            }`}
+          >
+            新对话
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1">
+          {hasConversation ? (
+            <div className="relative h-full">
+              <div ref={messageListRef} className={`h-full overflow-y-auto ${isDark ? 'scrollbar-qw-dark' : 'scrollbar-qw-light'}`}>
+                <div className="mx-auto w-full max-w-[820px] px-4 pb-[210px] pt-3">
+                  <AgentStepViewer
+                    timeline={currentSession?.timeline || []}
+                    isDark={isDark}
+                    loading={loading}
+                    onToggleThinking={handleToggleThinking}
+                  />
+                </div>
+              </div>
+
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-4 pb-4">
+                <div>
+                  <div className="pointer-events-auto mb-3 flex items-center justify-end px-1">
+                    <ModeSwitch mode={mode} setMode={setMode} isDark={isDark} disabled={loading} />
+                  </div>
+                  <div
+                    ref={senderWrapperRef}
+                    onPaste={(event) => { void handleComposerPaste(event); }}
+                    onDrop={(event) => { void handleFileDrop(event); }}
+                    onDragEnter={handleComposerDragEnter}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      if (!loading && !uploading) setIsComposerDragActive(true);
+                    }}
+                    onDragLeave={handleComposerDragLeave}
+                    className={`pointer-events-auto overflow-hidden rounded-[22px] border backdrop-blur-2xl transition ${
+                      isComposerDragActive
+                        ? isDark
+                          ? 'border-cyan-400/60 bg-cyan-400/10 shadow-[0_0_0_3px_rgba(34,211,238,0.16)]'
+                          : 'border-cyan-400 bg-cyan-50 shadow-[0_0_0_3px_rgba(34,211,238,0.16)]'
+                        : isDark
+                          ? 'border-white/10 bg-[#0f1724]/92 shadow-[0_16px_44px_rgba(2,6,23,0.40)]'
+                          : 'border-slate-200/90 bg-white/95 shadow-[0_12px_36px_rgba(15,23,42,0.10)]'
+                    }`}
+                  >
+                    <ChatSender
+                      className="agent-chat-sender"
+                      value={draftMessage}
+                      placeholder="给 Agent 发送消息"
+                      loading={loading || uploading}
+                      actions={(presets) => presets.filter((item) => item.name !== 'attachment')}
+                      autosize={{ minRows: 3, maxRows: 8 }}
+                      readyToSend={(value) => Boolean(String(value || '').trim())}
+                      attachmentsProps={{
+                        items: senderAttachments,
+                        overflow: 'scrollX',
+                        removable: true,
+                      }}
+                      onChange={(event) => setDraftMessage(event.detail || '')}
+                      onSend={() => {
+                        void submitCurrentMessage();
+                      }}
+                      onStop={handleStopStream}
+                      onFileRemove={handleSenderFileRemove}
+                    >
+                      <SenderAttachmentTrigger
+                        isDark={isDark}
+                        active={attachmentActionActive}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          triggerAttachmentPicker();
+                        }}
+                      />
+                    </ChatSender>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center px-4 pb-10">
+              <div className="w-full max-w-[820px]">
+                <div className="mb-8 text-center">
+                  <h1 className={`text-3xl font-semibold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                    今天想让 Agent 帮你做什么？
+                  </h1>
+                </div>
+                <div className="mb-3 flex items-center justify-end">
+                  <ModeSwitch mode={mode} setMode={setMode} isDark={isDark} disabled={loading} />
+                </div>
+                <div
+                  ref={senderWrapperRef}
+                  onPaste={(event) => { void handleComposerPaste(event); }}
+                  onDrop={(event) => { void handleFileDrop(event); }}
+                  onDragEnter={handleComposerDragEnter}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    if (!loading && !uploading) setIsComposerDragActive(true);
+                  }}
+                  onDragLeave={handleComposerDragLeave}
+                  className={`overflow-hidden rounded-[22px] border transition ${
+                    isComposerDragActive
+                      ? isDark
+                        ? 'border-cyan-400/60 bg-cyan-400/10 shadow-[0_0_0_3px_rgba(34,211,238,0.16)]'
+                        : 'border-cyan-400 bg-cyan-50 shadow-[0_0_0_3px_rgba(34,211,238,0.16)]'
+                      : panelSurface
+                  }`}
+                >
+                  <ChatSender
+                    className="agent-chat-sender"
+                    value={draftMessage}
+                    placeholder="给 Agent 发送消息"
+                    loading={loading || uploading}
+                    actions={(presets) => presets.filter((item) => item.name !== 'attachment')}
+                    autosize={{ minRows: 4, maxRows: 8 }}
+                    readyToSend={(value) => Boolean(String(value || '').trim())}
+                    attachmentsProps={{
+                      items: senderAttachments,
+                      overflow: 'scrollX',
+                      removable: true,
+                    }}
+                    onChange={(event) => setDraftMessage(event.detail || '')}
+                    onSend={() => {
+                      void submitCurrentMessage();
+                    }}
+                    onStop={handleStopStream}
+                    onFileRemove={handleSenderFileRemove}
+                  >
+                    <SenderAttachmentTrigger
+                      isDark={isDark}
+                      active={attachmentActionActive}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        triggerAttachmentPicker();
+                      }}
+                    />
+                  </ChatSender>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

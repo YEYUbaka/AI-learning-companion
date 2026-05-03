@@ -5,7 +5,7 @@
 import os
 import zipfile
 import chardet
-from typing import Optional, List
+from typing import List
 from xml.etree import ElementTree as ET
 
 from core.logger import logger
@@ -13,6 +13,7 @@ from core.logger import logger
 # 最大提取文本长度（字符数）
 MAX_TEXT_LENGTH = 15000
 TRUNCATE_LENGTH = 12000
+DOC_FORMAT_ERROR = "暂不支持 .doc 格式上传，请将文件另存为 .docx 后重新上传。"
 
 
 def parse_file(file_path: str) -> tuple[str, int]:
@@ -42,6 +43,8 @@ def parse_file(file_path: str) -> tuple[str, int]:
         text = parse_text_file(file_path)
     elif file_ext == '.docx':
         text = parse_docx(file_path)
+    elif file_ext == '.doc':
+        raise ValueError(DOC_FORMAT_ERROR)
     elif file_ext == '.pptx':
         text = parse_pptx(file_path)
     else:

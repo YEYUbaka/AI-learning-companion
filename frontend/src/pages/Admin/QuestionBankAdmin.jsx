@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import api from '../../api/apiClient';
 import AdminLayout from '../../components/AdminLayout';
 import {
   createQuestionBankItem,
@@ -147,6 +148,58 @@ function normalizeJudgeAnswer(answer) {
   return '正确';
 }
 
+function getQuestionBankAssetUrl(asset) {
+  if (!asset) {
+    return null;
+  }
+
+  if (typeof asset === 'string') {
+    return asset;
+  }
+
+  const rawValue =
+    asset.preview_url ||
+    asset.image_url ||
+    asset.file_url ||
+    asset.url ||
+    asset.file_path;
+
+  if (!rawValue) {
+    return null;
+  }
+
+  if (/^(https?:|data:|blob:)/i.test(rawValue)) {
+    return rawValue;
+  }
+
+  const normalizedPath = rawValue.startsWith('uploads/') ? `/${rawValue}` : rawValue;
+
+  if (normalizedPath.startsWith('/')) {
+    const apiBaseUrl = String(api.defaults.baseURL || '').replace(/\/$/, '');
+    return apiBaseUrl ? `${apiBaseUrl}${normalizedPath}` : normalizedPath;
+  }
+
+  return normalizedPath;
+}
+
+function normalizeQuestionImages(images) {
+  return (Array.isArray(images) ? images : [])
+    .map((image, index) => {
+      const url = getQuestionBankAssetUrl(image);
+      if (!url) {
+        return null;
+      }
+
+      return {
+        id: image?.id ?? `question-image-${index}`,
+        key: `${image?.id || image?.file_path || image?.file_name || index}-${index}`,
+        name: image?.file_name || image?.name || `题图 ${index + 1}`,
+        url,
+      };
+    })
+    .filter(Boolean);
+}
+
 function QuestionBankAdmin() {
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
@@ -160,6 +213,9 @@ function QuestionBankAdmin() {
   const [keyword, setKeyword] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [error, setError] = useState('');
+  const [previewAsset, setPreviewAsset] = useState(null);
+  const [brokenAssetKeys, setBrokenAssetKeys] = useState({});
+  const [qbConstants, setQbConstants] = useState({ grade_levels: [], subjects: [] });
   const isChoiceType = form.question_type === 'choice';
   const isMultipleChoiceType = form.question_type === 'multiple_choice';
   const isJudgeType = form.question_type === 'judge';
@@ -216,14 +272,42 @@ function QuestionBankAdmin() {
     }
   };
 
+  const loadConstants = async () => {
+    try {
+      const response = await api.get('/api/v1/question-bank/constants');
+      if (response.data?.success) {
+        setQbConstants({
+          grade_levels: response.data.grade_levels || [],
+          subjects: response.data.subjects || [],
+        });
+      }
+    } catch (err) {
+      logger.error('Failed to load question bank constants', err);
+    }
+  };
+
   useEffect(() => {
     void loadItems();
+    void loadConstants();
   }, []);
 
   const resetForm = () => {
     setForm(createEmptyForm());
     setEditingItemId(null);
     setError('');
+  };
+
+  const markAssetBroken = (assetKey) => {
+    setBrokenAssetKeys((current) => {
+      if (current[assetKey]) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [assetKey]: true,
+      };
+    });
   };
 
   const buildPayload = () => {
@@ -499,6 +583,7 @@ function QuestionBankAdmin() {
             </div>
           </div>
 
+          {false && (
           <div
             className={`mt-4 rounded-lg border px-4 py-3 text-sm ${
               isDark
@@ -509,6 +594,7 @@ function QuestionBankAdmin() {
             录题字段已中文化，支持录入题目、学段、科目、难度、考点、答案、解析和题目图片。知识库文档仍是材料来源，不会直接当作题目。
           </div>
 
+          )}
           {statusMessage ? (
             <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-500">
               {statusMessage}
@@ -542,18 +628,26 @@ function QuestionBankAdmin() {
                 />
 
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <input
+                  <select
                     className={palette.input}
                     value={form.grade_level}
                     onChange={(e) => setForm({ ...form, grade_level: e.target.value })}
-                    placeholder="学段，例如：高一 / 初二"
-                  />
-                  <input
+                  >
+                    <option value="">选择学段</option>
+                    {qbConstants.grade_levels.map((level) => (
+                      <option key={level} value={level}>{level}</option>
+                    ))}
+                  </select>
+                  <select
                     className={palette.input}
                     value={form.subject}
                     onChange={(e) => setForm({ ...form, subject: e.target.value })}
-                    placeholder="科目，例如：数学 / 物理"
-                  />
+                  >
+                    <option value="">选择科目</option>
+                    {qbConstants.subjects.map((subj) => (
+                      <option key={subj} value={subj}>{subj}</option>
+                    ))}
+                  </select>
                   <select
                     className={palette.input}
                     value={form.question_type}
@@ -790,6 +884,7 @@ function QuestionBankAdmin() {
                     metadata.created_by_name ||
                     (item.created_by ? `管理员 #${item.created_by}` : '未知');
                   const lastEditedByName = getDisplayName(metadata, item.created_by);
+                  const questionImages = normalizeQuestionImages(item.question_images);
 
                   return (
                     <article
@@ -838,16 +933,52 @@ function QuestionBankAdmin() {
                             <span>最近更新时间：{formatDateTime(item.updated_at)}</span>
                           </div>
 
-                          {item.question_images?.length ? (
+                          {questionImages.length ? (
                             <div className="mt-3 flex flex-wrap gap-3">
-                              {item.question_images.map((image) => (
-                                <img
-                                  key={image.id}
-                                  src={image.preview_url}
-                                  alt={image.file_name}
-                                  className="h-20 w-20 rounded-lg object-cover"
-                                />
-                              ))}
+                              {questionImages.map((image) => {
+                                const isBroken = Boolean(brokenAssetKeys[image.key]);
+
+                                return (
+                                  <button
+                                    key={image.key}
+                                    type="button"
+                                    className={`group relative h-24 w-24 overflow-hidden rounded-xl border text-left transition ${
+                                      isDark
+                                        ? 'border-slate-800 bg-slate-950/80 hover:border-slate-600'
+                                        : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                                    }`}
+                                    onClick={() => {
+                                      if (!isBroken) {
+                                        setPreviewAsset(image);
+                                      }
+                                    }}
+                                    title={isBroken ? '题图加载失败' : `预览 ${image.name}`}
+                                  >
+                                    {isBroken ? (
+                                      <div
+                                        className={`flex h-full w-full items-center justify-center px-2 text-center text-xs ${
+                                          isDark ? 'text-slate-400' : 'text-slate-500'
+                                        }`}
+                                      >
+                                        题图加载失败
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <img
+                                          src={image.url}
+                                          alt={image.name}
+                                          className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.03]"
+                                          loading="lazy"
+                                          onError={() => markAssetBroken(image.key)}
+                                        />
+                                        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/65 via-black/20 to-transparent px-2 py-1 text-[11px] text-white opacity-0 transition group-hover:opacity-100">
+                                          点击预览
+                                        </div>
+                                      </>
+                                    )}
+                                  </button>
+                                );
+                              })}
                             </div>
                           ) : null}
                         </div>
@@ -878,6 +1009,46 @@ function QuestionBankAdmin() {
           </div>
         </div>
       </div>
+      {previewAsset ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/82 px-4 py-6"
+          onClick={() => setPreviewAsset(null)}
+        >
+          <div
+            className={`relative max-h-full w-full max-w-5xl overflow-hidden rounded-2xl border shadow-2xl ${
+              isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'
+            }`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div
+              className={`flex items-center justify-between gap-4 border-b px-4 py-3 ${
+                isDark ? 'border-slate-800' : 'border-slate-200'
+              }`}
+            >
+              <div className="min-w-0">
+                <div className={`truncate text-sm font-semibold ${palette.title}`}>{previewAsset.name}</div>
+                <div className={`mt-1 text-xs ${palette.text}`}>Click outside to close preview</div>
+              </div>
+              <button
+                type="button"
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                  isDark ? 'bg-slate-900 text-slate-200 hover:bg-slate-800' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+                onClick={() => setPreviewAsset(null)}
+              >
+                关闭
+              </button>
+            </div>
+            <div className={`max-h-[80vh] overflow-auto p-4 ${isDark ? 'bg-slate-950' : 'bg-slate-50/60'}`}>
+              <img
+                src={previewAsset.url}
+                alt={previewAsset.name}
+                className="mx-auto max-h-[72vh] w-auto max-w-full rounded-xl object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AdminLayout>
   );
 }

@@ -88,7 +88,7 @@ class ProviderTemplateItem(BaseModel):
     available_models: List[str]
     requires_extra_headers: bool
     extra_header_keys: List[str]
-    capabilities: Dict[str, bool]
+    capabilities: Dict[str, Any]
 
 
 # 拉取提供商模型列表

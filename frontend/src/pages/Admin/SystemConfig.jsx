@@ -18,6 +18,7 @@ const SystemConfig = () => {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState(null);
 
   useEffect(() => {
     fetchConfig();
@@ -67,12 +68,13 @@ const SystemConfig = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setSaveMsg(null);
     setSaving(true);
     try {
       await api.put('/api/v1/admin/system-config', config);
-      alert('配置保存成功');
+      setSaveMsg({ type: 'success', text: '配置保存成功' });
     } catch (error) {
-      alert('保存失败: ' + (error.response?.data?.detail || error.message));
+      setSaveMsg({ type: 'error', text: '保存失败: ' + (error.response?.data?.detail || error.message) });
     } finally {
       setSaving(false);
     }
@@ -161,6 +163,15 @@ const SystemConfig = () => {
               </select>
             </div>
 
+            {saveMsg && (
+              <div className={`mt-3 rounded-lg px-3 py-2 text-sm ${
+                saveMsg.type === 'success'
+                  ? (isDark ? 'bg-emerald-400/10 text-emerald-200' : 'bg-emerald-50 text-emerald-700')
+                  : (isDark ? 'bg-rose-400/10 text-rose-200' : 'bg-rose-50 text-rose-700')
+              }`}>
+                {saveMsg.text}
+              </div>
+            )}
             <div className={`pt-4 border-t ${palette.divider}`}>
               <button
                 type="submit"

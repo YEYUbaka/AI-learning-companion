@@ -296,7 +296,6 @@ function Quiz() {
     if (!topic.trim()) {
       const message = '测评知识点不能为空';
       setError(message);
-      window.alert(message);
       return;
     }
 

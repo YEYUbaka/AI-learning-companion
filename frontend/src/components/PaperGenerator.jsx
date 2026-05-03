@@ -594,7 +594,8 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         setShowSaveTemplateModal(false);
         setTemplateName('');
         setTemplateDescription('');
-        alert('模板保存成功');
+        setError('');
+        setStatusMessage('模板保存成功');
       } else {
         setError(response.data.message || '保存模板失败');
       }

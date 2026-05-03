@@ -4,13 +4,14 @@
 """
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
 from core.config import settings
+from core.rate_limiter import login_rate_limiter, register_rate_limiter
 from database import get_db
 from models.users import User
 
@@ -90,7 +91,8 @@ def get_user_by_email(db: Session, email: str):
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserRegister, db: Session = Depends(get_db)):
+async def register(user_data: UserRegister, request: Request, db: Session = Depends(get_db)):
+    await register_rate_limiter(request)
     """
     用户注册接口
     
@@ -139,7 +141,9 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), request: Request = None, db: Session = Depends(get_db)):
+    if request:
+        await login_rate_limiter(request)
     """
     用户登录接口
     
@@ -189,7 +193,8 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
 
 
 @router.post("/login-json", response_model=TokenResponse)
-async def login_json(login_data: UserLogin, db: Session = Depends(get_db)):
+async def login_json(login_data: UserLogin, request: Request, db: Session = Depends(get_db)):
+    await login_rate_limiter(request)
     """
     用户登录接口（JSON格式，方便前端调用）
     

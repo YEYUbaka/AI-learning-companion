@@ -139,6 +139,7 @@ const PromptEditor = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [successMsg, setSuccessMsg] = useState(null);
   const [isMobileLayout, setIsMobileLayout] = useState(getIsMobileLayout);
   const [mobilePanel, setMobilePanel] = useState('features');
   const [formData, setFormData] = useState({
@@ -358,23 +359,26 @@ const PromptEditor = () => {
       setFormData({ name: '', content: '', description: '', enabled: true });
       await fetchPrompts();
     } catch (err) {
-      alert('创建失败: ' + (err.response?.data?.detail || err.message));
+      setError('创建失败: ' + (err.response?.data?.detail || err.message));
     }
   };
 
   const handleEnableVersion = async (name, version) => {
+    setError(null);
+    setSuccessMsg(null);
     try {
       await api.post(`/api/v1/admin/prompts/${name}/enable/${version}`);
       await fetchVersions(name);
       await fetchPrompts();
-      alert('已启用该版本');
+      setSuccessMsg('已启用该版本');
     } catch (err) {
-      alert('操作失败: ' + (err.response?.data?.detail || err.message));
+      setError('操作失败: ' + (err.response?.data?.detail || err.message));
     }
   };
 
   const handleDelete = async (id) => {
     if (!confirm('确定要删除这个 Prompt 版本吗？')) return;
+    setError(null);
     try {
       await api.delete(`/api/v1/admin/prompts/${id}`);
       await fetchPrompts();
@@ -382,7 +386,7 @@ const PromptEditor = () => {
         await fetchVersions(selectedPromptName);
       }
     } catch (err) {
-      alert('删除失败: ' + (err.response?.data?.detail || err.message));
+      setError('删除失败: ' + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -390,6 +394,7 @@ const PromptEditor = () => {
     e.preventDefault();
     if (!selectedVersion) return;
 
+    setError(null);
     try {
       setSaving(true);
       await api.put(`/api/v1/admin/prompts/${selectedVersion.id}`, {
@@ -401,7 +406,7 @@ const PromptEditor = () => {
       await fetchPrompts();
       setIsEditing(false);
     } catch (err) {
-      alert('保存失败: ' + (err.response?.data?.detail || err.message));
+      setError('保存失败: ' + (err.response?.data?.detail || err.message));
     } finally {
       setSaving(false);
     }
@@ -421,6 +426,12 @@ const PromptEditor = () => {
       </div>
 
       <div className="space-y-5 p-4">
+        {successMsg && (
+          <div className={`rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-emerald-400/10 text-emerald-200' : 'bg-emerald-50 text-emerald-700'}`}>
+            {successMsg}
+            <button type="button" onClick={() => setSuccessMsg(null)} className="ml-3 text-xs underline">关闭</button>
+          </div>
+        )}
         {loading ? (
           <div className={`py-8 text-center ${palette.empty}`}>加载中...</div>
         ) : error ? (

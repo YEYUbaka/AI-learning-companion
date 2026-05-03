@@ -37,6 +37,16 @@ def test_planner_routes_paper_request_to_blueprint_then_generation():
     ]
 
 
+def test_planner_does_not_route_uploaded_paper_question_to_generation():
+    planner = AgentPlanner(ToolRegistry())
+    plan = planner.plan("请解答上传的试卷第 3 题，并讲清楚里面的公式")
+
+    tool_names = [item["tool_name"] for item in plan["tool_steps"]]
+
+    assert "build_paper_blueprint" not in tool_names
+    assert "generate_paper_questions" not in tool_names
+
+
 def test_planner_routes_java_learning_path_to_study_plan():
     planner = AgentPlanner(ToolRegistry())
     plan = planner.plan("帮我推荐一个能够达到面试程度的Java学习路径")

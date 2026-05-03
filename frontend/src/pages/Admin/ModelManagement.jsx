@@ -12,15 +12,19 @@ const DEFAULT_FORM = {
   base_url: '',
   priority: 0,
   enabled: true,
+  supports_vision: false,
   model_name: '',
   temperature: 0.7,
   max_tokens: DEFAULT_AI_MAX_TOKENS,
   top_p: 1.0,
   timeout: 60,
   extra_headers: {},
+  web_search_host: '',
+  workspace_name: '',
+  search_service_id: '',
 };
 
-const ADMIN_PROVIDER_ORDER = ['siliconflow', 'zhipu', 'moonshot', 'doubao', 'openrouter'];
+const ADMIN_PROVIDER_ORDER = ['siliconflow', 'zhipu', 'qwen', 'moonshot', 'doubao', 'openrouter'];
 
 const FALLBACK_PROVIDER_TEMPLATES = [
   {
@@ -37,6 +41,17 @@ const FALLBACK_PROVIDER_TEMPLATES = [
     ],
     requires_extra_headers: false,
     extra_header_keys: [],
+    capabilities: {
+      streaming: true,
+      tool_calling: true,
+      reasoning: true,
+      long_output: true,
+      supports_responses_api: false,
+      supports_vision: false,
+      supports_previous_response_id: false,
+      native_tools: [],
+      native_search_mode: 'none',
+    },
   },
   {
     key: 'zhipu',
@@ -47,6 +62,38 @@ const FALLBACK_PROVIDER_TEMPLATES = [
     available_models: ['glm-4.7-flash', 'glm-4-flash', 'glm-4-air', 'glm-4', 'glm-z1-flash'],
     requires_extra_headers: false,
     extra_header_keys: [],
+    capabilities: {
+      streaming: true,
+      tool_calling: true,
+      reasoning: true,
+      long_output: true,
+      supports_responses_api: false,
+      supports_vision: false,
+      supports_previous_response_id: false,
+      native_tools: [],
+      native_search_mode: 'none',
+    },
+  },
+  {
+    key: 'qwen',
+    display_name: '千问',
+    default_base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    default_model: 'qwen-turbo',
+    default_max_tokens: DEFAULT_AI_MAX_TOKENS,
+    available_models: ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-long'],
+    requires_extra_headers: false,
+    extra_header_keys: [],
+    capabilities: {
+      streaming: true,
+      tool_calling: true,
+      reasoning: true,
+      long_output: true,
+      supports_responses_api: false,
+      supports_vision: false,
+      supports_previous_response_id: false,
+      native_tools: [],
+      native_search_mode: 'qwen_chat_enable_search',
+    },
   },
   {
     key: 'moonshot',
@@ -57,6 +104,17 @@ const FALLBACK_PROVIDER_TEMPLATES = [
     available_models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
     requires_extra_headers: false,
     extra_header_keys: [],
+    capabilities: {
+      streaming: true,
+      tool_calling: false,
+      reasoning: true,
+      long_output: true,
+      supports_responses_api: false,
+      supports_vision: false,
+      supports_previous_response_id: false,
+      native_tools: [],
+      native_search_mode: 'none',
+    },
   },
   {
     key: 'doubao',
@@ -67,6 +125,17 @@ const FALLBACK_PROVIDER_TEMPLATES = [
     available_models: [],
     requires_extra_headers: false,
     extra_header_keys: [],
+    capabilities: {
+      streaming: true,
+      tool_calling: true,
+      reasoning: true,
+      long_output: true,
+      supports_responses_api: true,
+      supports_vision: false,
+      supports_previous_response_id: true,
+      native_tools: ['web_search', 'knowledge_search', 'image_process', 'mcp'],
+      native_search_mode: 'responses_builtin_tools',
+    },
   },
   {
     key: 'openrouter',
@@ -77,6 +146,17 @@ const FALLBACK_PROVIDER_TEMPLATES = [
     available_models: [],
     requires_extra_headers: true,
     extra_header_keys: ['HTTP-Referer', 'X-Title'],
+    capabilities: {
+      streaming: true,
+      tool_calling: true,
+      reasoning: true,
+      long_output: true,
+      supports_responses_api: false,
+      supports_vision: false,
+      supports_previous_response_id: false,
+      native_tools: [],
+      native_search_mode: 'none',
+    },
   },
 ];
 
@@ -96,6 +176,131 @@ const createDefaultForm = () => ({
   ...DEFAULT_FORM,
   extra_headers: { ...DEFAULT_FORM.extra_headers },
 });
+
+const getQwenOfficialSearchConfig = (params = {}) => ({
+  web_search_host:
+    params.web_search_host || params.search_service_host || params.opensearch_host || params.search_host || '',
+  workspace_name: params.workspace_name || '',
+  search_service_id: params.search_service_id || params.web_search_service_id || '',
+});
+
+const buildProviderSpecificParams = (formData) => {
+  if (formData.provider_name !== 'qwen') {
+    return {};
+  }
+
+  const nextParams = {};
+  const webSearchHost = String(formData.web_search_host || '').trim();
+  const workspaceName = String(formData.workspace_name || '').trim();
+  const searchServiceId = String(formData.search_service_id || '').trim();
+
+  if (webSearchHost) nextParams.web_search_host = webSearchHost;
+  if (workspaceName) nextParams.workspace_name = workspaceName;
+  if (searchServiceId) nextParams.search_service_id = searchServiceId;
+
+  return nextParams;
+};
+
+const inferQwenSupportsResponses = (modelName = '') => {
+  const lower = String(modelName || '').toLowerCase();
+  if (lower === 'qwen3-max') return true;
+  if (/^qwen3-max-\d{4}-\d{2}-\d{2}$/.test(lower)) return true;
+  return ['qwen3.6-plus', 'qwen3.6-flash', 'qwen3.5-plus', 'qwen3.5-flash'].some(prefix => lower.startsWith(prefix));
+};
+
+const inferDoubaoSupportsResponses = (modelName = '') => {
+  const value = String(modelName || '');
+  if (!value) return true;
+  if (value === 'doubao-1-5-pro-32k-character-250715') return false;
+  const match = value.match(/(\d{6})$/);
+  if (!match) return true;
+  return Number(match[1]) >= 250615;
+};
+
+const getProviderCapabilities = (template, modelName = '') => {
+  const base = { ...(template?.capabilities || {}) };
+  const providerKey = template?.key;
+
+  if (providerKey === 'qwen') {
+    const supportsResponses = inferQwenSupportsResponses(modelName);
+    base.supports_responses_api = supportsResponses;
+    if (supportsResponses) {
+      base.native_search_mode = 'responses_builtin_tools';
+      base.native_tools = ['web_search', 'web_extractor', 'code_interpreter'];
+    } else {
+      base.native_search_mode = 'qwen_chat_enable_search';
+      base.native_tools = [];
+    }
+  } else if (providerKey === 'doubao') {
+    const supportsResponses = inferDoubaoSupportsResponses(modelName);
+    base.supports_responses_api = supportsResponses;
+    if (!supportsResponses) {
+      base.native_search_mode = 'none';
+      base.native_tools = [];
+    }
+  }
+
+  return base;
+};
+
+const getNativeSearchSummary = (capabilities = {}) => {
+  const mode = capabilities.native_search_mode || 'none';
+  if (mode === 'qwen_chat_enable_search') {
+    return '联网搜索通过 Chat Completions 的 enable_search / search_options 启用，不走通用 built-in tools。';
+  }
+  if (mode === 'responses_builtin_tools') {
+    return '联网搜索通过 Responses API 内建工具启用，只适用于支持 Responses 的模型。';
+  }
+  return '当前不提供 provider 原生联网搜索，实时检索通常需要走本地工具链或其他显式能力。';
+};
+
+const getProviderCapabilityNotes = (template, modelName = '') => {
+  const capabilities = getProviderCapabilities(template, modelName);
+  const notes = [
+    capabilities.tool_calling ? '支持原生 function calling。' : '不强调原生 function calling。',
+    capabilities.supports_responses_api ? '支持 Responses API。' : '默认走 Chat Completions 接口。',
+    getNativeSearchSummary(capabilities),
+  ];
+
+  if (template?.key === 'qwen') {
+    notes.push('Qwen 只有部分新模型支持 Responses 内建 web_search / web_extractor / code_interpreter。');
+  } else if (template?.key === 'doubao') {
+    notes.push('火山方舟的 chat/completions 以函数调用为主，原生联网搜索应理解为 Responses 能力，不是通用 chat tool。');
+  }
+
+  return notes;
+};
+
+const getProviderCapabilityBadges = (template, modelName = '') => {
+  const capabilities = getProviderCapabilities(template, modelName);
+  const badges = [capabilities.tool_calling ? '函数调用' : '基础对话'];
+
+  if (capabilities.supports_responses_api) badges.push('Responses API');
+  if (capabilities.supports_vision) badges.push('视觉');
+
+  const mode = capabilities.native_search_mode || 'none';
+  if (mode === 'qwen_chat_enable_search') {
+    badges.push('联网搜索: enable_search');
+  } else if (mode === 'responses_builtin_tools') {
+    badges.push('联网搜索: Responses 内建工具');
+  } else {
+    badges.push('联网搜索: 无原生入口');
+  }
+
+  return badges;
+};
+
+const getProviderParamHints = (providerKey) => {
+  if (providerKey !== 'qwen') {
+    return [];
+  }
+
+  return [
+    '阿里官方联网搜索推荐填写 `web_search_host`、`workspace_name`、`search_service_id`。',
+    '其中 `web_search_host` 兼容后端别名：`search_service_host`、`opensearch_host`、`search_host`。',
+    '`workspace_name` 默认可留空走 `default`，`search_service_id` 默认可留空走 `ops-web-search-001`。',
+  ];
+};
 
 const Slider = ({ label, value, min, max, step, onChange, isDark }) => (
   <div className="flex items-center gap-3">
@@ -140,6 +345,7 @@ const ModelManagement = () => {
   const [testDetailModal, setTestDetailModal] = useState(null);
   const [isMobileLayout, setIsMobileLayout] = useState(getIsMobileLayout);
   const [mobileProviderPanel, setMobileProviderPanel] = useState('catalog');
+  const [toastMsg, setToastMsg] = useState(null);
   const abortControllers = useRef({});
 
   useEffect(() => {
@@ -221,14 +427,19 @@ const ModelManagement = () => {
   const handleProviderChange = (key) => {
     const template = templates.find(t => t.key === key);
     if (!template) return;
+    const capabilities = getProviderCapabilities(template, template.default_model);
 
     setFormData(prev => ({
       ...prev,
       provider_name: key,
       base_url: template.default_base_url,
       model_name: template.default_model,
+      supports_vision: Boolean(capabilities.supports_vision),
       max_tokens: template.default_max_tokens ?? DEFAULT_AI_MAX_TOKENS,
       extra_headers: template.extra_header_keys.reduce((acc, headerKey) => ({ ...acc, [headerKey]: '' }), {}),
+      web_search_host: '',
+      workspace_name: '',
+      search_service_id: '',
     }));
     setCustomModelInput(false);
     setFetchedModels([]);
@@ -236,7 +447,7 @@ const ModelManagement = () => {
 
   const handleFetchModelList = async () => {
     if (!formData.base_url || !formData.api_key) {
-      alert('请先填写 Base URL 和 API Key');
+      setToastMsg({ type: 'error', text: '请先填写 Base URL 和 API Key' });
       return;
     }
 
@@ -253,7 +464,7 @@ const ModelManagement = () => {
       }
     } catch (err) {
       logger.error('拉取模型列表失败', err);
-      alert('拉取模型列表失败，请检查 URL 和密钥');
+      setToastMsg({ type: 'error', text: '拉取模型列表失败，请检查 URL 和密钥' });
     } finally {
       setFetchingModels(false);
     }
@@ -270,11 +481,13 @@ const ModelManagement = () => {
       enabled: formData.enabled,
       params: {
         model_name: formData.model_name,
+        supports_vision: formData.supports_vision,
         temperature: formData.temperature,
         max_tokens: formData.max_tokens,
         top_p: formData.top_p,
         timeout: formData.timeout,
         extra_headers: formData.extra_headers,
+        ...buildProviderSpecificParams(formData),
       },
     };
 
@@ -287,12 +500,13 @@ const ModelManagement = () => {
       await fetchModels();
       resetForm();
     } catch (err) {
-      alert(`操作失败: ${err.response?.data?.detail || err.message}`);
+      setToastMsg({ type: 'error', text: `操作失败: ${err.response?.data?.detail || err.message}` });
     }
   };
 
   const handleEdit = (model) => {
     const params = model.params || {};
+    const qwenOfficialSearchConfig = getQwenOfficialSearchConfig(params);
     const template = getTemplate(model.provider_name);
     const savedModel = params.model_name || '';
     const isCustom =
@@ -300,6 +514,7 @@ const ModelManagement = () => {
       template &&
       template.available_models.length > 0 &&
       !template.available_models.includes(savedModel);
+    const capabilities = getProviderCapabilities(template, savedModel);
 
     setFormData({
       provider_name: model.provider_name,
@@ -307,12 +522,16 @@ const ModelManagement = () => {
       base_url: model.base_url || '',
       priority: model.priority,
       enabled: model.enabled,
+      supports_vision: params.supports_vision ?? Boolean(capabilities.supports_vision),
       model_name: savedModel,
       temperature: params.temperature ?? 0.7,
       max_tokens: params.max_tokens ?? template?.default_max_tokens ?? DEFAULT_AI_MAX_TOKENS,
       top_p: params.top_p ?? 1.0,
       timeout: params.timeout ?? 60,
       extra_headers: { ...(params.extra_headers || {}) },
+      web_search_host: qwenOfficialSearchConfig.web_search_host,
+      workspace_name: qwenOfficialSearchConfig.workspace_name,
+      search_service_id: qwenOfficialSearchConfig.search_service_id,
     });
     setCustomModelInput(isCustom);
     setFetchedModels([]);
@@ -334,7 +553,7 @@ const ModelManagement = () => {
       }
       await fetchModels();
     } catch (err) {
-      alert(`删除失败: ${err.response?.data?.detail || err.message}`);
+      setToastMsg({ type: 'error', text: `删除失败: ${err.response?.data?.detail || err.message}` });
     }
   };
 
@@ -458,6 +677,7 @@ const ModelManagement = () => {
   };
 
   const currentTemplate = getTemplate(formData.provider_name);
+  const providerParamHints = getProviderParamHints(currentTemplate?.key);
   const hasPresetModels = currentTemplate && currentTemplate.available_models.length > 0;
   const needsFetch =
     currentTemplate &&
@@ -502,6 +722,8 @@ const ModelManagement = () => {
               const params = model.params || {};
               const testResult = testResults[model.id];
               const isSelected = editingModel?.id === model.id;
+              const template = getTemplate(model.provider_name);
+              const capabilityBadges = getProviderCapabilityBadges(template, params.model_name);
 
               return (
                 <li
@@ -550,6 +772,22 @@ const ModelManagement = () => {
                       max {params.max_tokens ?? DEFAULT_AI_MAX_TOKENS}
                     </span>
                     <span className={isDark ? 'text-slate-500' : 'text-gray-400'}>{params.timeout ?? 60}s</span>
+                    {params.supports_vision ? (
+                      <span className={isDark ? 'text-emerald-400' : 'text-emerald-600'}>视觉</span>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {capabilityBadges.map((badge) => (
+                      <span
+                        key={badge}
+                        className={`rounded-full px-2 py-0.5 text-[11px] ${
+                          isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {badge}
+                      </span>
+                    ))}
                   </div>
 
                   <div className="mt-3 flex flex-wrap items-center gap-2" onClick={e => e.stopPropagation()}>
@@ -742,10 +980,10 @@ const ModelManagement = () => {
                     <label className={`mb-1.5 block text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
                       优先级
                     </label>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                      <input
-                        type="number"
-                        value={formData.priority}
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <input
+                          type="number"
+                          value={formData.priority}
                         onChange={e =>
                           setFormData(prev => ({ ...prev, priority: parseInt(e.target.value, 10) || 0 }))
                         }
@@ -753,19 +991,135 @@ const ModelManagement = () => {
                           isDark ? 'border-slate-600 bg-slate-800 text-white' : 'border-gray-300 bg-white text-gray-900'
                         }`}
                       />
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={formData.enabled}
-                          onChange={e => setFormData(prev => ({ ...prev, enabled: e.target.checked }))}
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={formData.enabled}
+                            onChange={e => setFormData(prev => ({ ...prev, enabled: e.target.checked }))}
                           className="h-4 w-4 rounded text-blue-600 focus:ring-2 focus:ring-blue-500"
-                        />
-                        <span className={isDark ? 'text-slate-300' : 'text-gray-700'}>启用</span>
-                      </label>
+                          />
+                          <span className={isDark ? 'text-slate-300' : 'text-gray-700'}>启用</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={formData.supports_vision}
+                            onChange={e => setFormData(prev => ({ ...prev, supports_vision: e.target.checked }))}
+                            className="h-4 w-4 rounded text-blue-600 focus:ring-2 focus:ring-blue-500"
+                          />
+                          <span className={isDark ? 'text-slate-300' : 'text-gray-700'}>支持视觉</span>
+                        </label>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+
+              {currentTemplate ? (
+                <div
+                  className={`mb-6 rounded-xl border px-4 py-4 ${
+                    isDark ? 'border-slate-700 bg-slate-800/70' : 'border-slate-200 bg-slate-50'
+                  }`}
+                >
+                  <div className="flex flex-wrap gap-2">
+                    {getProviderCapabilityBadges(currentTemplate, formData.model_name).map((badge) => (
+                      <span
+                        key={badge}
+                        className={`rounded-full px-2.5 py-1 text-xs ${
+                          isDark ? 'bg-slate-900 text-slate-200' : 'bg-white text-slate-700'
+                        }`}
+                      >
+                        {badge}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    <p className={`text-sm font-medium ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                      Provider 能力说明
+                    </p>
+                    {getProviderCapabilityNotes(currentTemplate, formData.model_name).map((note) => (
+                      <p
+                        key={note}
+                        className={`text-xs leading-5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}
+                      >
+                        {note}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {currentTemplate?.key === 'qwen' && (
+                <>
+                  <div className={`border-t ${isDark ? 'border-slate-800' : 'border-gray-100'}`} />
+
+                  <div className="py-6">
+                    <SectionTitle isDark={isDark}>阿里官方联网搜索</SectionTitle>
+                    <div className="space-y-4">
+                      <div
+                        className={`rounded-xl border px-4 py-3 ${
+                          isDark ? 'border-slate-700 bg-slate-800/60' : 'border-slate-200 bg-slate-50'
+                        }`}
+                      >
+                        <div className="space-y-1.5">
+                          {providerParamHints.map((hint) => (
+                            <p
+                              key={hint}
+                              className={`text-xs leading-5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}
+                            >
+                              {hint}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className={`mb-1.5 block text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
+                          web_search_host
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.web_search_host}
+                          onChange={e => setFormData(prev => ({ ...prev, web_search_host: e.target.value }))}
+                          placeholder="例如 https://xxx-hangzhou.opensearch.aliyuncs.com"
+                          className={inputCls}
+                        />
+                        <p className={`mt-1 text-xs ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
+                          用于直连阿里官方 Web Search API；后端也兼容 `search_service_host` / `opensearch_host` / `search_host`。
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div>
+                          <label className={`mb-1.5 block text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
+                            workspace_name
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.workspace_name}
+                            onChange={e => setFormData(prev => ({ ...prev, workspace_name: e.target.value }))}
+                            placeholder="default"
+                            className={inputCls}
+                          />
+                        </div>
+
+                        <div>
+                          <label className={`mb-1.5 block text-sm font-medium ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
+                            search_service_id
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.search_service_id}
+                            onChange={e => setFormData(prev => ({ ...prev, search_service_id: e.target.value }))}
+                            placeholder="ops-web-search-001"
+                            className={inputCls}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className={`border-t ${isDark ? 'border-slate-800' : 'border-gray-100'}`} />
 
@@ -1030,6 +1384,14 @@ const ModelManagement = () => {
   return (
     <AdminLayout>
       <div className="flex h-full flex-col gap-4 p-4 sm:p-6">
+        {toastMsg && (
+          <div className={`rounded-lg px-3 py-2 text-sm ${
+            isDark ? 'bg-rose-400/10 text-rose-200' : 'bg-rose-50 text-rose-700'
+          }`}>
+            {toastMsg.text}
+            <button type="button" onClick={() => setToastMsg(null)} className="ml-3 text-xs underline">&times;</button>
+          </div>
+        )}
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className={`text-2xl font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>模型管理</h2>

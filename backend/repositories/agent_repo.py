@@ -37,6 +37,18 @@ class AgentRepository:
         return db.query(AgentSession).filter(AgentSession.id == session_id).first()
 
     @staticmethod
+    def get_session_for_user(
+        db: Session,
+        session_id: int,
+        user_id: int
+    ) -> Optional[AgentSession]:
+        """获取指定用户的会话"""
+        return db.query(AgentSession).filter(
+            AgentSession.id == session_id,
+            AgentSession.user_id == user_id
+        ).first()
+
+    @staticmethod
     def update_session_status(
         db: Session,
         session_id: int,
@@ -51,6 +63,24 @@ class AgentRepository:
         session.status = status
         if completed_at:
             session.completed_at = completed_at
+        db.commit()
+        return True
+
+    @staticmethod
+    def resume_session(
+        db: Session,
+        session_id: int,
+        session_type: Optional[str] = None,
+    ) -> bool:
+        """恢复会话到运行状态"""
+        session = db.query(AgentSession).filter(AgentSession.id == session_id).first()
+        if not session:
+            return False
+
+        session.status = "running"
+        if session_type:
+            session.session_type = session_type
+        session.completed_at = None
         db.commit()
         return True
 
@@ -82,6 +112,16 @@ class AgentRepository:
         return db.query(AgentStep).filter(
             AgentStep.session_id == session_id
         ).order_by(AgentStep.step_number).all()
+
+    @staticmethod
+    def get_next_step_number(db: Session, session_id: int) -> int:
+        """获取会话的下一个步骤编号"""
+        latest = db.query(AgentStep).filter(
+            AgentStep.session_id == session_id
+        ).order_by(AgentStep.step_number.desc()).first()
+        if not latest:
+            return 0
+        return int(latest.step_number) + 1
 
     @staticmethod
     def create_tool_call(

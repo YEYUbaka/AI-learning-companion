@@ -505,7 +505,6 @@ function StudyPlan() {
                             ? 'border-slate-600 bg-slate-800/70 text-white placeholder-slate-400 focus:border-sky-500 focus:ring-sky-500/20'
                             : 'border-slate-300 bg-white text-slate-900 placeholder-slate-400 focus:border-slate-900 focus:ring-slate-900/10'
                         }`}
-                        required
                       />
                       <p className={`mt-2 text-xs ${mutedText}`}>
                         支持自动识别“分钟 / 小时 / 天 / 周 / 月 / 年”等时间关键词，不写时间也可以。

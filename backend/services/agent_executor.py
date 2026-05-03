@@ -2,9 +2,12 @@
 Agent 执行引擎
 """
 import asyncio
+import base64
 import json
+import mimetypes
+from pathlib import Path
 import re
-from typing import Any, AsyncGenerator, Dict, List
+from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -74,6 +77,25 @@ SEARCH_INTENT_KEYWORDS_EN = [
     "look up",
 ]
 
+EXPLICIT_SEARCH_INTENT_KEYWORDS = [
+    "搜索",
+    "查找",
+    "检索",
+    "搜一下",
+    "搜一搜",
+    "帮我找",
+    "帮我搜",
+    "上网查",
+    "联网查",
+]
+
+EXPLICIT_SEARCH_INTENT_KEYWORDS_EN = [
+    "search",
+    "find",
+    "look up",
+    "google",
+]
+
 LEARNING_PATH_KEYWORDS = [
     "学习计划",
     "学习路线",
@@ -114,6 +136,69 @@ RESOURCE_RECOMMENDATION_KEYWORDS_EN = [
     "resource",
     "resources",
 ]
+
+FOLLOW_UP_QUERY_KEYWORDS = [
+    "详细",
+    "展开",
+    "继续",
+    "具体",
+    "分步",
+    "一步一步",
+    "再讲",
+    "细说",
+    "解释一下",
+    "为什么",
+    "怎么得",
+    "哪一步",
+]
+
+FOLLOW_UP_QUERY_KEYWORDS_EN = [
+    "detail",
+    "details",
+    "elaborate",
+    "expand",
+    "continue",
+    "step by step",
+    "explain why",
+]
+
+CONTEXT_REFERENCE_KEYWORDS = [
+    "它",
+    "他",
+    "她",
+    "它们",
+    "这个",
+    "这本",
+    "这篇",
+    "这题",
+    "这道题",
+    "上述",
+    "上面",
+    "前面",
+    "刚才",
+    "这里",
+    "其",
+]
+
+CONTEXT_REFERENCE_KEYWORDS_EN = [
+    "it",
+    "this",
+    "that",
+    "these",
+    "those",
+    "above",
+    "previous",
+]
+
+SEARCH_QUERY_PREFIX_PATTERN = re.compile(
+    r"^(?:请问|请|麻烦|帮我|帮忙|可以|能否|能不能|给我|我想知道|想知道|告诉我|请你|再帮我|帮我再)\s*",
+    re.IGNORECASE,
+)
+
+SEARCH_ACTION_PREFIX_PATTERN = re.compile(
+    r"^(?:搜索|查找|检索|搜一下|搜一搜|查一下|查一查|search|find|look up|google)\s*",
+    re.IGNORECASE,
+)
 
 TECH_QUERY_KEYWORDS = [
     "Java",
@@ -164,12 +249,71 @@ META_EVIDENCE_MARKERS = [
     "网络搜索暂不可用",
 ]
 
+SEMANTIC_ROUTE_CONFIDENCE_THRESHOLD = 0.7
+SEMANTIC_ROUTE_PROMPT_NAME = "agent_semantic_router_prompt"
+SEMANTIC_ROUTE_INTENTS = {
+    "context_followup",
+    "fresh_search",
+    "resource_recommendation",
+    "knowledge_lookup",
+    "study_plan",
+    "paper_generation",
+    "learning_map",
+    "direct_answer",
+}
+
 
 class AgentPlanner:
     """结构化规划器"""
 
     def __init__(self, tool_registry: ToolRegistry):
         self.tool_registry = tool_registry
+
+    @staticmethod
+    def _extract_current_user_message(goal: str) -> str:
+        goal_text = (goal or "").strip()
+        marker = "当前用户消息："
+        if marker in goal_text:
+            return goal_text.rsplit(marker, 1)[-1].strip()
+        return goal_text
+
+    @staticmethod
+    def _extract_context_user_messages(goal: str) -> List[str]:
+        goal_text = (goal or "").strip()
+        context_marker = "对话上下文："
+        current_marker = "当前用户消息："
+        if context_marker not in goal_text or current_marker not in goal_text:
+            return []
+
+        context_block = goal_text.split(context_marker, 1)[1].split(current_marker, 1)[0]
+        messages: List[str] = []
+        for raw_line in context_block.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("用户:") or line.startswith("用户："):
+                parts = re.split(r"[:：]", line, maxsplit=1)
+                if len(parts) == 2 and parts[1].strip():
+                    messages.append(parts[1].strip())
+        return messages
+
+    @classmethod
+    def _clean_query_text(cls, query: str) -> str:
+        normalized = re.sub(r"\s+", " ", (query or "").strip())
+        previous = None
+        while normalized and normalized != previous:
+            previous = normalized
+            normalized = SEARCH_QUERY_PREFIX_PATTERN.sub("", normalized).strip()
+        return normalized.strip("：:，,。.？?！!；; ")
+
+    @classmethod
+    def _strip_search_action_prefix(cls, query: str) -> str:
+        normalized = cls._clean_query_text(query)
+        previous = None
+        while normalized and normalized != previous:
+            previous = normalized
+            normalized = SEARCH_ACTION_PREFIX_PATTERN.sub("", normalized).strip()
+        return normalized
 
     @staticmethod
     def _contains_any_keyword(
@@ -194,6 +338,15 @@ class AgentPlanner:
         )
 
     @classmethod
+    def _is_explicit_search_request(cls, goal_text: str, lower_goal: str) -> bool:
+        return cls._contains_any_keyword(
+            goal_text,
+            lower_goal,
+            EXPLICIT_SEARCH_INTENT_KEYWORDS,
+            EXPLICIT_SEARCH_INTENT_KEYWORDS_EN,
+        )
+
+    @classmethod
     def _is_search_intent(cls, goal_text: str, lower_goal: str) -> bool:
         return cls._contains_any_keyword(
             goal_text,
@@ -212,6 +365,59 @@ class AgentPlanner:
         ) or "怎么学" in goal_text
 
     @classmethod
+    def _is_paper_generation_query(cls, goal_text: str) -> bool:
+        text = cls._clean_query_text(goal_text)
+        lower_text = text.lower()
+
+        if any(keyword in text for keyword in ["解答", "讲解", "解析", "怎么做", "为什么", "第"]):
+            if any(keyword in text for keyword in ["上传", "这份试卷", "试卷中", "试卷里", "这道题", "题目"]):
+                return False
+
+        explicit_generation_phrases = [
+            "组卷",
+            "智能组卷",
+            "生成试卷",
+            "生成一份试卷",
+            "生成一套试卷",
+            "生成练习题",
+            "生成一套练习题",
+            "生成教师卷",
+            "生成练习卷",
+            "出题",
+            "命题",
+            "设计试卷",
+            "设计练习题",
+            "创建试卷",
+            "制作试卷",
+        ]
+        if any(keyword in text for keyword in explicit_generation_phrases):
+            return True
+
+        generation_verbs = ["生成", "设计", "创建", "制作", "编写", "拟定"]
+        paper_targets = ["试卷", "练习题", "教师卷", "练习卷", "卷子", "测试题", "测验题"]
+        if any(verb in text for verb in generation_verbs) and any(target in text for target in paper_targets):
+            return True
+
+        if re.search(r"出.{0,4}(一套|一份|一道|几道|[0-9一二三四五六七八九十]+道).{0,8}(题|试卷|练习)", text):
+            return True
+
+        return any(
+            phrase in lower_text
+            for phrase in [
+                "generate a test",
+                "generate an exam",
+                "generate a quiz",
+                "create a test paper",
+                "create an exam paper",
+                "make a worksheet",
+            ]
+        )
+
+    @classmethod
+    def _is_learning_map_query(cls, goal_text: str, lower_goal: str) -> bool:
+        return any(keyword in goal_text for keyword in ["知识图谱", "思维导图", "XMind"]) or "xmind" in lower_goal
+
+    @classmethod
     def _is_tech_query(cls, goal_text: str, lower_goal: str) -> bool:
         return cls._contains_any_keyword(
             goal_text,
@@ -226,25 +432,69 @@ class AgentPlanner:
 
     @classmethod
     def _is_resource_recommendation_query(cls, goal_text: str, lower_goal: str) -> bool:
+        return cls._has_resource_intent(goal_text, lower_goal) and not cls._is_learning_path_query(goal_text, lower_goal)
+
+    @classmethod
+    def _has_resource_intent(cls, goal_text: str, lower_goal: str) -> bool:
         return cls._contains_any_keyword(
             goal_text,
             lower_goal,
             RESOURCE_RECOMMENDATION_KEYWORDS,
             RESOURCE_RECOMMENDATION_KEYWORDS_EN,
-        ) and not cls._is_learning_path_query(goal_text, lower_goal)
+        )
+
+    @classmethod
+    def _is_follow_up_query(cls, goal_text: str, lower_goal: str) -> bool:
+        return cls._contains_any_keyword(
+            goal_text,
+            lower_goal,
+            FOLLOW_UP_QUERY_KEYWORDS,
+            FOLLOW_UP_QUERY_KEYWORDS_EN,
+        )
+
+    @classmethod
+    def _has_context_reference(cls, goal_text: str, lower_goal: str) -> bool:
+        return cls._contains_any_keyword(
+            goal_text,
+            lower_goal,
+            CONTEXT_REFERENCE_KEYWORDS,
+            CONTEXT_REFERENCE_KEYWORDS_EN,
+        )
+
+    @classmethod
+    def _build_context_aware_query(cls, goal: str) -> str:
+        latest_message = cls._strip_search_action_prefix(cls._extract_current_user_message(goal))
+        if not latest_message:
+            return cls._clean_query_text(goal)
+
+        lower_goal = latest_message.lower()
+        prior_user_messages = [
+            cleaned
+            for cleaned in (cls._clean_query_text(item) for item in cls._extract_context_user_messages(goal))
+            if cleaned
+        ]
+        if prior_user_messages and (
+            cls._is_follow_up_query(latest_message, lower_goal)
+            or cls._has_context_reference(latest_message, lower_goal)
+        ):
+            topic_hint = prior_user_messages[-1]
+            if topic_hint.lower() not in lower_goal:
+                return cls._strip_search_action_prefix(f"{topic_hint} {latest_message}")
+        return latest_message
 
     # ReAct-style planner that maps common intents to deterministic tool chains.
     def plan(self, goal: str) -> Dict[str, Any]:
         # Route high-confidence intents first so required tools are selected
         # deterministically before the downstream agent starts free-form work.
-        goal_text = (goal or "").strip()
+        goal_text = self._clean_query_text(self._extract_current_user_message(goal))
         lower_goal = goal_text.lower()
+        retrieval_query = self._build_context_aware_query(goal)
         trace_id = str(uuid4())
         tool_steps: List[Dict[str, Any]] = []
         rationale = "根据用户意图进行结构化工具规划。"
         confidence = 0.76
 
-        if any(keyword in goal_text for keyword in ["试卷", "组卷", "教师卷", "练习卷"]):
+        if self._is_paper_generation_query(goal_text):
             config = self._extract_paper_config(goal_text)
             tool_steps = [
                 {"tool_name": "build_paper_blueprint", "tool_input": config, "reason": "先固定试卷蓝图"},
@@ -265,7 +515,7 @@ class AgentPlanner:
             ]
             rationale = "检测到组卷意图，按照蓝图、生成、审核三阶段执行。"
             confidence = 0.92
-        elif any(keyword in goal_text for keyword in ["知识图谱", "思维导图", "XMind", "xmind"]):
+        elif self._is_learning_map_query(goal_text, lower_goal):
             map_mode = "syllabus" if any(keyword in goal_text for keyword in ["课程", "章节", "大纲"]) else "document"
             tool_steps = [
                 {
@@ -288,7 +538,7 @@ class AgentPlanner:
             tool_steps = [
                 {
                     "tool_name": "web_search",
-                    "tool_input": {"query": goal_text, "max_results": 8},
+                    "tool_input": {"query": retrieval_query, "max_results": 8},
                     "reason": "当前问题涉及近期/最新动态，优先联网搜索。",
                 }
             ]
@@ -298,7 +548,7 @@ class AgentPlanner:
             tool_steps = [
                 {
                     "tool_name": "search_knowledge",
-                    "tool_input": {"query": goal_text, "limit": 5},
+                    "tool_input": {"query": retrieval_query, "limit": 5},
                     "reason": "先检索技术学习路径相关知识证据，为最终回答补充可点击参考链接",
                 },
                 {
@@ -313,7 +563,7 @@ class AgentPlanner:
             tool_steps = [
                 {
                     "tool_name": "web_search",
-                    "tool_input": {"query": goal_text, "max_results": 8},
+                    "tool_input": {"query": retrieval_query, "max_results": 8},
                     "reason": "Use web search for recommendation and resource discovery queries.",
                 }
             ]
@@ -323,7 +573,7 @@ class AgentPlanner:
             tool_steps.append(
                 {
                     "tool_name": "search_knowledge",
-                    "tool_input": {"query": goal_text, "limit": 5},
+                    "tool_input": {"query": retrieval_query, "limit": 5},
                     "reason": "教育类问答优先检索知识库证据",
                 }
             )
@@ -331,7 +581,7 @@ class AgentPlanner:
                 tool_steps.append(
                     {
                         "tool_name": "search_example_questions",
-                        "tool_input": {"query": goal_text, "limit": 3},
+                        "tool_input": {"query": retrieval_query, "limit": 3},
                         "reason": "补充例题/真题素材",
                     }
                 )
@@ -347,11 +597,11 @@ class AgentPlanner:
             ]
             rationale = "检测到学习计划意图，直接生成学习计划。"
             confidence = 0.82
-        elif self._is_search_intent(goal_text, lower_goal):
+        elif self._is_explicit_search_request(goal_text, lower_goal):
             tool_steps = [
                 {
                     "tool_name": "web_search",
-                    "tool_input": {"query": goal_text, "max_results": 5},
+                    "tool_input": {"query": retrieval_query, "max_results": 5},
                     "reason": "需要联网检索最新信息",
                 }
             ]
@@ -361,7 +611,7 @@ class AgentPlanner:
             tool_steps = [
                 {
                     "tool_name": "search_knowledge",
-                    "tool_input": {"query": goal_text, "limit": 5},
+                    "tool_input": {"query": retrieval_query, "limit": 5},
                     "reason": "默认先尝试知识库检索，再组织回答。",
                 }
             ]
@@ -466,10 +716,10 @@ class AgentExecutor:
         self.tool_registry = ToolRegistry()
         self.planner = AgentPlanner(self.tool_registry)
         self.reviewer = AgentReviewer()
-        self.agent_provider = FeatureModelConfigService.get_provider_for_feature(db, "agent")
+        self.agent_provider = FeatureModelConfigService.get_provider_for_feature(db, "agent") if db is not None else None
         self.final_answer_fallback_used = False
-        session = AgentRepository.get_session(db, session_id)
-        self.context = context or (session.context if session else {}) or {}
+        session = AgentRepository.get_session(db, session_id) if db is not None else None
+        self.context = context if context is not None else (session.context if session else {}) or {}
         self.attachments = self.context.get("attachments") or []
 
     def _record_step(self, step_number: int, step_type: str, content: Any, extra_data: Dict[str, Any]) -> None:
@@ -482,6 +732,64 @@ class AgentExecutor:
             content=content_text,
             extra_data=extra_data,
         )
+
+    def _next_step_number(self) -> int:
+        if self.db is None:
+            return 0
+        return AgentRepository.get_next_step_number(self.db, self.session_id)
+
+    def _get_conversation_items(self) -> List[tuple[str, str]]:
+        if self.db is None:
+            return []
+        steps = AgentRepository.get_session_steps(self.db, self.session_id)
+        conversation_items: List[tuple[str, str]] = []
+        for step in steps:
+            if step.step_type == "user_message" and step.content:
+                conversation_items.append(("user", step.content.strip()))
+            elif step.step_type == "final_answer" and step.content:
+                conversation_items.append(("assistant", step.content.strip()))
+        return conversation_items
+
+    def _has_prior_assistant_answer(self) -> bool:
+        return any(role == "assistant" and content for role, content in self._get_conversation_items())
+
+    def _build_conversation_goal(self, latest_message: str) -> str:
+        if self.db is None:
+            return latest_message
+        conversation_items = self._get_conversation_items()
+
+        if len(conversation_items) <= 1:
+            return latest_message
+
+        latest_compact = latest_message.strip()
+        history_lines = []
+        for role, content in conversation_items[:-1][-6:]:
+            prefix = "用户" if role == "user" else "助手"
+            history_lines.append(f"{prefix}: {content}")
+
+        return (
+            "请结合当前会话的上文来回答当前问题。\n\n"
+            "对话上下文：\n"
+            f"{chr(10).join(history_lines)}\n\n"
+            f"当前用户消息：\n{latest_compact}"
+        )
+
+    def _should_answer_from_context_directly(self, goal: str) -> bool:
+        goal_text = (goal or "").strip()
+        lower_goal = goal_text.lower()
+        if not goal_text or not self._has_prior_assistant_answer():
+            return False
+        if not AgentPlanner._is_follow_up_query(goal_text, lower_goal):
+            return False
+        if AgentPlanner._is_search_intent(goal_text, lower_goal):
+            return False
+        if AgentPlanner._is_current_events_query(goal_text, lower_goal):
+            return False
+        if AgentPlanner._is_resource_recommendation_query(goal_text, lower_goal):
+            return False
+        if AgentPlanner._is_tech_learning_query(goal_text, lower_goal):
+            return False
+        return True
 
     @staticmethod
     def _dedupe_lines(lines: List[str]) -> List[str]:
@@ -520,36 +828,99 @@ class AgentExecutor:
             if attachment.get("file_type") == "image" or attachment.get("type") == "image"
         ]
 
+    @staticmethod
+    def _resolve_local_attachment_path(attachment: Dict[str, Any]) -> Optional[Path]:
+        candidates: List[str] = []
+        for key in ("file_path", "local_path"):
+            value = attachment.get(key)
+            if value:
+                candidates.append(str(value))
+
+        for key in ("image_url", "file_url", "preview_url"):
+            value = attachment.get(key)
+            if isinstance(value, str) and value.startswith("/uploads/"):
+                candidates.append(value.lstrip("/"))
+
+        backend_root = Path(__file__).resolve().parents[1]
+        cwd = Path.cwd()
+        seen: set[str] = set()
+
+        for candidate in candidates:
+            normalized = candidate.replace("\\", "/").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+
+            candidate_path = Path(normalized)
+            possible_paths = [candidate_path]
+            if not candidate_path.is_absolute():
+                possible_paths.extend([cwd / candidate_path, backend_root / candidate_path])
+
+            for possible_path in possible_paths:
+                if possible_path.exists() and possible_path.is_file():
+                    return possible_path
+        return None
+
+    def _build_image_content_block(self, attachment: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        image_url = attachment.get("image_url") or attachment.get("file_url") or attachment.get("preview_url")
+        if isinstance(image_url, str) and image_url.startswith(("http://", "https://", "data:")):
+            return {"type": "input_image", "image_url": image_url}
+
+        local_path = self._resolve_local_attachment_path(attachment)
+        if local_path is None:
+            logger.warning("Image attachment missing usable path for multimodal request: %s", attachment)
+            return None
+
+        mime_type = str(attachment.get("mime_type") or "").strip() or mimetypes.guess_type(local_path.name)[0] or "image/png"
+        encoded = base64.b64encode(local_path.read_bytes()).decode("ascii")
+        return {"type": "input_image", "image_url": f"data:{mime_type};base64,{encoded}"}
+
     def _augment_goal_with_file_hints(self, goal: str) -> str:
-        file_hints: List[str] = []
+        file_blocks: List[str] = []
         for attachment in self.attachments:
             if attachment.get("file_type") == "image" or attachment.get("type") == "image":
                 continue
-            file_path = attachment.get("file_path")
-            if file_path:
-                file_hints.append(
-                    f"[Attached file: {file_path}. Use the parse_file tool when file contents are needed.]"
+
+            file_name = attachment.get("file_name") or attachment.get("name") or "unknown file"
+            text_content = attachment.get("text_content") or ""
+
+            if text_content:
+                MAX_CONTEXT_LEN = 8000
+                truncated = text_content[:MAX_CONTEXT_LEN]
+                truncation_note = (
+                    f" [文本过长，已截断至{MAX_CONTEXT_LEN}字符]"
+                    if len(text_content) > MAX_CONTEXT_LEN else ""
                 )
-        if not file_hints:
+                file_blocks.append(
+                    f'[已解析文件: "{file_name}"]\n'
+                    f"```\n{truncated}{truncation_note}\n```\n"
+                    "[注意: 以上文件内容已直接提供，无需再调用 parse_file 工具读取此文件。]"
+                )
+            else:
+                file_path = attachment.get("file_path", "")
+                file_blocks.append(
+                    f'[附件: "{file_name}" (路径: {file_path})。'
+                    "文件内容未被预解析，如需读取请使用 parse_file 工具。]"
+                )
+
+        if not file_blocks:
             return goal
-        return f"{goal.strip()}\n\n" + "\n".join(file_hints)
+        return f"{goal.strip()}\n\n## 附件内容\n\n" + "\n\n".join(file_blocks)
 
     async def _execute_multimodal_direct(self, goal: str, mode: str) -> Dict[str, Any]:
-        capabilities = AIService.get_provider_capabilities(self.agent_provider)
+        capabilities = AIService.get_provider_capabilities(self.agent_provider, db=self.db)
         if not capabilities.get("supports_vision") or not capabilities.get("supports_responses_api"):
             raise ValueError("The current agent model does not support image understanding. Please switch to a vision-capable model.")
 
         content_blocks: List[Dict[str, Any]] = []
         for attachment in self._get_image_attachments():
-            image_url = attachment.get("image_url") or attachment.get("file_url") or attachment.get("preview_url")
-            if image_url and not str(image_url).startswith(("http://", "https://", "data:", "/")):
-                image_url = f"/{str(image_url).lstrip('/')}"
-            if image_url:
-                content_blocks.append({"type": "input_image", "image_url": image_url})
+            image_block = self._build_image_content_block(attachment)
+            if image_block:
+                content_blocks.append(image_block)
         if goal.strip():
             content_blocks.append({"type": "input_text", "text": goal.strip()})
-        if not content_blocks:
-            raise ValueError("No image attachment found")
+        if not any(block.get("type") == "input_image" for block in content_blocks):
+            raise ValueError("No valid image attachment found")
 
         result = await AIService.call_ai_async(
             input_items=[{"role": "user", "content": content_blocks}],
@@ -572,13 +943,425 @@ class AgentExecutor:
             "fallback_used": result.get("fallback_used", False),
         }
 
+    async def _execute_contextual_followup_direct(self, goal: str, mode: str) -> Dict[str, Any]:
+        result = await AIService.call_ai_async(
+            user_prompt=goal,
+            system_prompt_name="system_prompt",
+            provider=self.agent_provider,
+            temperature=0.2 if mode != "cot" else 0.3,
+            max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
+            quality_context={"mode": "agent_context_followup"},
+            instructions="Answer directly from the current conversation context. Do not browse or call tools unless the user explicitly asks for fresh external information.",
+        )
+        answer = (result.get("text") or "").strip()
+        if not answer:
+            raise ValueError("The model returned an empty contextual follow-up result")
+        return {
+            "success": True,
+            "answer": answer,
+            "trace_id": result.get("trace_id"),
+            "quality_status": result.get("quality_status", "pass"),
+            "confidence": result.get("confidence", 0.82),
+            "evidence": result.get("evidence", []),
+            "fallback_used": result.get("fallback_used", False),
+        }
+
+    async def _execute_semantic_direct_answer(self, goal: str, mode: str) -> Dict[str, Any]:
+        result = await AIService.call_ai_async(
+            user_prompt=goal,
+            system_prompt_name="system_prompt",
+            provider=self.agent_provider,
+            temperature=0.2 if mode != "cot" else 0.3,
+            max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
+            quality_context={"mode": "agent_semantic_direct_answer"},
+            instructions="Answer directly using the current request and conversation context. Do not browse or call tools unless fresh external information is explicitly required.",
+        )
+        answer = (result.get("text") or "").strip()
+        if not answer:
+            raise ValueError("The model returned an empty direct answer result")
+        return {
+            "success": True,
+            "answer": answer,
+            "trace_id": result.get("trace_id"),
+            "quality_status": result.get("quality_status", "pass"),
+            "confidence": result.get("confidence", 0.8),
+            "evidence": result.get("evidence", []),
+            "fallback_used": result.get("fallback_used", False),
+        }
+
+    def _should_run_semantic_router(self, goal: str) -> bool:
+        goal_text = AgentPlanner._clean_query_text(AgentPlanner._extract_current_user_message(goal))
+        if not goal_text:
+            return False
+        lower_goal = goal_text.lower()
+        if AgentPlanner._is_paper_generation_query(goal_text):
+            return False
+        if AgentPlanner._is_learning_map_query(goal_text, lower_goal):
+            return False
+        return True
+
+    @staticmethod
+    def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+        payload = (text or "").strip()
+        if not payload:
+            return None
+
+        fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", payload, re.IGNORECASE)
+        if fenced_match:
+            payload = fenced_match.group(1).strip()
+        else:
+            start = payload.find("{")
+            end = payload.rfind("}")
+            if start >= 0 and end > start:
+                payload = payload[start:end + 1]
+
+        parsed = json.loads(payload)
+        if isinstance(parsed, dict):
+            return parsed
+        return None
+
+    def _normalize_semantic_route(self, route_payload: Dict[str, Any], goal: str) -> Optional[Dict[str, Any]]:
+        intent = str(route_payload.get("intent") or "").strip().lower()
+        if intent not in SEMANTIC_ROUTE_INTENTS:
+            return None
+
+        confidence_raw = route_payload.get("confidence", 0)
+        try:
+            confidence = float(confidence_raw)
+        except (TypeError, ValueError):
+            confidence = 0.0
+
+        rewritten_query = str(route_payload.get("rewritten_query") or "").strip()
+        if not rewritten_query:
+            rewritten_query = AgentPlanner._build_context_aware_query(goal)
+
+        preferred_tool = str(route_payload.get("preferred_tool") or "none").strip().lower()
+        if preferred_tool not in {"web_search", "search_knowledge", "generate_study_plan", "build_learning_map", "none"}:
+            preferred_tool = "none"
+
+        return {
+            "intent": intent,
+            "needs_tool": bool(route_payload.get("needs_tool", False)),
+            "needs_fresh_info": bool(route_payload.get("needs_fresh_info", False)),
+            "preferred_tool": preferred_tool,
+            "rewritten_query": rewritten_query,
+            "is_followup": bool(route_payload.get("is_followup", False)),
+            "confidence": confidence,
+        }
+
+    async def _run_semantic_router(self, goal: str) -> Optional[Dict[str, Any]]:
+        if not self._should_run_semantic_router(goal):
+            return None
+        if self.db is None:
+            return None
+
+        try:
+            result = await AIService.call_ai_async(
+                user_prompt=goal,
+                system_prompt_name=SEMANTIC_ROUTE_PROMPT_NAME,
+                provider=self.agent_provider,
+                temperature=0,
+                max_tokens=320,
+                quality_context={"mode": "agent_semantic_router"},
+                instructions="Return JSON only.",
+            )
+            route_payload = self._extract_json_object(result.get("text", ""))
+            if not route_payload:
+                return None
+            route = self._normalize_semantic_route(route_payload, goal)
+            if not route or route["confidence"] < SEMANTIC_ROUTE_CONFIDENCE_THRESHOLD:
+                return None
+            return route
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("Semantic router unavailable, falling back to planner: %s", exc)
+            return None
+
+    def _build_plan_from_semantic_route(
+        self,
+        goal: str,
+        route: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if not route:
+            return None
+
+        intent = route["intent"]
+        query = route.get("rewritten_query") or AgentPlanner._build_context_aware_query(goal)
+        goal_text = AgentPlanner._clean_query_text(AgentPlanner._extract_current_user_message(goal))
+
+        if intent == "paper_generation" or intent == "learning_map":
+            return self.planner.plan(goal)
+
+        if intent == "fresh_search":
+            return {
+                "trace_id": str(uuid4()),
+                "quality_status": "planned",
+                "confidence": route["confidence"],
+                "rationale": "语义路由判断当前问题需要最新外部信息，优先执行联网搜索。",
+                "tool_steps": [
+                    {
+                        "tool_name": "web_search",
+                        "tool_input": {"query": query, "max_results": 8},
+                        "reason": "需要获取最新事实或实时信息。",
+                    }
+                ],
+            }
+
+        if intent == "resource_recommendation":
+            return {
+                "trace_id": str(uuid4()),
+                "quality_status": "planned",
+                "confidence": route["confidence"],
+                "rationale": "语义路由判断当前问题以外部资源推荐为主，优先执行联网搜索。",
+                "tool_steps": [
+                    {
+                        "tool_name": "web_search",
+                        "tool_input": {"query": query, "max_results": 8},
+                        "reason": "需要发现最新或更合适的外部资源。",
+                    }
+                ],
+            }
+
+        if intent == "knowledge_lookup":
+            return {
+                "trace_id": str(uuid4()),
+                "quality_status": "planned",
+                "confidence": route["confidence"],
+                "rationale": "语义路由判断当前问题更适合先查本地知识库证据。",
+                "tool_steps": [
+                    {
+                        "tool_name": "search_knowledge",
+                        "tool_input": {"query": query, "limit": 5},
+                        "reason": "优先复用本地知识库中的概念、公式与证据。",
+                    }
+                ],
+            }
+
+        if intent == "study_plan":
+            tool_steps: List[Dict[str, Any]] = [
+                {
+                    "tool_name": "search_knowledge",
+                    "tool_input": {"query": query, "limit": 5},
+                    "reason": "先补充学习主题相关证据，再生成分阶段计划。",
+                },
+                {
+                    "tool_name": "generate_study_plan",
+                    "tool_input": {"goal": goal_text},
+                    "reason": "根据目标生成学习计划。",
+                },
+            ]
+            return {
+                "trace_id": str(uuid4()),
+                "quality_status": "planned",
+                "confidence": route["confidence"],
+                "rationale": "语义路由判断当前请求以学习路径/学习计划输出为主。",
+                "tool_steps": tool_steps,
+            }
+
+        return None
+
+    def _get_provider_capabilities(self) -> Dict[str, Any]:
+        return AIService.get_provider_capabilities(self.agent_provider, db=self.db)
+
+    def _get_native_search_mode(self) -> str:
+        capabilities = self._get_provider_capabilities()
+        return str(capabilities.get("native_search_mode") or "none").strip().lower()
+
+    def _provider_supports_native_tool(self, tool_name: str) -> bool:
+        capabilities = self._get_provider_capabilities()
+        native_search_mode = str(capabilities.get("native_search_mode") or "none").strip().lower()
+        if native_search_mode == "qwen_chat_enable_search":
+            return tool_name == "web_search"
+        native_tools = capabilities.get("native_tools") or []
+        return bool(native_search_mode == "responses_builtin_tools" and tool_name in native_tools)
+
+    def _should_try_native_tools_first(self, goal: str, route: Optional[Dict[str, Any]] = None) -> bool:
+        goal_text = AgentPlanner._clean_query_text(AgentPlanner._extract_current_user_message(goal))
+        lower_goal = goal_text.lower()
+        if route and route.get("intent") in {"fresh_search", "resource_recommendation"}:
+            return self._provider_supports_native_tool("web_search")
+        return self._provider_supports_native_tool("web_search") and (
+            AgentPlanner._is_current_events_query(goal_text, lower_goal)
+            or AgentPlanner._is_explicit_search_request(goal_text, lower_goal)
+            or AgentPlanner._is_resource_recommendation_query(goal_text, lower_goal)
+        )
+
+    @staticmethod
+    def _normalize_native_tool_name(tool_call: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(tool_call, dict):
+            return None
+
+        candidates = [
+            tool_call.get("tool_name"),
+            tool_call.get("name"),
+            tool_call.get("type"),
+        ]
+        for value in candidates:
+            if not isinstance(value, str):
+                continue
+            normalized = value.strip()
+            if not normalized:
+                continue
+            if normalized.endswith("_call"):
+                normalized = normalized[: -len("_call")]
+            if normalized in {"tool", "tool_call", "function", "function_call", "message"}:
+                continue
+            return normalized
+        return None
+
+    @classmethod
+    def _normalize_native_tool_input(cls, tool_call: Dict[str, Any]) -> Dict[str, Any]:
+        for key in ("arguments", "input", "params"):
+            value = tool_call.get(key)
+            if value is None:
+                continue
+            try:
+                return cls._parse_native_tool_arguments(value)
+            except Exception:  # pylint: disable=broad-except
+                if isinstance(value, dict):
+                    return value
+
+        query = tool_call.get("query")
+        if isinstance(query, str) and query.strip():
+            return {"query": query.strip()}
+        return {}
+
+    @classmethod
+    def _build_native_tool_observation(
+        cls,
+        tool_call: Dict[str, Any],
+        *,
+        fallback_used: bool,
+    ) -> Dict[str, Any]:
+        tool_name = cls._normalize_native_tool_name(tool_call) or "native_tool"
+        tool_input = cls._normalize_native_tool_input(tool_call)
+        output = tool_call.get("output") or tool_call.get("result") or tool_call
+        summary = (
+            tool_call.get("summary")
+            or tool_call.get("description")
+            or "由模型原生工具完成调用，结果已用于当前回答。"
+        )
+        return {
+            "tool_name": tool_name,
+            "success": True,
+            "quality_status": "verified",
+            "confidence": 0.86,
+            "evidence": [],
+            "fallback_used": fallback_used,
+            "tool_input": tool_input,
+            "output_summary": summary,
+            "output": output,
+            "native_tool": True,
+        }
+
+    async def _try_native_tool_run(
+        self,
+        goal: str,
+        mode: str,
+        route: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        should_try_native = (
+            self._should_try_native_tools_first(goal, route)
+            if route is not None
+            else self._should_try_native_tools_first(goal)
+        )
+        if not should_try_native:
+            return None
+
+        query_text = (route or {}).get("rewritten_query") or AgentPlanner._build_context_aware_query(goal)
+        if not query_text:
+            query_text = goal
+
+        native_search_mode = self._get_native_search_mode()
+        extra_model_args: Dict[str, Any]
+        if native_search_mode == "qwen_chat_enable_search":
+            extra_model_args = {
+                "enable_search": True,
+                "search_options": {
+                    "forced_search": True,
+                    "search_strategy": "turbo",
+                },
+            }
+        elif native_search_mode == "responses_builtin_tools":
+            extra_model_args = {
+                "tools": [{"type": "web_search"}],
+            }
+        else:
+            return None
+
+        try:
+            result = await AIService.call_ai_async(
+                user_prompt=query_text,
+                system_prompt_name="system_prompt",
+                provider=self.agent_provider,
+                temperature=0.2 if mode != "cot" else 0.3,
+                max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
+                quality_context={"mode": "agent_native_tools", "tool_priority": "native_first"},
+                instructions="For quality-sensitive or up-to-date questions, prefer provider-native web search before answering.",
+                extra_model_args=extra_model_args,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("Native tool preflight unavailable, falling back to local tools: %s", exc)
+            return None
+
+        answer = (result.get("text") or "").strip()
+        if not answer:
+            return None
+
+        observations: List[Dict[str, Any]]
+        if native_search_mode == "qwen_chat_enable_search":
+            observations = [
+                {
+                    "tool_name": "web_search",
+                    "success": True,
+                    "quality_status": "verified",
+                    "confidence": 0.84,
+                    "evidence": [],
+                    "fallback_used": result.get("fallback_used", False),
+                    "tool_input": {
+                        "query": query_text,
+                        "forced_search": True,
+                        "search_strategy": "turbo",
+                    },
+                    "output_summary": "已通过 Qwen Chat Completions 的 `enable_search` 能力完成联网搜索。",
+                    "output": {
+                        "provider_format": ((result.get("metadata") or {}).get("provider_format")),
+                        "usage": ((result.get("metadata") or {}).get("usage") or {}),
+                    },
+                    "native_tool": True,
+                }
+            ]
+        else:
+            tool_calls = result.get("tool_calls") or []
+            if not tool_calls:
+                return None
+            observations = [
+                self._build_native_tool_observation(
+                    tool_call,
+                    fallback_used=bool(result.get("fallback_used", False)),
+                )
+                for tool_call in tool_calls
+            ]
+
+        evidence = [item for obs in observations for item in obs.get("evidence", [])]
+        return {
+            "success": True,
+            "answer": answer,
+            "trace_id": result.get("trace_id"),
+            "quality_status": result.get("quality_status", "pass"),
+            "confidence": result.get("confidence", 0.86),
+            "evidence": evidence,
+            "fallback_used": result.get("fallback_used", False),
+            "observations": observations,
+        }
+
     @staticmethod
     def _goal_prefers_live_search(goal: str) -> bool:
-        goal_text = (goal or "").strip()
+        goal_text = AgentPlanner._clean_query_text(AgentPlanner._extract_current_user_message(goal))
         lower_goal = goal_text.lower()
         return (
             AgentPlanner._is_current_events_query(goal_text, lower_goal)
-            or AgentPlanner._is_tech_learning_query(goal_text, lower_goal)
+            or AgentPlanner._is_explicit_search_request(goal_text, lower_goal)
+            or AgentPlanner._has_resource_intent(goal_text, lower_goal)
         )
 
     @staticmethod
@@ -815,12 +1598,14 @@ class AgentExecutor:
 
     async def execute_react(self, goal: str) -> Dict[str, Any]:
         try:
-            actual_goal = self._augment_goal_with_file_hints(goal)
+            raw_goal = self._augment_goal_with_file_hints((goal or "").strip())
+            actual_goal = self._augment_goal_with_file_hints(self._build_conversation_goal(goal))
+            base_step = self._next_step_number()
             if self._has_image_attachments():
                 direct_result = await self._execute_multimodal_direct(actual_goal, "react")
-                self._record_step(0, "goal", actual_goal, {})
+                self._record_step(base_step, "goal", actual_goal, {})
                 self._record_step(
-                    1,
+                    base_step + 1,
                     "final_answer",
                     direct_result["answer"],
                     {
@@ -833,9 +1618,136 @@ class AgentExecutor:
                 AgentRepository.update_session_status(self.db, self.session_id, "completed")
                 return {**direct_result, "iterations": 1}
 
-            plan = self.planner.plan(actual_goal)
+            if self._should_answer_from_context_directly(raw_goal):
+                direct_result = await self._execute_contextual_followup_direct(actual_goal, "react")
+                self._record_step(base_step, "goal", actual_goal, {})
+                self._record_step(
+                    base_step + 1,
+                    "thought",
+                    "检测到当前问题是在同一会话里继续追问细节，直接基于上文展开说明，无需额外检索。",
+                    {
+                        "quality_status": direct_result.get("quality_status"),
+                        "confidence": direct_result.get("confidence"),
+                    },
+                )
+                self._record_step(
+                    base_step + 2,
+                    "final_answer",
+                    direct_result["answer"],
+                    {
+                        "quality_status": direct_result.get("quality_status"),
+                        "confidence": direct_result.get("confidence"),
+                        "evidence": direct_result.get("evidence", []),
+                        "fallback_used": direct_result.get("fallback_used", False),
+                    },
+                )
+                AgentRepository.update_session_status(self.db, self.session_id, "completed")
+                return {**direct_result, "iterations": 1}
+
+            semantic_route = await self._run_semantic_router(actual_goal)
+
+            if semantic_route and semantic_route["intent"] == "direct_answer" and not semantic_route.get("needs_tool"):
+                direct_result = await self._execute_semantic_direct_answer(actual_goal, "react")
+                self._record_step(base_step, "goal", actual_goal, {})
+                self._record_step(
+                    base_step + 1,
+                    "thought",
+                    "语义路由判断当前问题可直接回答，无需额外调用工具。",
+                    {
+                        "quality_status": direct_result.get("quality_status"),
+                        "confidence": semantic_route.get("confidence", direct_result.get("confidence")),
+                    },
+                )
+                self._record_step(
+                    base_step + 2,
+                    "final_answer",
+                    direct_result["answer"],
+                    {
+                        "quality_status": direct_result.get("quality_status"),
+                        "confidence": direct_result.get("confidence"),
+                        "evidence": direct_result.get("evidence", []),
+                        "fallback_used": direct_result.get("fallback_used", False),
+                    },
+                )
+                AgentRepository.update_session_status(self.db, self.session_id, "completed")
+                return {**direct_result, "iterations": 1}
+
+            native_result = (
+                await self._try_native_tool_run(actual_goal, "react", semantic_route)
+                if semantic_route is not None
+                else await self._try_native_tool_run(actual_goal, "react")
+            )
+            if native_result:
+                trace_id = native_result.get("trace_id") or str(uuid4())
+                step_number = base_step
+                self._record_step(step_number, "goal", actual_goal, {"trace_id": trace_id, "step_id": step_number})
+                step_number += 1
+                self._record_step(
+                    step_number,
+                    "thought",
+                    "已优先使用模型原生工具完成本轮检索，再整合为最终回答。",
+                    {
+                        "trace_id": trace_id,
+                        "step_id": step_number,
+                        "quality_status": native_result.get("quality_status"),
+                        "confidence": native_result.get("confidence"),
+                        "native_tool": True,
+                    },
+                )
+                for observation in native_result.get("observations", []):
+                    step_number += 1
+                    tool_input = observation.get("tool_input") or {}
+                    self._record_step(
+                        step_number,
+                        "action",
+                        f'{observation["tool_name"]}: {json.dumps(tool_input, ensure_ascii=False)}',
+                        {
+                            "trace_id": trace_id,
+                            "step_id": step_number,
+                            "tool_name": observation["tool_name"],
+                            "tool_input": tool_input,
+                            "native_tool": True,
+                        },
+                    )
+                    step_number += 1
+                    self._record_step(
+                        step_number,
+                        "observation",
+                        observation,
+                        {
+                            "trace_id": trace_id,
+                            "step_id": step_number,
+                            "tool_name": observation["tool_name"],
+                            "quality_status": observation.get("quality_status"),
+                            "confidence": observation.get("confidence"),
+                            "fallback_used": observation.get("fallback_used", False),
+                            "native_tool": True,
+                        },
+                    )
+                final_step_number = step_number + 1
+                self._record_step(
+                    final_step_number,
+                    "final_answer",
+                    native_result["answer"],
+                    {
+                        "trace_id": trace_id,
+                        "step_id": final_step_number,
+                        "quality_status": native_result.get("quality_status"),
+                        "confidence": native_result.get("confidence"),
+                        "evidence": native_result.get("evidence", []),
+                        "fallback_used": native_result.get("fallback_used", False),
+                        "native_tool": True,
+                    },
+                )
+                AgentRepository.update_session_status(self.db, self.session_id, "completed")
+                return {
+                    **native_result,
+                    "iterations": len(native_result.get("observations", [])),
+                }
+
+            plan = self._build_plan_from_semantic_route(actual_goal, semantic_route) or self.planner.plan(actual_goal)
             trace_id = plan["trace_id"]
-            step_number = 0
+            step_number = base_step
             self._record_step(step_number, "goal", actual_goal, {"trace_id": trace_id, "step_id": step_number})
             step_number += 1
             self._record_step(
@@ -880,13 +1792,14 @@ class AgentExecutor:
             review = self.reviewer.review(plan, observations)
             final_answer = await self._build_final_answer_async(actual_goal, plan, observations, review)
             review["fallback_used"] = review.get("fallback_used", False) or self.final_answer_fallback_used
+            final_step_number = step_number + 1
             self._record_step(
-                step_number,
+                final_step_number,
                 "final_answer",
                 final_answer,
                 {
                     "trace_id": trace_id,
-                    "step_id": step_number,
+                    "step_id": final_step_number,
                     "quality_status": review["quality_status"],
                     "confidence": review["confidence"],
                     "evidence": review.get("evidence", []),
@@ -910,13 +1823,15 @@ class AgentExecutor:
             return {"success": False, "error": str(exc)}
 
     async def execute_react_stream(self, goal: str) -> AsyncGenerator[Dict[str, Any], None]:
-        actual_goal = self._augment_goal_with_file_hints(goal)
+        raw_goal = self._augment_goal_with_file_hints((goal or "").strip())
+        actual_goal = self._augment_goal_with_file_hints(self._build_conversation_goal(goal))
+        base_step = self._next_step_number()
         if self._has_image_attachments():
-            self._record_step(0, "goal", actual_goal, {})
-            yield {"type": "goal", "content": actual_goal, "step_number": 0}
+            self._record_step(base_step, "goal", actual_goal, {})
+            yield {"type": "goal", "content": actual_goal, "step_number": base_step}
             result = await self._execute_multimodal_direct(actual_goal, "react")
             self._record_step(
-                1,
+                base_step + 1,
                 "final_answer",
                 result["answer"],
                 {
@@ -930,7 +1845,7 @@ class AgentExecutor:
             yield {
                 "type": "final_answer",
                 "content": result["answer"],
-                "step_number": 1,
+                "step_number": base_step + 1,
                 "quality_status": result.get("quality_status", "pass"),
                 "confidence": result.get("confidence", 0.82),
                 "evidence": result.get("evidence", []),
@@ -944,9 +1859,229 @@ class AgentExecutor:
             }
             return
 
-        plan = self.planner.plan(actual_goal)
+        if self._should_answer_from_context_directly(raw_goal):
+            self._record_step(base_step, "goal", actual_goal, {})
+            yield {"type": "goal", "content": actual_goal, "step_number": base_step}
+            await asyncio.sleep(0.05)
+            self._record_step(
+                base_step + 1,
+                "thought",
+                "检测到当前问题是在同一会话里继续追问细节，直接基于上文展开说明，无需额外检索。",
+                {
+                    "quality_status": "pass",
+                    "confidence": 0.82,
+                },
+            )
+            yield {
+                "type": "thought",
+                "content": "检测到当前问题是在同一会话里继续追问细节，直接基于上文展开说明，无需额外检索。",
+                "step_number": base_step + 1,
+                "quality_status": "pass",
+                "confidence": 0.82,
+            }
+            await asyncio.sleep(0.05)
+            result = await self._execute_contextual_followup_direct(actual_goal, "react")
+            self._record_step(
+                base_step + 2,
+                "final_answer",
+                result["answer"],
+                {
+                    "quality_status": result.get("quality_status"),
+                    "confidence": result.get("confidence"),
+                    "evidence": result.get("evidence", []),
+                    "fallback_used": result.get("fallback_used", False),
+                },
+            )
+            AgentRepository.update_session_status(self.db, self.session_id, "completed")
+            yield {
+                "type": "final_answer",
+                "content": result["answer"],
+                "step_number": base_step + 2,
+                "quality_status": result.get("quality_status", "pass"),
+                "confidence": result.get("confidence", 0.82),
+                "evidence": result.get("evidence", []),
+                "fallback_used": result.get("fallback_used", False),
+            }
+            yield {
+                "type": "completed",
+                "quality_status": result.get("quality_status", "pass"),
+                "confidence": result.get("confidence", 0.82),
+                "fallback_used": result.get("fallback_used", False),
+            }
+            return
+
+        semantic_route = await self._run_semantic_router(actual_goal)
+
+        if semantic_route and semantic_route["intent"] == "direct_answer" and not semantic_route.get("needs_tool"):
+            self._record_step(base_step, "goal", actual_goal, {})
+            yield {"type": "goal", "content": actual_goal, "step_number": base_step}
+            await asyncio.sleep(0.05)
+            self._record_step(
+                base_step + 1,
+                "thought",
+                "语义路由判断当前问题可直接回答，无需额外调用工具。",
+                {
+                    "quality_status": "pass",
+                    "confidence": semantic_route.get("confidence", 0.8),
+                },
+            )
+            yield {
+                "type": "thought",
+                "content": "语义路由判断当前问题可直接回答，无需额外调用工具。",
+                "step_number": base_step + 1,
+                "quality_status": "pass",
+                "confidence": semantic_route.get("confidence", 0.8),
+            }
+            await asyncio.sleep(0.05)
+            result = await self._execute_semantic_direct_answer(actual_goal, "react")
+            self._record_step(
+                base_step + 2,
+                "final_answer",
+                result["answer"],
+                {
+                    "quality_status": result.get("quality_status"),
+                    "confidence": result.get("confidence"),
+                    "evidence": result.get("evidence", []),
+                    "fallback_used": result.get("fallback_used", False),
+                },
+            )
+            AgentRepository.update_session_status(self.db, self.session_id, "completed")
+            yield {
+                "type": "final_answer",
+                "content": result["answer"],
+                "step_number": base_step + 2,
+                "quality_status": result.get("quality_status", "pass"),
+                "confidence": result.get("confidence", 0.8),
+                "evidence": result.get("evidence", []),
+                "fallback_used": result.get("fallback_used", False),
+            }
+            yield {
+                "type": "completed",
+                "quality_status": result.get("quality_status", "pass"),
+                "confidence": result.get("confidence", 0.8),
+                "fallback_used": result.get("fallback_used", False),
+            }
+            return
+
+        native_result = (
+            await self._try_native_tool_run(actual_goal, "react", semantic_route)
+            if semantic_route is not None
+            else await self._try_native_tool_run(actual_goal, "react")
+        )
+        if native_result:
+            trace_id = native_result.get("trace_id") or str(uuid4())
+            step_number = base_step
+            self._record_step(step_number, "goal", actual_goal, {"trace_id": trace_id, "step_id": step_number})
+            yield {"type": "goal", "content": actual_goal, "step_number": step_number, "trace_id": trace_id}
+            await asyncio.sleep(0.05)
+            step_number += 1
+            self._record_step(
+                step_number,
+                "thought",
+                "已优先使用模型原生工具完成本轮检索，再整合为最终回答。",
+                {
+                    "trace_id": trace_id,
+                    "step_id": step_number,
+                    "quality_status": native_result.get("quality_status"),
+                    "confidence": native_result.get("confidence"),
+                    "native_tool": True,
+                },
+            )
+            yield {
+                "type": "thought",
+                "content": "已优先使用模型原生工具完成本轮检索，再整合为最终回答。",
+                "step_number": step_number,
+                "trace_id": trace_id,
+                "quality_status": native_result.get("quality_status"),
+                "confidence": native_result.get("confidence"),
+            }
+            await asyncio.sleep(0.05)
+
+            for observation in native_result.get("observations", []):
+                step_number += 1
+                tool_input = observation.get("tool_input") or {}
+                self._record_step(
+                    step_number,
+                    "action",
+                    f'{observation["tool_name"]}: {json.dumps(tool_input, ensure_ascii=False)}',
+                    {
+                        "trace_id": trace_id,
+                        "step_id": step_number,
+                        "tool_name": observation["tool_name"],
+                        "tool_input": tool_input,
+                        "native_tool": True,
+                    },
+                )
+                yield {
+                    "type": "action",
+                    "tool_name": observation["tool_name"],
+                    "tool_input": tool_input,
+                    "step_number": step_number,
+                    "trace_id": trace_id,
+                    "native_tool": True,
+                }
+                step_number += 1
+                self._record_step(
+                    step_number,
+                    "observation",
+                    observation,
+                    {
+                        "trace_id": trace_id,
+                        "step_id": step_number,
+                        "tool_name": observation["tool_name"],
+                        "quality_status": observation.get("quality_status"),
+                        "confidence": observation.get("confidence"),
+                        "fallback_used": observation.get("fallback_used", False),
+                        "native_tool": True,
+                    },
+                )
+                yield {
+                    "type": "observation",
+                    "result": observation,
+                    "step_number": step_number,
+                    "trace_id": trace_id,
+                    "native_tool": True,
+                }
+                await asyncio.sleep(0.05)
+
+            final_step_number = step_number + 1
+            self._record_step(
+                final_step_number,
+                "final_answer",
+                native_result["answer"],
+                {
+                    "trace_id": trace_id,
+                    "step_id": final_step_number,
+                    "quality_status": native_result.get("quality_status"),
+                    "confidence": native_result.get("confidence"),
+                    "evidence": native_result.get("evidence", []),
+                    "fallback_used": native_result.get("fallback_used", False),
+                    "native_tool": True,
+                },
+            )
+            AgentRepository.update_session_status(self.db, self.session_id, "completed")
+            yield {
+                "type": "final_answer",
+                "content": native_result["answer"],
+                "step_number": final_step_number,
+                "trace_id": trace_id,
+                "quality_status": native_result.get("quality_status"),
+                "confidence": native_result.get("confidence"),
+                "evidence": native_result.get("evidence", []),
+                "fallback_used": native_result.get("fallback_used", False),
+            }
+            yield {
+                "type": "completed",
+                "trace_id": trace_id,
+                "quality_status": native_result.get("quality_status"),
+                "confidence": native_result.get("confidence"),
+                "fallback_used": native_result.get("fallback_used", False),
+            }
+            return
+
+        plan = self._build_plan_from_semantic_route(actual_goal, semantic_route) or self.planner.plan(actual_goal)
         trace_id = plan["trace_id"]
-        step_number = 0
+        step_number = base_step
         self._record_step(step_number, "goal", actual_goal, {"trace_id": trace_id, "step_id": step_number})
         yield {"type": "goal", "content": actual_goal, "step_number": step_number, "trace_id": trace_id}
         await asyncio.sleep(0.05)
@@ -993,7 +2128,10 @@ class AgentExecutor:
             step_number += 1
 
             if self._should_add_supplemental_web_search(actual_goal, observation, observations):
-                supplemental_input = {"query": actual_goal, "max_results": 5}
+                supplemental_input = {
+                    "query": AgentPlanner._build_context_aware_query(actual_goal),
+                    "max_results": 5,
+                }
                 yield {
                     "type": "action",
                     "tool_name": "web_search",
@@ -1055,11 +2193,12 @@ class AgentExecutor:
 
     async def execute_cot(self, goal: str) -> Dict[str, Any]:
         try:
-            actual_goal = self._augment_goal_with_file_hints(goal)
+            actual_goal = self._augment_goal_with_file_hints(self._build_conversation_goal(goal))
+            base_step = self._next_step_number()
             if self._has_image_attachments():
                 result = await self._execute_multimodal_direct(actual_goal, "cot")
-                self._record_step(0, "goal", actual_goal, {})
-                self._record_step(1, "final_answer", result["answer"], {})
+                self._record_step(base_step, "goal", actual_goal, {})
+                self._record_step(base_step + 1, "final_answer", result["answer"], {})
                 AgentRepository.update_session_status(self.db, self.session_id, "completed")
                 return {**result, "iterations": 1}
             result = await AIService.call_ai_async(
@@ -1070,8 +2209,8 @@ class AgentExecutor:
                 provider=self.agent_provider,
             )
             answer = result.get("text", "")
-            self._record_step(0, "goal", actual_goal, {})
-            self._record_step(1, "final_answer", answer, {})
+            self._record_step(base_step, "goal", actual_goal, {})
+            self._record_step(base_step + 1, "final_answer", answer, {})
             AgentRepository.update_session_status(self.db, self.session_id, "completed")
             return {"success": True, "answer": answer, "iterations": 1}
         except Exception as exc:
@@ -1124,11 +2263,12 @@ class AgentExecutor:
         actual_goal = goal
 
         try:
-            actual_goal = self._augment_goal_with_file_hints(goal)
+            actual_goal = self._augment_goal_with_file_hints(self._build_conversation_goal(goal))
+            base_step = self._next_step_number()
             if self._has_image_attachments():
                 result = await self._execute_multimodal_direct(actual_goal, "function_calling")
-                self._record_step(0, "goal", actual_goal, {})
-                self._record_step(1, "final_answer", result["answer"], {})
+                self._record_step(base_step, "goal", actual_goal, {})
+                self._record_step(base_step + 1, "final_answer", result["answer"], {})
                 AgentRepository.update_session_status(self.db, self.session_id, "completed")
                 return {**result, "iterations": 1}
             native_result = await AIService.call_ai_with_tools_async(
@@ -1148,25 +2288,25 @@ class AgentExecutor:
                 if not answer:
                     raise ValueError("原生 function calling 未返回可执行工具")
 
-                self._record_step(0, "goal", actual_goal, {"trace_id": trace_id, "step_id": 0})
+                self._record_step(base_step, "goal", actual_goal, {"trace_id": trace_id, "step_id": base_step})
                 self._record_step(
-                    1,
+                    base_step + 1,
                     "thought",
                     "模型已直接返回最终答案，无需继续调用工具。",
                     {
                         "trace_id": trace_id,
-                        "step_id": 1,
+                        "step_id": base_step + 1,
                         "quality_status": native_result.get("quality_status"),
                         "confidence": native_result.get("confidence"),
                     },
                 )
                 self._record_step(
-                    2,
+                    base_step + 2,
                     "final_answer",
                     answer,
                     {
                         "trace_id": trace_id,
-                        "step_id": 2,
+                        "step_id": base_step + 2,
                         "quality_status": native_result.get("quality_status"),
                         "confidence": native_result.get("confidence"),
                         "fallback_used": native_result.get("fallback_used", False),
@@ -1192,7 +2332,7 @@ class AgentExecutor:
                 "tool_steps": tool_steps,
             }
 
-            step_number = 0
+            step_number = base_step
             self._record_step(step_number, "goal", actual_goal, {"trace_id": trace_id, "step_id": step_number})
             step_number += 1
             self._record_step(
@@ -1226,13 +2366,14 @@ class AgentExecutor:
             review["fallback_used"] = review.get("fallback_used", False) or native_result.get("fallback_used", False)
             final_answer = await self._build_final_answer_async(actual_goal, plan, observations, review)
             review["fallback_used"] = review.get("fallback_used", False) or self.final_answer_fallback_used
+            final_step_number = step_number + 1
             self._record_step(
-                step_number,
+                final_step_number,
                 "final_answer",
                 final_answer,
                 {
                     "trace_id": trace_id,
-                    "step_id": step_number,
+                    "step_id": final_step_number,
                     "quality_status": review["quality_status"],
                     "confidence": review["confidence"],
                     "evidence": review.get("evidence", []),

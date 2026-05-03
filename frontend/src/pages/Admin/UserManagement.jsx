@@ -16,6 +16,7 @@ const UserManagement = () => {
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [isMobileLayout, setIsMobileLayout] = useState(getIsMobileLayout);
+  const [roleError, setRoleError] = useState(null);
   const { theme } = useThemeStore();
   const isDark = theme === 'dark';
 
@@ -67,12 +68,13 @@ const UserManagement = () => {
   };
 
   const handleRoleChange = async (userId, newRole) => {
+    setRoleError(null);
     try {
       await updateUserRole(userId, newRole);
       await fetchUsers();
     } catch (error) {
       console.error('更新用户角色失败:', error);
-      alert('更新失败，请稍后重试');
+      setRoleError('更新失败，请稍后重试');
     }
   };
 
@@ -97,6 +99,11 @@ const UserManagement = () => {
   return (
     <AdminLayout>
       <div className="space-y-5 p-4 sm:p-6">
+        {roleError && (
+          <div className={`rounded-lg px-3 py-2 text-sm ${isDark ? 'bg-rose-400/10 text-rose-200' : 'bg-rose-50 text-rose-700'}`}>
+            {roleError}
+          </div>
+        )}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className={`text-2xl font-bold ${palette.heading}`}>用户管理</h2>

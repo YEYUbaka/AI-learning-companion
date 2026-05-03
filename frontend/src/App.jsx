@@ -9,6 +9,7 @@ import Quiz from './pages/Quiz';
 import QuizResult from './pages/QuizResult';
 import LearningMap from './pages/LearningMap';
 import KnowledgeDocument from './pages/KnowledgeDocument';
+import NotFound from './pages/NotFound';
 import AdminDashboard from './pages/Admin/Dashboard';
 import ModelManagement from './pages/Admin/ModelManagement';
 import PromptEditor from './pages/Admin/PromptEditor';
@@ -192,6 +193,7 @@ const AppContent = () => {
             </AdminProtectedRoute>
           }
         />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </div>
   );

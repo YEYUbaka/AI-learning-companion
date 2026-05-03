@@ -8,6 +8,16 @@ from utils.model_registry import AIProvider, registry
 
 
 class AuthFailingProvider(AIProvider):
+    def __init__(self):
+        super().__init__(
+            provider_name="deepseek",
+            api_key="invalid",
+            base_url="https://api.example.com/v1",
+            model_name="test-model",
+            temperature=0.0,
+            max_tokens=4096,
+            top_p=1.0,
+        )
     def call(self, messages, **kwargs):
         request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
         response = httpx.Response(

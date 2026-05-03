@@ -168,16 +168,32 @@ def _extract_response_text(payload: Dict[str, Any]) -> str:
 
 def _extract_response_tool_calls(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     tool_calls: List[Dict[str, Any]] = []
+    builtin_tool_types = {
+        "tool_call",
+        "function_call",
+        "web_search",
+        "web_search_call",
+        "web_extractor",
+        "web_extractor_call",
+        "knowledge_search",
+        "knowledge_search_call",
+        "code_interpreter",
+        "code_interpreter_call",
+        "image_process",
+        "image_process_call",
+        "mcp",
+        "mcp_call",
+    }
     for item in payload.get("output") or []:
         if not isinstance(item, dict):
             continue
         item_type = item.get("type")
-        if item_type in {"function_call", "tool_call"}:
+        if item_type in builtin_tool_types:
             tool_calls.append(item)
             continue
         if item_type == "message":
             for content in item.get("content") or []:
-                if isinstance(content, dict) and content.get("type") in {"tool_call", "function_call"}:
+                if isinstance(content, dict) and content.get("type") in builtin_tool_types:
                     tool_calls.append(content)
     return tool_calls
 
@@ -191,6 +207,59 @@ def _flatten_stream_sse_lines(lines: Iterable[str]) -> Iterable[str]:
             yield line[6:]
 
 
+def _parse_http_error_payload(response: httpx.Response) -> Tuple[str, str]:
+    try:
+        error_data = response.json()
+    except Exception:  # pylint: disable=broad-except
+        return "", ""
+
+    error_obj = error_data.get("error") if isinstance(error_data, dict) else {}
+    if not isinstance(error_obj, dict):
+        error_obj = {}
+    code = str(error_obj.get("code") or error_data.get("code") or "").strip()
+    detail = str(error_obj.get("message") or error_data.get("message") or "").strip()
+    return code, detail
+
+
+def _summarize_http_error(provider_name: str, response: httpx.Response) -> Tuple[str, str]:
+    error_code, detail = _parse_http_error_payload(response)
+    detail_lower = detail.lower()
+    auth_markers = [
+        "api key",
+        "invalid api key",
+        "incorrect api key",
+        "authentication",
+        "unauthorized",
+        "access token",
+        "invalid token",
+        "token expired",
+        "signature",
+    ]
+
+    if error_code == "ModelNotOpen" or "has not activated the model" in detail_lower:
+        model_match = re.search(r"model\s+([A-Za-z0-9._:-]+)", detail)
+        model_name = model_match.group(1) if model_match else "当前模型"
+        return f"{provider_name} 模型未开通：{model_name}，请先在火山方舟控制台开通该模型服务", "configuration"
+
+    if response.status_code == 400:
+        if error_code in {"InvalidApiKey", "Unauthorized", "AuthenticationFailed"} or any(marker in detail_lower for marker in auth_markers):
+            return f"{provider_name} API key is invalid or expired", "auth"
+        if detail:
+            return f"{provider_name} request parameters are invalid: {detail[:180]}", "bad_request"
+        return f"{provider_name} request parameters are invalid", "bad_request"
+    if response.status_code == 401:
+        return f"{provider_name} authentication failed", "auth"
+    if response.status_code == 403:
+        return f"{provider_name} access forbidden", "auth"
+    if response.status_code == 404 and detail:
+        return f"{provider_name} resource not found: {detail[:180]}", "configuration"
+    if response.status_code == 429:
+        return f"{provider_name} rate limited", "rate_limit"
+    if response.status_code in {500, 502, 503, 504}:
+        return f"{provider_name} service is temporarily unavailable", "upstream_server"
+    return f"{provider_name} call failed (HTTP {response.status_code})", "other"
+
+
 def _parse_doubao_model_version(model_name: str) -> Optional[int]:
     match = re.search(r"(\d{6})$", model_name or "")
     if not match:
@@ -201,9 +270,26 @@ def _parse_doubao_model_version(model_name: str) -> Optional[int]:
         return None
 
 
-def _infer_doubao_supports_responses(model_name: str, explicit: Optional[bool] = None) -> bool:
-    if explicit is not None:
-        return explicit
+def _coerce_optional_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off", ""}:
+            return False
+    return bool(value)
+
+
+def _infer_doubao_supports_responses(model_name: str, explicit: Optional[Any] = None) -> bool:
+    explicit_bool = _coerce_optional_bool(explicit)
+    if explicit_bool is not None:
+        return explicit_bool
     if not model_name:
         return True
     if model_name == "doubao-1-5-pro-32k-character-250715":
@@ -214,13 +300,82 @@ def _infer_doubao_supports_responses(model_name: str, explicit: Optional[bool] =
     return version >= 250615
 
 
-def _infer_supports_vision(provider_name: str, model_name: str, explicit: Optional[bool] = None) -> bool:
-    if explicit is not None:
-        return explicit
+def _infer_supports_vision(provider_name: str, model_name: str, explicit: Optional[Any] = None) -> bool:
+    explicit_bool = _coerce_optional_bool(explicit)
+    if explicit_bool is not None:
+        return explicit_bool
     lower_model = (model_name or "").lower()
     if any(token in lower_model for token in ["vision", "vl", "gpt-4o", "gpt-4.1", "claude-3", "gemini"]):
         return True
+    if provider_name == "doubao" and re.search(r"doubao-seed-2(?:[.-])?0-(pro|lite|mini)", lower_model):
+        return True
     return provider_name == "doubao" and "vision" in lower_model
+
+
+def _infer_qwen_supports_responses(model_name: str, explicit: Optional[Any] = None) -> bool:
+    explicit_bool = _coerce_optional_bool(explicit)
+    if explicit_bool is not None:
+        return explicit_bool
+    lower_model = (model_name or "").lower()
+    if lower_model in {"qwen3-max"}:
+        return True
+    if re.match(r"^qwen3-max-\d{4}-\d{2}-\d{2}$", lower_model):
+        return True
+    return any(
+        lower_model.startswith(prefix)
+        for prefix in (
+            "qwen3.6-plus",
+            "qwen3.6-flash",
+            "qwen3.5-plus",
+            "qwen3.5-flash",
+        )
+    )
+
+
+def _infer_qwen_chat_native_search_support(model_name: str) -> bool:
+    lower_model = (model_name or "").lower()
+    return any(
+        lower_model.startswith(prefix)
+        for prefix in (
+            "qwen3-max",
+            "qwen-max",
+            "qwen3.6-plus",
+            "qwen3.5-plus",
+            "qwen-plus",
+            "qwen3.6-flash",
+            "qwen3.5-flash",
+            "qwen-flash",
+            "qwen-turbo",
+            "qwq-plus",
+            "qwen3.5-omni-plus",
+            "qwen3.5-omni-flash",
+            "qwen3.5-omni-plus-realtime",
+            "qwen3.5-omni-flash-realtime",
+            "qwen-plus-character",
+            "qwen-flash-character",
+        )
+    )
+
+
+def _infer_native_search_mode(
+    provider_name: str,
+    model_name: str,
+    *,
+    supports_responses_api: bool,
+    explicit: Optional[Any] = None,
+) -> str:
+    explicit_mode = str(explicit or "").strip().lower()
+    if explicit_mode in {"none", "qwen_chat_enable_search", "responses_builtin_tools"}:
+        return explicit_mode
+    if provider_name == "qwen":
+        if supports_responses_api:
+            return "responses_builtin_tools"
+        if _infer_qwen_chat_native_search_support(model_name):
+            return "qwen_chat_enable_search"
+        return "none"
+    if provider_name == "doubao":
+        return "responses_builtin_tools" if supports_responses_api else "none"
+    return "none"
 
 
 def _provider_template(
@@ -236,6 +391,7 @@ def _provider_template(
     supports_vision: bool = False,
     supports_previous_response_id: bool = False,
     native_tools: Optional[List[str]] = None,
+    native_search_mode: str = "none",
     requires_extra_headers: bool = False,
     extra_header_keys: Optional[List[str]] = None,
     extra_headers: Optional[Dict[str, str]] = None,
@@ -259,6 +415,7 @@ def _provider_template(
             "supports_vision": supports_vision,
             "supports_previous_response_id": supports_previous_response_id,
             "native_tools": native_tools or [],
+            "native_search_mode": native_search_mode,
         },
     }
 
@@ -287,6 +444,7 @@ PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
         available_models=["qwen-turbo", "qwen-plus", "qwen-max", "qwen-long"],
         tool_calling=True,
         reasoning=True,
+        native_search_mode="qwen_chat_enable_search",
     ),
     "xinghuo": _provider_template(
         display_name="Xinghuo",
@@ -336,6 +494,7 @@ PROVIDER_TEMPLATES: Dict[str, Dict[str, Any]] = {
         supports_responses_api=True,
         supports_previous_response_id=True,
         native_tools=["web_search", "knowledge_search", "image_process", "mcp"],
+        native_search_mode="responses_builtin_tools",
     ),
     "openai_compat": _provider_template(
         display_name="OpenAI Compatible",
@@ -432,6 +591,12 @@ class AIProvider(ABC):
 
 
 class OpenAICompatProvider(AIProvider):
+    @staticmethod
+    def _tools_are_chat_compatible(tools: Optional[List[Dict[str, Any]]]) -> bool:
+        if not tools:
+            return True
+        return all((tool or {}).get("type") == "function" for tool in tools if isinstance(tool, dict))
+
     def _build_payload(
         self,
         *,
@@ -461,8 +626,14 @@ class OpenAICompatProvider(AIProvider):
             "top_p": kwargs.get("top_p", self.top_p),
         }
         if tools:
+            if not self._tools_are_chat_compatible(tools):
+                raise ValueError(f"{self.provider_name} chat/completions only supports function tools")
             payload["tools"] = tools
             payload["tool_choice"] = kwargs.get("tool_choice", "auto")
+        if "enable_search" in kwargs:
+            payload["enable_search"] = bool(kwargs["enable_search"])
+        if kwargs.get("search_options") is not None:
+            payload["search_options"] = kwargs["search_options"]
         return payload
 
     def call(
@@ -514,6 +685,9 @@ class OpenAICompatProvider(AIProvider):
                             model_name = chunk_data["model"]
             latency = (time.time() - start_time) * 1000
             yield f'data: {json.dumps({"type": "done", "latency_ms": round(latency, 2), "model": model_name}, ensure_ascii=False)}\n\n'
+        except httpx.HTTPStatusError as exc:
+            message, _ = _summarize_http_error(self.provider_name, exc.response)
+            yield f'data: {json.dumps({"type": "error", "message": message[:300]}, ensure_ascii=False)}\n\n'
         except Exception as exc:  # pylint: disable=broad-except
             yield f'data: {json.dumps({"type": "error", "message": str(exc)[:300]}, ensure_ascii=False)}\n\n'
 
@@ -531,6 +705,39 @@ class OpenAICompatProvider(AIProvider):
 
 
 class ResponsesProvider(AIProvider):
+    def _build_chat_fallback_provider(self) -> OpenAICompatProvider:
+        return OpenAICompatProvider(
+            provider_name=self.provider_name,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            model_name=self.model_name,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            top_p=self.top_p,
+            extra_headers=self.extra_headers,
+            timeout=self.timeout,
+            capabilities=self.capabilities,
+        )
+
+    @staticmethod
+    def _tools_are_chat_compatible(tools: Optional[List[Dict[str, Any]]]) -> bool:
+        if not tools:
+            return True
+        return all((tool or {}).get("type") == "function" for tool in tools if isinstance(tool, dict))
+
+    def _can_fallback_to_chat_completions(
+        self,
+        *,
+        response: httpx.Response,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
+    ) -> bool:
+        if response.status_code not in {404, 405, 501}:
+            return False
+        if kwargs.get("instructions") or kwargs.get("previous_response_id") or kwargs.get("caching") or kwargs.get("thinking"):
+            return False
+        return self._tools_are_chat_compatible(tools)
+
     def _build_payload(
         self,
         *,
@@ -579,11 +786,27 @@ class ResponsesProvider(AIProvider):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         endpoint = self.base_url + "/responses"
-        payload = self._build_payload(messages=messages, input_items=input_items, tools=kwargs.pop("tools", None), **kwargs)
-        with httpx.Client(timeout=self.timeout) as client:
-            response = client.post(endpoint, json=payload, headers=self._build_headers())
-            response.raise_for_status()
-            result = response.json()
+        tools = kwargs.pop("tools", None)
+        payload = self._build_payload(messages=messages, input_items=input_items, tools=tools, **kwargs)
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(endpoint, json=payload, headers=self._build_headers())
+                response.raise_for_status()
+                result = response.json()
+        except httpx.HTTPStatusError as exc:
+            if self._can_fallback_to_chat_completions(response=exc.response, tools=tools, **kwargs):
+                logger.warning(
+                    "Responses API unavailable for %s (%s), falling back to /chat/completions",
+                    self.model_name,
+                    exc.response.status_code,
+                )
+                return self._build_chat_fallback_provider().call(
+                    messages=messages,
+                    input_items=input_items,
+                    tools=tools,
+                    **kwargs,
+                )
+            raise
         return {
             "text": _extract_response_text(result),
             "usage": result.get("usage", {}),
@@ -602,7 +825,8 @@ class ResponsesProvider(AIProvider):
         **kwargs: Any,
     ) -> Generator[str, None, None]:
         endpoint = self.base_url + "/responses"
-        payload = self._build_payload(messages=messages, input_items=input_items, tools=kwargs.pop("tools", None), **kwargs)
+        tools = kwargs.pop("tools", None)
+        payload = self._build_payload(messages=messages, input_items=input_items, tools=tools, **kwargs)
         payload["stream"] = True
         start_time = time.time()
         try:
@@ -623,6 +847,22 @@ class ResponsesProvider(AIProvider):
                             model_name = chunk_data["model"]
             latency = (time.time() - start_time) * 1000
             yield f'data: {json.dumps({"type": "done", "latency_ms": round(latency, 2), "model": model_name}, ensure_ascii=False)}\n\n'
+        except httpx.HTTPStatusError as exc:
+            if self._can_fallback_to_chat_completions(response=exc.response, tools=tools, **kwargs):
+                logger.warning(
+                    "Responses stream unavailable for %s (%s), falling back to /chat/completions",
+                    self.model_name,
+                    exc.response.status_code,
+                )
+                yield from self._build_chat_fallback_provider().call_stream(
+                    messages=messages,
+                    input_items=input_items,
+                    tools=tools,
+                    **kwargs,
+                )
+                return
+            message, _ = _summarize_http_error(self.provider_name, exc.response)
+            yield f'data: {json.dumps({"type": "error", "message": message[:300]}, ensure_ascii=False)}\n\n'
         except Exception as exc:  # pylint: disable=broad-except
             yield f'data: {json.dumps({"type": "error", "message": str(exc)[:300]}, ensure_ascii=False)}\n\n'
 
@@ -880,15 +1120,37 @@ class ModelRegistry:
             base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
         template_caps = dict(template.get("capabilities") or {})
-        supports_responses_api = params.get("supports_responses_api")
-        supports_vision = params.get("supports_vision")
+        supports_responses_api = _coerce_optional_bool(params.get("supports_responses_api"))
+        supports_vision = _coerce_optional_bool(params.get("supports_vision"))
+        supports_previous_response_id = _coerce_optional_bool(params.get("supports_previous_response_id"))
+        native_search_mode = params.get("native_search_mode")
 
         if normalized == "doubao":
             template_caps["supports_responses_api"] = _infer_doubao_supports_responses(model_name, supports_responses_api)
+        elif normalized == "qwen":
+            template_caps["supports_responses_api"] = _infer_qwen_supports_responses(model_name, supports_responses_api)
         elif supports_responses_api is not None:
-            template_caps["supports_responses_api"] = bool(supports_responses_api)
+            template_caps["supports_responses_api"] = supports_responses_api
 
         template_caps["supports_vision"] = _infer_supports_vision(normalized, model_name, supports_vision)
+        if supports_previous_response_id is not None:
+            template_caps["supports_previous_response_id"] = supports_previous_response_id
+
+        template_caps["native_search_mode"] = _infer_native_search_mode(
+            normalized,
+            model_name,
+            supports_responses_api=bool(template_caps.get("supports_responses_api")),
+            explicit=native_search_mode,
+        )
+
+        if normalized == "qwen":
+            if template_caps["native_search_mode"] == "responses_builtin_tools":
+                template_caps["native_tools"] = ["web_search", "web_extractor", "code_interpreter"]
+            else:
+                template_caps["native_tools"] = []
+        elif normalized == "doubao" and template_caps["native_search_mode"] == "none":
+            template_caps["native_tools"] = []
+
         if "native_tools" in params and isinstance(params["native_tools"], list):
             template_caps["native_tools"] = params["native_tools"]
 
@@ -915,30 +1177,12 @@ class ModelRegistry:
                 provider_kwargs["api_key"] = api_key
             return WenxinProvider(secret_key=secret_key, **provider_kwargs)
 
-        if normalized == "doubao" and template_caps.get("supports_responses_api"):
+        if normalized in {"doubao", "qwen"} and template_caps.get("supports_responses_api"):
             return ResponsesProvider(**provider_kwargs)
         return OpenAICompatProvider(**provider_kwargs)
 
     def _parse_http_error(self, provider_name: str, status_code: int, response: httpx.Response) -> Tuple[str, str]:
-        try:
-            error_data = response.json()
-            detail = error_data.get("error", {}).get("message") or error_data.get("message") or ""
-        except Exception:  # pylint: disable=broad-except
-            detail = ""
-        detail_lower = detail.lower()
-        if status_code == 400:
-            if any(token in detail_lower for token in ["invalid", "api", "key", "token"]):
-                return f"{provider_name} API key is invalid or expired", "auth"
-            return f"{provider_name} request parameters are invalid", "bad_request"
-        if status_code == 401:
-            return f"{provider_name} authentication failed", "auth"
-        if status_code == 403:
-            return f"{provider_name} access forbidden", "auth"
-        if status_code == 429:
-            return f"{provider_name} rate limited", "rate_limit"
-        if status_code in {500, 502, 503, 504}:
-            return f"{provider_name} service is temporarily unavailable", "upstream_server"
-        return f"{provider_name} call failed (HTTP {status_code})", "other"
+        return _summarize_http_error(provider_name, response)
 
     def _classify_generic_error(self, provider_name: str, error_str: str) -> Tuple[str, Optional[int], str]:
         lowered = (error_str or "").lower()
@@ -979,7 +1223,7 @@ class ModelRegistry:
         if auth_errors and len(auth_errors) == len(error_details):
             upstream_status = self._first_status_code(auth_errors) or 401
             return UpstreamServiceError(
-                "All configured AI providers failed authentication",
+                f"AI 上游认证失败（上游 HTTP {upstream_status}），请检查管理后台 API Key 配置",
                 http_status=502,
                 upstream_status=upstream_status,
                 provider=auth_errors[0].get("provider"),

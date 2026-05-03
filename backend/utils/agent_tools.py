@@ -8,14 +8,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urlparse
 
+import httpx
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from core.logger import logger
+from repositories.model_config_repo import ModelConfigRepository
 from repositories.quiz_paper_repo import QuizPaperRepository
+from services.feature_model_config_service import FeatureModelConfigService
 from services.learning_map_service import LearningMapService
 from services.quiz_paper_service import QuizPaperService
 from utils.file_parser import parse_file
+from utils.model_registry import OpenAICompatProvider, ResponsesProvider, registry
 
 
 class ToolParameter(BaseModel):
@@ -107,6 +111,7 @@ class BaseTool(ABC):
                         for parameter in self.definition.parameters
                         if parameter.required
                     ],
+                    "additionalProperties": False,
                 },
             },
         }
@@ -1044,6 +1049,45 @@ class WebSearchTool(BaseTool):
         r"\u5b66\u4e60|\u8def\u5f84|\u8def\u7ebf|\u8ba1\u5212|\u6559\u7a0b|\u9762\u8bd5|roadmap|tutorial|guide|interview|curriculum|path",
         re.IGNORECASE,
     )
+    WEATHER_QUERY_PATTERN = re.compile(
+        r"\u5929\u6c14|\u6c14\u6e29|\u6e29\u5ea6|\u964d\u96e8|\u4e0b\u96e8|\u98ce\u529b|\u7a7a\u6c14\u8d28\u91cf|weather|forecast|temperature|rain",
+        re.IGNORECASE,
+    )
+    WEATHER_TIME_PATTERN = re.compile(
+        r"\u4eca\u5929|\u660e\u5929|\u540e\u5929|\u4eca\u665a|\u660e\u665a|\u672c\u5468|\u8fd9\u5468|7\u5929|15\u5929|40\u5929|today|tomorrow|tonight|this week",
+        re.IGNORECASE,
+    )
+    WEATHER_RESULT_PATTERN = re.compile(
+        r"\u5929\u6c14|\u6c14\u8c61|\u9884\u62a5|\u6c14\u6e29|\u964d\u6c34|weather|forecast|temperature",
+        re.IGNORECASE,
+    )
+    WEATHER_RESULT_DOMAINS = {
+        "weather.com.cn",
+        "www.weather.com.cn",
+        "nmc.cn",
+        "www.nmc.cn",
+        "tianqi.com",
+        "www.tianqi.com",
+        "qq.ip138.com",
+        "tianqi.so.com",
+    }
+    CHINESE_QUERY_PATTERN = re.compile(r"[\u4e00-\u9fff]")
+
+    @staticmethod
+    def _build_weather_user_location(city: str) -> Dict[str, Any]:
+        payload = {"type": "approximate"}
+        if city:
+            payload["country"] = "中国"
+            payload["city"] = city
+        return payload
+
+    @staticmethod
+    def _build_weather_summary_result(title: str, summary: str, url: str = "") -> Dict[str, Any]:
+        return {
+            "title": title,
+            "snippet": summary,
+            "url": url,
+        }
 
     @classmethod
     def _build_keyword_query(cls, query: str) -> str:
@@ -1067,7 +1111,391 @@ class WebSearchTool(BaseTool):
         return " ".join(optimized_terms)
 
     @classmethod
+    def _is_weather_query(cls, query: str) -> bool:
+        return bool(cls.WEATHER_QUERY_PATTERN.search(query or ""))
+
+    @classmethod
+    def _infer_region(cls, query: str) -> str:
+        return "cn-zh" if cls.CHINESE_QUERY_PATTERN.search(query or "") else "us-en"
+
+    @classmethod
+    def _extract_weather_location(cls, query: str) -> str:
+        raw_query = re.sub(r"\s+", " ", (query or "").strip())
+        if not raw_query:
+            return ""
+
+        if cls.CHINESE_QUERY_PATTERN.search(raw_query):
+            cleaned = re.sub(
+                r"\u4eca\u5929|\u660e\u5929|\u540e\u5929|\u4eca\u665a|\u660e\u665a|\u672c\u5468|\u8fd9\u5468|7\u5929|15\u5929|40\u5929|\u5929\u6c14|\u5929\u6c14\u9884\u62a5|\u6c14\u6e29|\u6e29\u5ea6|\u964d\u96e8|\u4e0b\u96e8|\u98ce\u529b|\u7a7a\u6c14\u8d28\u91cf|\u600e\u4e48\u6837|\u600e\u4e48|\u5982\u4f55|\u5417|\uff1f|\?",
+                " ",
+                raw_query,
+                flags=re.IGNORECASE,
+            )
+            tokens = [token for token in re.findall(r"[\u4e00-\u9fff]{2,}", cleaned) if token]
+            return tokens[0] if tokens else ""
+
+        lower_query = raw_query.lower()
+        match = re.search(r"\bin\s+([a-z][a-z\s-]{1,30})", lower_query)
+        if match:
+            return match.group(1).strip()
+        tokens = re.findall(r"[A-Za-z][A-Za-z\s-]{1,30}", raw_query)
+        return tokens[0].strip() if tokens else ""
+
+    @classmethod
+    def _build_weather_query_candidates(cls, query: str) -> List[str]:
+        raw_query = re.sub(r"\s+", " ", (query or "").strip())
+        if not raw_query:
+            return []
+
+        location = cls._extract_weather_location(raw_query)
+        time_hint_match = cls.WEATHER_TIME_PATTERN.search(raw_query)
+        time_hint = time_hint_match.group(0).strip() if time_hint_match else ""
+
+        candidates: List[str] = [raw_query]
+        if location and time_hint:
+            candidates.append(f"{location} {time_hint}天气预报")
+        if location:
+            candidates.append(f"{location} 天气预报")
+            candidates.append(f"{location} weather forecast")
+        return SearchKnowledgeTool._dedupe_terms([item.strip() for item in candidates if item and item.strip()])
+
+    @staticmethod
+    def _extract_responses_annotations(raw_response: Dict[str, Any]) -> List[Dict[str, Any]]:
+        annotations: List[Dict[str, Any]] = []
+        for item in raw_response.get("output") or []:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for content in item.get("content") or []:
+                if not isinstance(content, dict):
+                    continue
+                for annotation in content.get("annotations") or []:
+                    if isinstance(annotation, dict):
+                        annotations.append(annotation)
+        return annotations
+
+    @classmethod
+    def _resolve_weather_provider_runtime(
+        cls,
+        db: Optional[Session],
+    ) -> Optional[Dict[str, Any]]:
+        if db is None:
+            return None
+        provider_name = FeatureModelConfigService.get_provider_for_feature(db, "agent")
+        if not provider_name:
+            return None
+        config = ModelConfigRepository.get_by_provider(db, provider_name)
+        if not config or not getattr(config, "enabled", False):
+            return None
+        runtime_provider = registry.build_provider_from_config(config)
+        if runtime_provider is None:
+            return None
+        params = config.params if isinstance(config.params, dict) else {}
+        return {
+            "provider_name": str(provider_name).strip().lower(),
+            "provider": runtime_provider,
+            "params": params,
+        }
+
+    @classmethod
+    def _build_official_weather_result(
+        cls,
+        *,
+        raw_query: str,
+        provider_label: str,
+        text: str,
+        results: List[Dict[str, Any]],
+        evidence: List[Dict[str, Any]],
+        fallback_used: bool = False,
+    ) -> Dict[str, Any]:
+        return cls().build_result(
+            success=True,
+            payload={
+                "query": raw_query,
+                "query_used": raw_query,
+                "query_candidates": cls._build_query_candidates(raw_query),
+                "results": results,
+                "count": len(results),
+                "text": text,
+                "provider_search": provider_label,
+            },
+            evidence=evidence,
+            confidence=0.9 if results else 0.78,
+            fallback_used=fallback_used,
+        )
+
+    @classmethod
+    def _search_weather_with_doubao(
+        cls,
+        provider: ResponsesProvider,
+        raw_query: str,
+        max_results: int,
+    ) -> Optional[Dict[str, Any]]:
+        city = cls._extract_weather_location(raw_query)
+        tool_payload = {
+            "type": "web_search",
+            "sources": ["moji"],
+            "limit": max(1, min(max_results, 10)),
+            "max_keyword": 1,
+            "user_location": cls._build_weather_user_location(city),
+        }
+        result = provider.call(
+            input_items=[{"role": "user", "content": raw_query}],
+            tools=[tool_payload],
+        )
+        text = (result.get("text") or "").strip()
+        raw_response = result.get("raw_response") or {}
+        annotations = cls._extract_responses_annotations(raw_response) if isinstance(raw_response, dict) else []
+
+        seen_urls = set()
+        results: List[Dict[str, Any]] = []
+        evidence: List[Dict[str, Any]] = []
+        for annotation in annotations:
+            url = str(annotation.get("url") or annotation.get("link") or "").strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            title = str(annotation.get("title") or annotation.get("text") or "豆包联网天气结果").strip()
+            snippet = text[:300] if text else title
+            results.append(cls._build_weather_summary_result(title, snippet, url))
+            evidence.append(
+                {
+                    "type": "web_result",
+                    "title": title,
+                    "summary": title,
+                    "excerpt": snippet,
+                    "url": url,
+                }
+            )
+
+        if not results and text:
+            results.append(cls._build_weather_summary_result("豆包官方联网天气摘要", text[:300]))
+
+        if not results and not text:
+            return None
+
+        return cls._build_official_weather_result(
+            raw_query=raw_query,
+            provider_label="doubao_native_weather_search",
+            text=text,
+            results=results,
+            evidence=evidence,
+        )
+
+    @classmethod
+    def _search_weather_with_qwen_api(
+        cls,
+        provider: Any,
+        params: Dict[str, Any],
+        raw_query: str,
+        max_results: int,
+    ) -> Optional[Dict[str, Any]]:
+        host = (
+            params.get("web_search_host")
+            or params.get("search_service_host")
+            or params.get("opensearch_host")
+            or params.get("search_host")
+        )
+        if not host:
+            return None
+
+        workspace_name = params.get("workspace_name") or "default"
+        service_id = params.get("search_service_id") or params.get("web_search_service_id") or "ops-web-search-001"
+        query_rewrite = params.get("query_rewrite", True)
+        content_type = params.get("content_type") or "snippet"
+        url = f"{str(host).rstrip('/')}/v3/openapi/workspaces/{workspace_name}/web-search/{service_id}"
+
+        response = httpx.post(
+            url,
+            json={
+                "query": raw_query,
+                "query_rewrite": bool(query_rewrite),
+                "top_k": max(1, min(max_results, 10)),
+                "content_type": content_type,
+            },
+            headers={
+                "Authorization": f"Bearer {provider.api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=getattr(provider, "timeout", 30),
+        )
+        response.raise_for_status()
+        data = response.json()
+        search_result = (((data or {}).get("result") or {}).get("search_result") or [])
+        results: List[Dict[str, Any]] = []
+        evidence: List[Dict[str, Any]] = []
+        for item in search_result:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            link = str(item.get("link") or "").strip()
+            snippet = str(item.get("snippet") or item.get("content") or "").strip()
+            if not title and not snippet:
+                continue
+            results.append(cls._build_weather_summary_result(title or "阿里联网天气结果", snippet, link))
+            if link:
+                evidence.append(
+                    {
+                        "type": "web_result",
+                        "title": title or "阿里联网天气结果",
+                        "summary": title or "阿里联网天气结果",
+                        "excerpt": snippet,
+                        "url": link,
+                    }
+                )
+
+        if not results:
+            return None
+
+        text = "\n".join(
+            item["snippet"] for item in results[:3] if item.get("snippet")
+        ).strip()
+        return cls._build_official_weather_result(
+            raw_query=raw_query,
+            provider_label="qwen_aliyun_weather_search_api",
+            text=text,
+            results=results,
+            evidence=evidence,
+        )
+
+    @classmethod
+    def _search_weather_with_qwen_native(
+        cls,
+        provider: Any,
+        raw_query: str,
+    ) -> Optional[Dict[str, Any]]:
+        if isinstance(provider, ResponsesProvider):
+            result = provider.call(
+                input_items=[{"role": "user", "content": raw_query}],
+                tools=[{"type": "web_search"}],
+            )
+        elif isinstance(provider, OpenAICompatProvider):
+            result = provider.call(
+                messages=[{"role": "user", "content": raw_query}],
+                enable_search=True,
+                search_options={"forced_search": True, "search_strategy": "turbo"},
+            )
+        else:
+            return None
+
+        text = (result.get("text") or "").strip()
+        if not text:
+            return None
+
+        raw_response = result.get("raw_response") or {}
+        annotations = cls._extract_responses_annotations(raw_response) if isinstance(raw_response, dict) else []
+        results: List[Dict[str, Any]] = []
+        evidence: List[Dict[str, Any]] = []
+        seen_urls = set()
+        for annotation in annotations:
+            url = str(annotation.get("url") or annotation.get("link") or "").strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            title = str(annotation.get("title") or annotation.get("text") or "千问联网天气结果").strip()
+            results.append(cls._build_weather_summary_result(title, text[:300], url))
+            evidence.append(
+                {
+                    "type": "web_result",
+                    "title": title,
+                    "summary": title,
+                    "excerpt": text[:300],
+                    "url": url,
+                }
+            )
+        if not results:
+            results.append(cls._build_weather_summary_result("千问官方联网天气摘要", text[:300]))
+
+        return cls._build_official_weather_result(
+            raw_query=raw_query,
+            provider_label="qwen_native_weather_search",
+            text=text,
+            results=results,
+            evidence=evidence,
+        )
+
+    @classmethod
+    def _search_weather_with_official_provider(
+        cls,
+        db: Optional[Session],
+        raw_query: str,
+        max_results: int,
+    ) -> Optional[Dict[str, Any]]:
+        runtime = cls._resolve_weather_provider_runtime(db)
+        if not runtime:
+            return None
+
+        provider_name = runtime["provider_name"]
+        provider = runtime["provider"]
+        params = runtime["params"]
+
+        if provider_name == "doubao" and isinstance(provider, ResponsesProvider):
+            return cls._search_weather_with_doubao(provider, raw_query, max_results)
+        if provider_name == "qwen":
+            direct_result = cls._search_weather_with_qwen_api(provider, params, raw_query, max_results)
+            if direct_result:
+                return direct_result
+            return cls._search_weather_with_qwen_native(provider, raw_query)
+        return None
+
+    @staticmethod
+    def _extract_provider_error_details(exc: Exception) -> Dict[str, Any]:
+        error_type = exc.__class__.__name__
+        message = str(exc)
+        error_code = ""
+        status_code = None
+
+        if isinstance(exc, httpx.HTTPStatusError):
+            status_code = exc.response.status_code
+            try:
+                payload = exc.response.json()
+            except Exception:  # pylint: disable=broad-except
+                payload = {}
+
+            error_obj = payload.get("error") if isinstance(payload, dict) else {}
+            if not isinstance(error_obj, dict):
+                error_obj = {}
+            error_code = str(error_obj.get("code") or payload.get("code") or "").strip()
+            detail = str(error_obj.get("message") or payload.get("message") or "").strip()
+            if detail:
+                message = detail
+
+        return {
+            "type": error_type,
+            "code": error_code,
+            "status_code": status_code,
+            "message": message,
+        }
+
+    @classmethod
+    def _search_weather_with_official_provider_safe(
+        cls,
+        db: Optional[Session],
+        raw_query: str,
+        max_results: int,
+    ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        runtime = cls._resolve_weather_provider_runtime(db)
+        provider_name = runtime["provider_name"] if runtime else ""
+        if not runtime:
+            return None, None
+
+        try:
+            return cls._search_weather_with_official_provider(db, raw_query, max_results), None
+        except Exception as exc:  # pylint: disable=broad-except
+            error_details = cls._extract_provider_error_details(exc)
+            error_details["provider"] = provider_name
+            logger.warning(
+                "Official weather search failed for provider %s: %s (%s)",
+                provider_name,
+                error_details.get("code") or error_details.get("type"),
+                error_details.get("message"),
+            )
+            return None, error_details
+
+    @classmethod
     def _build_query_candidates(cls, query: str) -> List[str]:
+        if cls._is_weather_query(query):
+            return cls._build_weather_query_candidates(query)
+
         candidates: List[str] = []
         keyword_query = cls._build_keyword_query(query)
         if keyword_query:
@@ -1104,6 +1532,12 @@ class WebSearchTool(BaseTool):
 
     @classmethod
     def _is_low_signal_result(cls, query: str, title: str, snippet: str, url: str) -> bool:
+        if cls._is_weather_query(query):
+            domain = urlparse(url or "").netloc.lower()
+            if any(domain == allowed or domain.endswith(f".{allowed}") for allowed in cls.WEATHER_RESULT_DOMAINS):
+                return False
+            haystack = f"{title or ''}\n{snippet or ''}\n{url or ''}"
+            return not bool(cls.WEATHER_RESULT_PATTERN.search(haystack))
         if not cls.LEARNING_QUERY_PATTERN.search(query or ""):
             return False
         haystack = f"{title or ''}\n{snippet or ''}\n{url or ''}"
@@ -1128,18 +1562,32 @@ class WebSearchTool(BaseTool):
         params = self.validate_params(kwargs)
         raw_query = params["query"]
         query_candidates = self._build_query_candidates(raw_query)
+        official_provider_error: Optional[Dict[str, Any]] = None
         if not query_candidates and raw_query:
             query_candidates = [raw_query]
+        if self._is_weather_query(raw_query):
+            official_result, official_provider_error = self._search_weather_with_official_provider_safe(
+                db,
+                raw_query,
+                params.get("max_results", 5),
+            )
+            if official_result:
+                return official_result
         try:
             from ddgs import DDGS
 
             results = []
             evidence = []
             query_used = raw_query
+            region = self._infer_region(raw_query)
 
             for candidate in query_candidates:
                 query_used = candidate
-                search_results = DDGS().text(candidate, max_results=params.get("max_results", 5))
+                search_results = DDGS().text(
+                    candidate,
+                    region=region,
+                    max_results=params.get("max_results", 5),
+                )
                 candidate_results = []
                 candidate_evidence = []
                 for item in search_results:
@@ -1180,6 +1628,7 @@ class WebSearchTool(BaseTool):
                         "query_candidates": query_candidates,
                         "results": [],
                         "count": 0,
+                        **({"provider_search_error": official_provider_error} if official_provider_error else {}),
                         "text": "未找到相关的网页搜索结果。",
                     },
                     quality_status="pass",
@@ -1195,6 +1644,7 @@ class WebSearchTool(BaseTool):
                     "query_candidates": query_candidates,
                     "results": results,
                     "count": len(results),
+                    **({"provider_search_error": official_provider_error} if official_provider_error else {}),
                 },
                 evidence=evidence,
                 confidence=0.74,
@@ -1209,7 +1659,7 @@ class WebSearchTool(BaseTool):
                 confidence=0.2,
                 fallback_used=True,
             )
-    async def execute(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
+    async def _execute_legacy_duplicate(self, db: Session, user_id: int, **kwargs) -> Dict[str, Any]:
         params = self.validate_params(kwargs)
         raw_query = params["query"]
         query_candidates = self._build_query_candidates(raw_query)

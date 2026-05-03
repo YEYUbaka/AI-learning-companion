@@ -25,21 +25,18 @@ const classifyHttpError = async (response) => {
 
   if ([502, 503, 504].includes(response.status)) {
     return buildStreamError(
-      detail || '服务暂时不可用或流式代理被中断，请稍后重试。',
+      detail || '上游服务暂时不可用或流式代理被中断，请稍后重试。',
       {
         code: 'UPSTREAM_ERROR',
         status: response.status,
-      }
+      },
     );
   }
 
-  return buildStreamError(
-    detail || `请求失败（HTTP ${response.status}）。`,
-    {
-      code: 'HTTP_ERROR',
-      status: response.status,
-    }
-  );
+  return buildStreamError(detail || `请求失败（HTTP ${response.status}）。`, {
+    code: 'HTTP_ERROR',
+    status: response.status,
+  });
 };
 
 const classifyStreamError = (error, sessionId) => {
@@ -64,7 +61,7 @@ const classifyStreamError = (error, sessionId) => {
         code: 'NETWORK_ERROR',
         recoverable: Boolean(sessionId),
         sessionId,
-      }
+      },
     );
   }
 
@@ -76,16 +73,24 @@ const classifyStreamError = (error, sessionId) => {
       code: 'STREAM_ERROR',
       recoverable: Boolean(sessionId),
       sessionId,
-    }
+    },
   );
 };
 
+const buildStreamPayload = ({ message, mode, context, sessionId }) => ({
+  message,
+  mode,
+  context,
+  session_id: sessionId ?? undefined,
+});
+
 const agentApi = {
-  createTask: async (goal, mode = 'react', context = null) => {
+  createTask: async ({ message, mode = 'react', context = null, sessionId = null }) => {
     const response = await apiClient.post('/api/agent/task', {
-      goal,
+      message,
       mode,
       context,
+      session_id: sessionId,
     });
     return response.data;
   },
@@ -107,7 +112,7 @@ const agentApi = {
     return response.data;
   },
 
-  createTaskStream: (goal, mode, context, onMessage, onComplete, onError) => {
+  createTaskStream: ({ message, mode, context, sessionId, onMessage, onComplete, onError }) => {
     const token = sessionStorage.getItem('token');
     const hostname = window.location.hostname;
     const baseURL =
@@ -117,7 +122,7 @@ const agentApi = {
     const url = `${baseURL}/api/agent/task/stream`;
     const controller = new AbortController();
 
-    let sessionId = null;
+    let resolvedSessionId = sessionId ?? null;
     let receivedDone = false;
     let completed = false;
 
@@ -137,7 +142,7 @@ const agentApi = {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ goal, mode, context }),
+          body: JSON.stringify(buildStreamPayload({ message, mode, context, sessionId })),
           cache: 'no-store',
           signal: controller.signal,
         });
@@ -166,14 +171,14 @@ const agentApi = {
             }
 
             throw buildStreamError(
-              sessionId
+              resolvedSessionId
                 ? '连接已断开，任务可能仍在后台继续执行，请稍后刷新会话查看结果。'
                 : '连接已断开，请重试。',
               {
                 code: 'STREAM_TRUNCATED',
-                recoverable: Boolean(sessionId),
-                sessionId,
-              }
+                recoverable: Boolean(resolvedSessionId),
+                sessionId: resolvedSessionId,
+              },
             );
           }
 
@@ -183,11 +188,7 @@ const agentApi = {
 
           for (const rawLine of lines) {
             const line = rawLine.trim();
-            if (!line || line.startsWith(':')) {
-              continue;
-            }
-
-            if (!line.startsWith('data: ')) {
+            if (!line || line.startsWith(':') || !line.startsWith('data: ')) {
               continue;
             }
 
@@ -200,8 +201,11 @@ const agentApi = {
 
             try {
               const event = JSON.parse(data);
-              if (event?.type === 'session_created' && event?.session_id) {
-                sessionId = event.session_id;
+              if (
+                ['session_created', 'session_resumed'].includes(event?.type) &&
+                event?.session_id
+              ) {
+                resolvedSessionId = event.session_id;
               }
               onMessage?.(event);
             } catch (error) {
@@ -214,7 +218,7 @@ const agentApi = {
           return;
         }
 
-        const streamError = classifyStreamError(error, sessionId);
+        const streamError = classifyStreamError(error, resolvedSessionId);
         if (streamError.aborted) {
           return;
         }

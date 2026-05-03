@@ -9,6 +9,7 @@
     "preview": "cross-env BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA=true BROWSERSLIST_IGNORE_OLD_DATA=true vite preview"
   },
   "dependencies": {
+    "@tdesign-react/chat": "^1.0.2",
     "@types/react-syntax-highlighter": "^15.5.13",
     "axios": "^1.13.2",
     "dagre": "^0.8.5",
@@ -29,6 +30,7 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react": "^4.2.1",

@@ -28,6 +28,14 @@ IMPORT_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
 class QuestionBankService:
     @staticmethod
+    def _normalize_asset_file_path(file_path: Optional[str]) -> str:
+        normalized = str(file_path or "").replace("\\", "/").strip()
+        normalized = normalized.lstrip("/")
+        if normalized.startswith("./"):
+            normalized = normalized[2:]
+        return normalized
+
+    @staticmethod
     def _normalize_expected_timestamp(value: Optional[str]) -> Optional[str]:
         text = str(value or "").strip()
         return text or None
@@ -177,12 +185,14 @@ class QuestionBankService:
 
     @staticmethod
     def _serialize_asset(asset) -> Dict[str, Any]:
-        preview_url = f"/uploads/{asset.file_path.replace(os.sep, '/')}" if not asset.file_path.startswith("uploads/") else f"/{asset.file_path.replace(os.sep, '/')}"
+        normalized_path = QuestionBankService._normalize_asset_file_path(asset.file_path)
+        preview_path = normalized_path if normalized_path.startswith("uploads/") else f"uploads/{normalized_path}"
+        preview_url = f"/{preview_path}"
         return {
             "id": asset.id,
             "asset_type": asset.asset_type,
             "file_name": asset.file_name,
-            "file_path": asset.file_path,
+            "file_path": normalized_path,
             "mime_type": asset.mime_type,
             "sort_order": asset.sort_order,
             "preview_url": preview_url,
@@ -233,8 +243,8 @@ class QuestionBankService:
             "stem": stem,
             "normalized_stem": normalize_stem(stem),
             "question_type": question_type,
-            "grade_level": str(payload.get("grade_level") or "").strip() or None,
-            "subject": str(payload.get("subject") or "").strip() or None,
+            "grade_level": cls._normalize_grade_level(payload),
+            "subject": cls._normalize_subject(payload),
             "difficulty": str(payload.get("difficulty") or "").strip() or None,
             "knowledge_points": cls._as_list(payload.get("knowledge_points")),
             "answer": answer,
@@ -247,6 +257,28 @@ class QuestionBankService:
             "metadata_json": payload.get("metadata") or {},
             "expected_updated_at": cls._normalize_expected_timestamp(payload.get("expected_updated_at")),
         }
+
+    @staticmethod
+    def _normalize_grade_level(payload: Dict[str, Any]) -> Optional[str]:
+        from utils.question_bank_constants import normalize_grade_level as _norm_gl
+        raw = str(payload.get("grade_level") or "").strip() or None
+        if raw is None:
+            return None
+        normalized = _norm_gl(raw)
+        if normalized is None:
+            raise ValueError(f"invalid grade_level: '{raw}'")
+        return normalized
+
+    @staticmethod
+    def _normalize_subject(payload: Dict[str, Any]) -> Optional[str]:
+        from utils.question_bank_constants import normalize_subject as _norm_subj
+        raw = str(payload.get("subject") or "").strip() or None
+        if raw is None:
+            return None
+        normalized = _norm_subj(raw)
+        if normalized is None:
+            raise ValueError(f"invalid subject: '{raw}'")
+        return normalized
 
     @classmethod
     def list_items(cls, db: Session, **filters: Any) -> Dict[str, Any]:
@@ -350,14 +382,14 @@ class QuestionBankService:
         _, ext = os.path.splitext(file.filename or "")
         if ext.lower() not in IMAGE_EXTENSIONS:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only image assets are supported")
-        relative_dir = os.path.join("uploads", "question-bank", str(item_id))
-        absolute_dir = os.path.abspath(relative_dir)
+        relative_dir = os.path.join("question-bank", str(item_id))
+        absolute_dir = os.path.abspath(os.path.join("uploads", relative_dir))
         os.makedirs(absolute_dir, exist_ok=True)
         saved_name = cls._safe_filename(file.filename or "image.png")
         absolute_path = os.path.join(absolute_dir, saved_name)
         with open(absolute_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        relative_path = os.path.join(relative_dir, saved_name)
+        relative_path = cls._normalize_asset_file_path(os.path.join(relative_dir, saved_name))
         asset = QuestionBankRepository.create_asset(
             db,
             item_id=item_id,

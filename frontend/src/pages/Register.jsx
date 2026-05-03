@@ -161,8 +161,7 @@ function Register() {
       const response = await api.post('/api/v1/auth/register', formData);
 
       if (response.data) {
-        alert('注册成功');
-        navigate('/login');
+        navigate('/login', { state: { registered: true } });
       }
     } catch (err) {
       if (err.response?.data) {
