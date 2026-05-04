@@ -7,6 +7,7 @@ import {
   exportPaper as requestExportPaper,
 } from '../api/apiClient';
 import { useThemeStore } from '../store/themeStore';
+import MathText from '../components/MathText';
 import PaperGenerator from '../components/PaperGenerator';
 import { getUserId } from '../utils/auth';
 import logger from '../utils/logger';
@@ -631,7 +632,7 @@ function Quiz() {
                 <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-current text-sm font-semibold">
                   {optionValue}
                 </span>
-                <span className="text-sm leading-7">{getOptionLabel(option, optionIndex)}</span>
+                <MathText className="text-sm leading-7">{getOptionLabel(option, optionIndex)}</MathText>
               </button>
             );
           })}
@@ -656,7 +657,7 @@ function Quiz() {
                 <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-current text-sm font-semibold">
                   {optionValue}
                 </span>
-                <span className="text-sm leading-7">{getOptionLabel(option, optionIndex)}</span>
+                <MathText className="text-sm leading-7">{getOptionLabel(option, optionIndex)}</MathText>
               </button>
             );
           })}
@@ -897,7 +898,7 @@ function Quiz() {
                   </div>
 
                   <div className={`mt-5 text-xl font-semibold leading-9 sm:text-2xl ${palette.title}`}>
-                    {currentQuestion?.question || currentQuestion?.stem || '题目加载中'}
+                    <MathText>{currentQuestion?.question || currentQuestion?.stem || '题目加载中'}</MathText>
                   </div>
 
                   {renderAssetGallery(currentQuestion?.question_images, palette)}
@@ -1133,14 +1134,14 @@ function Quiz() {
                           {question.points ? <span className={`text-xs ${palette.text}`}>{question.points} 分</span> : null}
                         </div>
                         <div className={`mt-3 text-sm font-semibold leading-7 ${palette.title}`}>
-                          {index + 1}. {question.question || question.stem || '题目'}
+                          {index + 1}. <MathText>{question.question || question.stem || '题目'}</MathText>
                         </div>
                         {renderAssetGallery(question.question_images, palette)}
                         {question.options?.length ? (
                           <div className="mt-3 grid gap-2">
                             {question.options.map((option, optionIndex) => (
                               <div key={`paper-option-${index}-${optionIndex}`} className={`rounded-sm border px-4 py-3 text-sm ${palette.info}`}>
-                                {getOptionLabel(option, optionIndex)}
+                                <MathText>{getOptionLabel(option, optionIndex)}</MathText>
                               </div>
                             ))}
                           </div>

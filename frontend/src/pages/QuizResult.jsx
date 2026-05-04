@@ -2,9 +2,13 @@ import { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { useThemeStore } from '../store/themeStore';
+import MathText from '../components/MathText';
 import { getAnchorProps } from '../utils/links';
 import { normalizeMarkdownContent } from '../utils/markdown';
 import { normalizeQuizQuestions } from '../utils/quiz';
@@ -576,7 +580,7 @@ function QuizResult() {
                           </span>
                         </div>
                         <h3 className={`mt-3 text-lg font-semibold leading-8 ${palette.title}`}>
-                          {index + 1}. {item?.question || question.question || question.stem || '题目'}
+                          {index + 1}. <MathText>{item?.question || question.question || question.stem || '题目'}</MathText>
                         </h3>
                         {knowledgePoints.length ? (
                           <div className="mt-3 flex flex-wrap gap-2">
@@ -596,7 +600,7 @@ function QuizResult() {
                           你的答案
                         </div>
                         <div className={`mt-2 text-sm leading-7 ${palette.title}`}>
-                          {String(userAnswer || '未作答')}
+                          <MathText>{String(userAnswer || '未作答')}</MathText>
                         </div>
                       </div>
                       <div className={`${palette.mutedSoft} p-4`}>
@@ -604,7 +608,7 @@ function QuizResult() {
                           标准答案
                         </div>
                         <div className={`mt-2 text-sm leading-7 ${palette.title}`}>
-                          {String(item?.correct_answer || question.answer || '未提供')}
+                          <MathText>{String(item?.correct_answer || question.answer || '未提供')}</MathText>
                         </div>
                       </div>
                     </div>
@@ -613,8 +617,8 @@ function QuizResult() {
                       <div className={`mb-3 text-sm font-semibold ${palette.title}`}>AI 解析</div>
                       <div className={`prose prose-sm max-w-none ${isDark ? 'prose-invert' : ''}`}>
                         <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          rehypePlugins={[rehypeRaw, rehypeSanitize]}
+                          remarkPlugins={[remarkGfm, remarkMath]}
+                          rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeKatex]}
                           components={markdownComponents}
                         >
                           {normalizeMarkdownContent(item?.explanation || '暂无解析')}

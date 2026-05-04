@@ -94,7 +94,7 @@ export const generateQuiz = async (payload) => {
 
 export const submitQuiz = async (payload) => {
   return api.post('/api/v1/quiz/submit', payload, {
-    timeout: 60000,
+    timeout: 180000,
   });
 };
 
