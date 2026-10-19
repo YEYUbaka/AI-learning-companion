@@ -24,6 +24,9 @@ from utils.model_registry import registry, _summarize_http_error
 DEFAULT_SYSTEM_PROMPT = "You are a professional AI learning assistant."
 
 
+# AI辅助生成: 智谱AI GLM-5 2026-01 — 统一AI调用服务入口与消息拼装流程
+# Prompt: "设计一个统一的AI调用服务层，支持系统提示词注入、多Provider切换、失败回退和结果清洗..."
+# 修改: 人工完善错误处理链路、补充API调用日志记录、品牌签名替换(clean_ai_response)、元数据字段、超时重试逻辑
 class AIService:
     @staticmethod
     def _build_input_items(

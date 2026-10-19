@@ -95,70 +95,12 @@ async def ask_ai_stream(question: AIQuestion, request: Request, db: Session = De
     返回：
     - Server-Sent Events 流式响应
     """
-    # 打印请求信息（包括客户端IP和请求头）- 使用sys.stdout确保立即输出
-    import sys
-    import traceback
     from core.logger import logger as app_logger
-    
-    # 立即输出，确保能看到
-    try:
-        client_ip = request.client.host if request.client else "unknown"
-        prompt_preview = question.prompt[:50] if question.prompt else 'None'
-        
-        # 使用多种方式输出，确保能看到
-        sys.stdout.write(f"\n{'='*80}\n")
-        sys.stdout.write(f"[AI请求] ========== 收到新请求 ==========\n")
-        sys.stdout.write(f"[AI请求] 客户端IP: {client_ip}\n")
-        sys.stdout.write(f"[AI请求] 请求URL: {request.url}\n")
-        sys.stdout.write(f"[AI请求] prompt: {prompt_preview}...\n")
-        sys.stdout.write(f"[AI请求] provider: {question.provider}\n")
-        sys.stdout.write(f"[AI请求] history字段存在: {hasattr(question, 'history')}\n")
-        sys.stdout.write(f"[AI请求] history值: {question.history}\n")
-        sys.stdout.write(f"{'='*80}\n\n")
-        sys.stdout.flush()
-        
-        # 同时使用print作为备用
-        print(f"\n{'='*80}", flush=True)
-        print(f"[AI请求-PRINT] ========== 收到新请求 ==========", flush=True)
-        print(f"[AI请求-PRINT] 客户端IP: {client_ip}", flush=True)
-        print(f"[AI请求-PRINT] prompt: {prompt_preview}...", flush=True)
-        print(f"{'='*80}\n", flush=True)
-        
-        # 写入日志文件
-        try:
-            if app_logger.handlers:
-                app_logger.info(f"[AI请求] 收到新请求 - 客户端: {client_ip}, prompt: {prompt_preview}..., provider: {question.provider}, history: {len(question.history) if question.history else 0}条")
-            else:
-                import logging
-                root_logger = logging.getLogger()
-                if root_logger.handlers:
-                    root_logger.info(f"[AI请求] 收到新请求 - 客户端: {client_ip}, prompt: {prompt_preview}..., provider: {question.provider}, history: {len(question.history) if question.history else 0}条")
-            
-            # 直接写入文件（备用方案）
-            from datetime import datetime
-            from core.logger import log_file
-            log_entry = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - zhixueban - INFO - [AI请求] 收到新请求 - 客户端: {client_ip}, prompt: {prompt_preview}..., provider: {question.provider}, history: {len(question.history) if question.history else 0}条\n"
-            with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(log_entry)
-                f.flush()
-        except Exception as log_err:
-            sys.stdout.write(f"[ERROR] 写入日志失败: {log_err}\n")
-            sys.stdout.flush()
-    except Exception as e:
-        error_msg = f"[ERROR] 打印请求信息时出错: {str(e)}"
-        sys.stdout.write(error_msg + "\n")
-        sys.stdout.write(f"[ERROR] 错误详情: {traceback.format_exc()}\n")
-        sys.stdout.flush()
-        try:
-            if app_logger.handlers:
-                app_logger.error(f"{error_msg}\n{traceback.format_exc()}")
-            else:
-                import logging
-                root_logger = logging.getLogger()
-                if root_logger.handlers:
-                    root_logger.error(f"{error_msg}\n{traceback.format_exc()}")
-        except:
-            pass
+
+    client_ip = request.client.host if request.client else "unknown"
+    prompt_preview = question.prompt[:50] if question.prompt else 'None'
+    history_count = len(question.history) if question.history else 0
+    app_logger.info(f"[AI请求] 客户端: {client_ip}, prompt: {prompt_preview}..., provider: {question.provider}, history: {history_count}条")
     
     # 验证输入
     if not question.prompt or len(question.prompt.strip()) == 0:
@@ -168,57 +110,19 @@ async def ask_ai_stream(question: AIQuestion, request: Request, db: Session = De
         )
     
     async def generate():
-        import sys
-        import traceback
         call_logged = False
         fallback_provider = question.provider or get_provider_config()
-        
-        # 立即输出，确保能看到生成器函数被调用
-        sys.stdout.write(f"\n{'='*80}\n")
-        sys.stdout.write(f"[生成器] ========== generate() 函数被调用 ==========\n")
-        sys.stdout.write(f"[生成器] 时间戳: {__import__('datetime').datetime.now()}\n")
-        sys.stdout.write(f"{'='*80}\n\n")
-        sys.stdout.flush()
-        print(f"[生成器-PRINT] generate() 函数被调用", flush=True)
-        
+
+        used_provider = question.provider
+        history = question.history or []
+        history_count = len(history)
+        app_logger.info(f"[AI流式] provider: {used_provider}, history: {history_count}条")
+
         try:
-            # 传递provider参数和对话历史
-            used_provider = question.provider
-            history = question.history or []
-            
-            sys.stdout.write(f"\n[上下文记忆] ========== 处理对话历史 ==========\n")
-            sys.stdout.write(f"[上下文记忆] provider: {used_provider}\n")
-            sys.stdout.write(f"[上下文记忆] 收到对话历史: {len(history)}条消息\n")
-            sys.stdout.flush()
-            print(f"[上下文记忆-PRINT] provider: {used_provider}, history: {len(history)}条", flush=True)
-            
-            if history:
-                sys.stdout.write(f"[上下文记忆] 历史消息详情:\n")
-                for i, msg in enumerate(history):
-                    if isinstance(msg, dict):
-                        role = msg.get('role', 'unknown')
-                        content = msg.get('content', '')
-                    else:
-                        role = getattr(msg, 'role', 'unknown')
-                        content = getattr(msg, 'content', '')
-                    sys.stdout.write(f"  [{i+1}] {role}: {content[:80]}...\n")
-                sys.stdout.flush()
-            else:
-                sys.stdout.write(f"[上下文记忆] ⚠️ 警告：没有收到对话历史！\n")
-                sys.stdout.flush()
-                print(f"[上下文记忆-PRINT] ⚠️ 警告：没有收到对话历史！", flush=True)
-            sys.stdout.write(f"[上下文记忆] ====================================\n\n")
-            sys.stdout.flush()
-            
-            sys.stdout.write(f"[生成器] 准备调用 ask_gpt_stream\n")
-            sys.stdout.flush()
-            print(f"[生成器-PRINT] 准备调用 ask_gpt_stream", flush=True)
-            
             async for chunk in ask_gpt_stream(question.prompt, used_provider, history):
                 chunk_type = chunk.get('type', 'unknown')
                 chunk_provider = chunk.get('provider', 'unknown')
-                sys.stdout.write(f"[生成器] 收到chunk: type={chunk_type}, provider={chunk_provider}\n")
-                sys.stdout.flush()
+                app_logger.debug(f"[AI流式] chunk: type={chunk_type}, provider={chunk_provider}")
                 if not call_logged and chunk_provider:
                     APICallRepository.record_call(
                         db,
@@ -229,19 +133,11 @@ async def ask_ai_stream(question: AIQuestion, request: Request, db: Session = De
                     call_logged = True
                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
         except Exception as e:
-            import sys
-            import traceback
             error_msg = str(e)
-            error_trace = traceback.format_exc()
-            sys.stdout.write(f"\n[生成器-ERROR] ========== 发生错误 ==========\n")
-            sys.stdout.write(f"[生成器-ERROR] 错误信息: {error_msg}\n")
-            sys.stdout.write(f"[生成器-ERROR] 错误堆栈:\n{error_trace}\n")
-            sys.stdout.write(f"[生成器-ERROR] ====================================\n\n")
-            sys.stdout.flush()
-            print(f"[生成器-ERROR-PRINT] 错误: {error_msg}", flush=True)
+            app_logger.error(f"[AI流式] 错误: {error_msg}", exc_info=True)
             error_chunk = {
                 "type": "error",
-                "content": str(e)
+                "content": error_msg
             }
             yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
             if not call_logged:
@@ -253,10 +149,7 @@ async def ask_ai_stream(question: AIQuestion, request: Request, db: Session = De
                 )
                 call_logged = True
         finally:
-            import sys
-            sys.stdout.write(f"[生成器] generate() 函数结束\n")
-            sys.stdout.flush()
-            print(f"[生成器-PRINT] generate() 函数结束", flush=True)
+            app_logger.debug("[AI流式] generate() 结束")
             if not call_logged:
                 APICallRepository.record_call(
                     db,

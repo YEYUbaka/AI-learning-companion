@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 
 from services.agent_executor import AgentExecutor
@@ -34,4 +32,3 @@ async def test_build_final_answer_async_fallback_is_user_facing(monkeypatch):
     assert "任务目标" not in answer
     assert "quality_status" not in answer
     assert "置信度" not in answer
-

@@ -2,7 +2,7 @@
  * 智能组卷组件
  * 目的：提供更贴合学科场景的组卷配置界面
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   listTemplates,
   createTemplate,
@@ -354,6 +354,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
   const [knowledgeCatalog, setKnowledgeCatalog] = useState([]);
   const [loadingKnowledgeCatalog, setLoadingKnowledgeCatalog] = useState(false);
   const [showKnowledgeCatalog, setShowKnowledgeCatalog] = useState(false);
+  const knowledgePointInputRef = useRef(null);
 
   const subjectOptions = useMemo(
     () => SUBJECT_OPTIONS_BY_GRADE[config.grade_level] || [],
@@ -751,8 +752,11 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
     }
   };
 
-  const addKnowledgePoint = (rawValue = knowledgePointInput) => {
-    const value = rawValue.trim();
+  const addKnowledgePoint = (rawValue) => {
+    const nextRawValue = typeof rawValue === 'string'
+      ? rawValue
+      : (knowledgePointInputRef.current?.value ?? knowledgePointInput);
+    const value = nextRawValue.trim();
     if (!value) return;
     setConfig((prev) => ({
       ...prev,
@@ -760,6 +764,9 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
         ? prev.knowledge_points
         : [...prev.knowledge_points, value],
     }));
+    if (knowledgePointInputRef.current) {
+      knowledgePointInputRef.current.value = '';
+    }
     setKnowledgePointInput('');
   };
 
@@ -1269,6 +1276,7 @@ function PaperGenerator({ onPaperGenerated, onCancel }) {
             <div className="mt-4 flex flex-col gap-3">
               <div className="flex flex-col gap-3 sm:flex-row">
                 <input
+                  ref={knowledgePointInputRef}
                   type="text"
                   value={knowledgePointInput}
                   onChange={(e) => setKnowledgePointInput(e.target.value)}

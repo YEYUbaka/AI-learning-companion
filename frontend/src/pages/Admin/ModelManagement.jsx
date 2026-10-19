@@ -24,9 +24,30 @@ const DEFAULT_FORM = {
   search_service_id: '',
 };
 
-const ADMIN_PROVIDER_ORDER = ['siliconflow', 'zhipu', 'qwen', 'moonshot', 'doubao', 'openrouter'];
+const ADMIN_PROVIDER_ORDER = ['deepseek', 'siliconflow', 'zhipu', 'qwen', 'moonshot', 'doubao', 'openrouter'];
 
 const FALLBACK_PROVIDER_TEMPLATES = [
+  {
+    key: 'deepseek',
+    display_name: 'DeepSeek',
+    default_base_url: 'https://api.deepseek.com/v1',
+    default_model: 'deepseek-chat',
+    default_max_tokens: DEFAULT_AI_MAX_TOKENS,
+    available_models: ['deepseek-chat', 'deepseek-reasoner'],
+    requires_extra_headers: false,
+    extra_header_keys: [],
+    capabilities: {
+      streaming: true,
+      tool_calling: true,
+      reasoning: true,
+      long_output: true,
+      supports_responses_api: false,
+      supports_vision: false,
+      supports_previous_response_id: false,
+      native_tools: [],
+      native_search_mode: 'none',
+    },
+  },
   {
     key: 'siliconflow',
     display_name: '硅基流动',

@@ -53,7 +53,7 @@ class AdminService:
     @staticmethod
     def update_system_config(db: Session, config: Dict[str, Any]) -> Dict[str, Any]:
         """更新系统配置（这里简化处理，实际应该存储到数据库）"""
-        # TODO: 创建SystemConfig表存储配置
+        # 当前系统配置通过环境变量管理，后续可迁移至 SystemConfig 表持久化
         logger.info(f"更新系统配置: {config}")
         return AdminService.get_system_config()
     

@@ -29,33 +29,6 @@ const deriveTitleFromMessages = (messages, fallback = '新的对话') => {
   return text.length > 18 ? `${text.slice(0, 18)}...` : text;
 };
 
-const INLINE_MATH_REGEXES = [
-  /\\frac\{(?:[^{}]|\{[^{}]*\})+\}\{(?:[^{}]|\{[^{}]*\})+\}/g,
-  /\\sqrt\{(?:[^{}]|\{[^{}]*\})+\}/g,
-  /\\lim_{(?:[^{}]|\{[^{}]*\})+}/g,
-  /\\sum_{(?:[^{}]|\{[^{}]*\})+}\^{(?:[^{}]|\{[^{}]*\})+}/g,
-  /\\int_{(?:[^{}]|\{[^{}]*\})+}\^{(?:[^{}]|\{[^{}]*\})+}/g,
-  /\\partial/g,
-  /\\nabla/g,
-  /\\alpha|\\beta|\\gamma|\\theta|\\pi/g,
-  /\\sin[^\s,.;:)]*/g,
-  /\\cos[^\s,.;:)]*/g,
-  /\\tan[^\s,.;:)]*/g,
-  /\\log[^\s,.;:)]*/g,
-  /\\ln[^\s,.;:)]*/g,
-  /\\cdot|\\cdots|\\ldots|\\times|\\leq|\\geq|\\neq|\\infty/g,
-];
-
-const wrapIfNeeded = (text, pattern) =>
-  text.replace(pattern, (match, offset, whole) => {
-    const prevChar = whole[offset - 1];
-    const nextChar = whole[offset + match.length];
-    if (prevChar === '$' || nextChar === '$') {
-      return match;
-    }
-    return '$' + match + '$';
-  });
-
 const isWhitespace = (char) => /\s/.test(char || '');
 
 const extractArgument = (text, start) => {
@@ -127,10 +100,145 @@ const normalizeFractions = (text) => {
   return result;
 };
 
+const normalizeAlignedBody = (body = '') =>
+  normalizeFractions(String(body || ''))
+    .replace(/\r\n?/g, '\n')
+    .replace(/\\\\\s*&/g, '\\\\\n&')
+    .replace(/(?<!\\)\\\s*&/g, '\\\\\n&')
+    .trim();
+
+const wrapDisplayMathBlock = (body, env = 'aligned') => `$$\n\\begin{${env}}\n${normalizeAlignedBody(body)}\n\\end{${env}}\n$$`;
+
+const normalizeDoubleDollarMathSegments = (text = '') => {
+  if (!text) return text;
+
+  let cursor = 0;
+  let result = '';
+
+  while (cursor < text.length) {
+    const start = text.indexOf('$$', cursor);
+    if (start === -1) {
+      result += text.slice(cursor);
+      break;
+    }
+
+    const end = text.indexOf('$$', start + 2);
+    if (end === -1) {
+      result += text.slice(cursor);
+      break;
+    }
+
+    result += text.slice(cursor, start);
+
+    const body = normalizeAlignedBody(text.slice(start + 2, end));
+    const prevChar = result[result.length - 1] || '';
+    const nextChar = text[end + 2] || '';
+    const prevInline = Boolean(prevChar && prevChar !== '\n');
+    const nextInline = Boolean(nextChar && nextChar !== '\n');
+    const prefersBlock = /\\begin\{|\\\\|\n/.test(body);
+
+    if (!prefersBlock && prevInline && nextInline) {
+      result += '$' + body + '$';
+    } else if (prevInline || nextInline || prefersBlock) {
+      result += `\n\n$$\n${body}\n$$\n\n`;
+    } else {
+      result += `$$\n${body}\n$$`;
+    }
+
+    cursor = end + 2;
+  }
+
+  return result.replace(/\n{3,}/g, '\n\n');
+};
+
+const isBareMathRunChar = (char = '') =>
+  char === ' ' || char === '\t' || /[A-Za-z0-9\\{}\[\]()^_=+\-*/.,<>≤≥≠×·|&π√△∠θα-ωΑ-Ω]/u.test(char);
+
+const isLikelyBareMathRun = (text = '') => {
+  const value = String(text || '').trim();
+  if (!value) return false;
+
+  const hasCommand = /\\[A-Za-z]+/.test(value);
+  const commandCount = (value.match(/\\[A-Za-z]+/g) || []).length;
+  const hasMathOperator = /[=+\-*/^_<>≤≥≠]/.test(value);
+  const hasGrouping = /[{}()[\]]/.test(value);
+  const hasSpecialSymbol = /[π√△∠θα-ωΑ-Ω]/u.test(value);
+  const hasPlainFunction = /\b(?:sin|cos|tan|cot|max|min|lim)\b/.test(value);
+  const hasAlphaNumeric = /[A-Za-z0-9]/.test(value);
+
+  return (
+    (hasCommand && (hasMathOperator || hasGrouping || commandCount >= 2 || hasSpecialSymbol)) ||
+    (!hasCommand && hasPlainFunction && hasMathOperator && hasAlphaNumeric) ||
+    (hasSpecialSymbol && hasMathOperator && hasAlphaNumeric)
+  );
+};
+
+const wrapBareMathRuns = (text = '') => {
+  if (!text) return text;
+
+  const stashedSegments = [];
+  const stashSegment = (value) => {
+    const token = `@@MATH_SEGMENT_${stashedSegments.length}@@`;
+    stashedSegments.push(value);
+    return token;
+  };
+
+  let cursor = 0;
+  let result = '';
+  const working = text.replace(/```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$|\$(?:\\.|[^$\n])+\$/g, stashSegment);
+
+  while (cursor < working.length) {
+    if (!isBareMathRunChar(working[cursor])) {
+      result += working[cursor];
+      cursor += 1;
+      continue;
+    }
+
+    let end = cursor;
+    while (end < working.length && isBareMathRunChar(working[end])) end += 1;
+
+    const run = working.slice(cursor, end);
+    const leadingWhitespace = run.match(/^[ \t]*/)?.[0] || '';
+    const trailingWhitespace = run.match(/[ \t]*$/)?.[0] || '';
+    const core = run.slice(leadingWhitespace.length, run.length - trailingWhitespace.length);
+
+    result += isLikelyBareMathRun(core) ? `${leadingWhitespace}$${core}$${trailingWhitespace}` : run;
+    cursor = end;
+  }
+
+  return result.replace(/@@MATH_SEGMENT_(\d+)@@/g, (_, index) => stashedSegments[Number(index)] || '');
+};
+
+const repairLegacyMathArtifacts = (text = '') => {
+  if (!text) return text;
+
+  let repaired = text;
+  repaired = repaired.replace(
+    /(\\end\{(?:aligned|align\*?|cases)\})\s*(\${3,})\s*(?=\$|[A-Za-z\u4e00-\u9fff#*-])/g,
+    '$1$$$$\n\n'
+  );
+  repaired = repaired.replace(
+    /(\\end\{(?:aligned|align\*?|cases)\}\$\$)\s*(?=\$|[A-Za-z\u4e00-\u9fff#*-])/g,
+    '$1\n\n'
+  );
+  repaired = repaired.replace(/\${4,}/g, '$$$$');
+  repaired = repaired.replace(/\$\$\s+\$(?=\\|[A-Za-z\u4e00-\u9fff])/g, '$$$$\n\n$$');
+  repaired = repaired.replace(/(?<!\$)\$\s+\$(?!\$)(?=\\[A-Za-z]|[A-Za-z0-9\u4e00-\u9fff])/g, '$');
+  repaired = repaired.replace(/(\$\$)\s*(---|###)/g, '$1\n\n$2');
+  return repaired;
+};
+
 const normalizeMathContent = (text = '') => {
   if (!text) return text;
 
-  let normalized = normalizeFractions(text);
+  const stashedBlocks = [];
+  const stashBlock = (value) => {
+    const token = `@@MATH_BLOCK_${stashedBlocks.length}@@`;
+    stashedBlocks.push(value);
+    return token;
+  };
+
+  let normalized = normalizeFractions(repairLegacyMathArtifacts(text));
 
   // \[ ... \] => $$ ... $$
   normalized = normalized.replace(
@@ -144,19 +252,26 @@ const normalizeMathContent = (text = '') => {
     (_, inner) => '$' + inner.trim() + '$'
   );
 
+  normalized = normalized.replace(
+    /\$\$\s*\\begin\{align\*?\}([\s\S]*?)\\end\{align\*?\}\s*\$\$/g,
+    (_, body) => stashBlock(wrapDisplayMathBlock(body, 'aligned'))
+  );
+
   // 环境如 aligned、cases
   normalized = normalized.replace(
     /\\begin\{(aligned|cases)\}([\s\S]*?)\\end\{\1\}/g,
-    (_, env, body) => `$$\\begin{${env}}${body}\\end{${env}}$$`
+    (_, env, body) => stashBlock(wrapDisplayMathBlock(body, env))
   );
-
-  INLINE_MATH_REGEXES.forEach((regex) => {
-    normalized = wrapIfNeeded(normalized, regex);
-  });
+  normalized = normalized.replace(
+    /\\begin\{align\*?\}([\s\S]*?)\\end\{align\*?\}/g,
+    (_, body) => stashBlock(wrapDisplayMathBlock(body, 'aligned'))
+  );
+  normalized = normalizeDoubleDollarMathSegments(normalized);
 
   normalized = normalized.replace(/\\\$/g, '$');
+  normalized = wrapBareMathRuns(normalized);
 
-  return normalized;
+  return normalized.replace(/@@MATH_BLOCK_(\d+)@@/g, (_, index) => stashedBlocks[Number(index)] || '');
 };
 
 // 直接使用 apiClient.js 中已配置的 baseURL，确保一致性

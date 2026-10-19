@@ -18,7 +18,8 @@ class AuthFailingProvider(AIProvider):
             max_tokens=4096,
             top_p=1.0,
         )
-    def call(self, messages, **kwargs):
+
+    def call(self, messages=None, input_items=None, **kwargs):
         request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
         response = httpx.Response(
             401,
@@ -58,7 +59,7 @@ def test_registry_call_with_fallback_raises_gateway_error_for_upstream_auth_fail
 
         assert exc_info.value.http_status == 502
         assert exc_info.value.upstream_status == 401
-        assert "上游 HTTP 401" in str(exc_info.value)
+        assert "HTTP 401" in str(exc_info.value)
     finally:
         registry._providers = original_providers
         registry._provider_params = original_params
@@ -67,7 +68,7 @@ def test_registry_call_with_fallback_raises_gateway_error_for_upstream_auth_fail
 @pytest.mark.asyncio
 async def test_quiz_submit_preserves_upstream_service_status(monkeypatch):
     async_error = UpstreamServiceError(
-        "AI 上游认证失败（上游 HTTP 401），请检查管理后台 API Key 配置",
+        "AI upstream authentication failed (HTTP 401)",
         http_status=502,
         upstream_status=401,
     )
@@ -79,9 +80,9 @@ async def test_quiz_submit_preserves_upstream_service_status(monkeypatch):
 
     request = SubmitQuizRequest(
         user_id=1,
-        topic="牛顿第二定律",
-        questions=[{"question": "F=ma 中 F 表示什么", "answer": "力", "type": "fill"}],
-        answers=["力"],
+        topic="Newton second law",
+        questions=[{"question": "What does F represent in F=ma?", "answer": "force", "type": "fill"}],
+        answers=["force"],
     )
     db = DummyDB()
 
@@ -89,14 +90,14 @@ async def test_quiz_submit_preserves_upstream_service_status(monkeypatch):
         await quiz_submit(request, db=db)
 
     assert exc_info.value.status_code == 502
-    assert "上游 HTTP 401" in str(exc_info.value.detail)
+    assert "HTTP 401" in str(exc_info.value.detail)
     assert db.rollback_called is True
 
 
 @pytest.mark.asyncio
 async def test_quiz_generate_preserves_upstream_service_status(monkeypatch):
     async_error = UpstreamServiceError(
-        "AI 上游限流（上游 HTTP 429），请稍后重试",
+        "AI upstream rate limited (HTTP 429)",
         http_status=503,
         upstream_status=429,
     )
@@ -104,12 +105,36 @@ async def test_quiz_generate_preserves_upstream_service_status(monkeypatch):
     def fake_generate_quiz(**kwargs):
         raise async_error
 
+    monkeypatch.setattr("routers.quiz.FeatureModelConfigService.get_provider_for_feature", lambda db, feature_key: None)
     monkeypatch.setattr("routers.quiz.generate_quiz", fake_generate_quiz)
 
-    request = GenerateQuizRequest(topic="牛顿第二定律", num_questions=3)
+    request = GenerateQuizRequest(topic="Newton second law", num_questions=3)
 
     with pytest.raises(HTTPException) as exc_info:
         await quiz_generate(request, db=object())
 
     assert exc_info.value.status_code == 503
-    assert "上游 HTTP 429" in str(exc_info.value.detail)
+    assert "HTTP 429" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_quiz_generate_uses_feature_model_provider_when_request_provider_missing(monkeypatch):
+    captured = {}
+
+    def fake_get_provider_for_feature(db, feature_key):
+        captured["feature_key"] = feature_key
+        return "siliconflow"
+
+    def fake_generate_quiz(**kwargs):
+        captured["provider"] = kwargs.get("provider")
+        return [{"question": "1+1=?", "answer": "2", "type": "fill"}]
+
+    monkeypatch.setattr("routers.quiz.FeatureModelConfigService.get_provider_for_feature", fake_get_provider_for_feature)
+    monkeypatch.setattr("routers.quiz.generate_quiz", fake_generate_quiz)
+
+    request = GenerateQuizRequest(topic="basic math", num_questions=1)
+    response = await quiz_generate(request, db=object())
+
+    assert response["success"] is True
+    assert captured["feature_key"] == "quiz"
+    assert captured["provider"] == "siliconflow"

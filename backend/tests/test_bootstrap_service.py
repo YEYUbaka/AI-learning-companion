@@ -154,3 +154,32 @@ def test_sync_models_backfills_default_max_tokens(db_session):
     assert changes == 1
     assert updated.params["max_tokens"] == settings.AI_DEFAULT_MAX_TOKENS
 
+
+def test_sync_from_env_refreshes_runtime_registry(db_session, monkeypatch):
+    calls = {"registry": 0}
+
+    monkeypatch.setattr("services.bootstrap_service.SeedLoader.load_prompt_seed", lambda: [])
+    monkeypatch.setattr(
+        "services.bootstrap_service.SeedLoader.load_model_seed",
+        lambda: [
+            {
+                "provider_name": "siliconflow",
+                "api_key": "test-key",
+                "base_url": "https://api.siliconflow.cn/v1",
+                "enabled": True,
+                "priority": 10,
+                "params": {"model_name": "deepseek-ai/DeepSeek-V3"},
+            }
+        ],
+    )
+
+    def fake_load_from_db(db):
+        calls["registry"] += 1
+
+    monkeypatch.setattr("utils.model_registry.registry.load_from_db", fake_load_from_db)
+
+    result = BootstrapService.sync_from_env(db_session)
+
+    assert result["models"] == 1
+    assert calls["registry"] == 1
+

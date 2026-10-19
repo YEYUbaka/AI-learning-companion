@@ -126,26 +126,13 @@ async def download_report(
     Returns:
         FileResponse: PDF文件
     """
-    import logging
-    import sys
-    logger = logging.getLogger(__name__)
-    
-    # 使用多种方式确保日志输出
-    print("\n" + "="*80, flush=True)
-    print(f"📄 [PDF报告] 开始生成PDF报告，用户ID: {user_id}", flush=True)
-    print("="*80 + "\n", flush=True)
-    logger.info(f"📄 开始生成PDF报告，用户ID: {user_id}")
-    sys.stdout.flush()
-    
+    from core.logger import logger
+
+    logger.info(f"[PDF报告] 开始生成，用户ID: {user_id}")
+
     try:
-        # 生成PDF报告
-        print("🔄 [PDF报告] 调用generate_pdf_report函数...", flush=True)
-        sys.stdout.flush()
-        logger.info("🔄 调用generate_pdf_report函数...")
         report_path = generate_pdf_report(user_id)
-        print(f"✅ [PDF报告] PDF报告生成成功: {report_path}", flush=True)
-        sys.stdout.flush()
-        logger.info(f"✅ PDF报告生成成功: {report_path}")
+        logger.info(f"[PDF报告] 生成成功: {report_path}")
         
         if not os.path.exists(report_path):
             raise HTTPException(

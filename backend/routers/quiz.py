@@ -12,6 +12,7 @@ from database import get_db
 from models.quizzes import Quiz
 from utils.quiz_generator import generate_quiz, evaluate_quiz
 from services.quiz_paper_service import QuizPaperService
+from services.feature_model_config_service import FeatureModelConfigService
 from utils.paper_exporter import PaperExporter
 from core.logger import logger
 from datetime import datetime
@@ -76,11 +77,12 @@ async def quiz_generate(
         dict: 包含主题和题目列表
     """
     try:
+        provider = request.provider or FeatureModelConfigService.get_provider_for_feature(db, "quiz")
         questions = generate_quiz(
             topic=request.topic,
             num_questions=request.num_questions or 5,
             question_type_distribution=request.question_type_distribution,
-            provider=request.provider,
+            provider=provider,
             db=db
         )
         

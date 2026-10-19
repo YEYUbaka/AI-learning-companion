@@ -249,6 +249,23 @@ META_EVIDENCE_MARKERS = [
     "网络搜索暂不可用",
 ]
 
+KNOWLEDGE_REFUSAL_MARKERS = [
+    "暂未检索到",
+    "未检索到",
+    "没有检索到",
+    "知识库没有",
+    "知识库中没有",
+    "知识库暂无",
+    "当前知识库",
+    "无法为你提供准确",
+    "无法提供准确",
+    "无法进行回答",
+    "不能回答",
+    "不能为你解答",
+    "请补充说明",
+    "重新发起清晰的提问",
+]
+
 SEMANTIC_ROUTE_CONFIDENCE_THRESHOLD = 0.7
 SEMANTIC_ROUTE_PROMPT_NAME = "agent_semantic_router_prompt"
 SEMANTIC_ROUTE_INTENTS = {
@@ -1529,7 +1546,14 @@ class AgentExecutor:
             for item in review.get("evidence", [])[:8]
         )
         return f"""
-你是智学伴的正式答复撰写助手。请基于工具证据，直接生成一份给用户看的最终回答。
+你是智学伴的正式答复撰写助手。请基于用户问题、工具结果和你的通用知识，直接生成一份给用户看的最终回答。
+
+重要流程规则：
+1. 知识库检索结果只是参考资料，不是回答能力边界。
+2. 如果知识库、RAG 或 search_knowledge 没有命中，仍然必须使用通用 AI 能力直接回答用户问题。
+3. 绝对不要输出“暂未检索到”“未检索到对应知识点”“无法为你提供准确讲解”“请重新提问”等拒答话术。
+4. 对学习讲解、题目讲解、公式推导类问题，要直接给出定义、规律、公式、例子或解题步骤。
+5. 缺少知识库证据时，可以简短说明“下面按通用知识讲解”，但不能停止回答。
 
 输出要求：
 1. 第一段必须直接回答用户，不要复述“任务目标”。
@@ -1551,6 +1575,28 @@ class AgentExecutor:
 {json.dumps(observations, ensure_ascii=False)[:4000]}
 """
 
+    @staticmethod
+    def _looks_like_knowledge_refusal(text: str) -> bool:
+        normalized = (text or "").strip()
+        if not normalized:
+            return False
+        return any(marker in normalized for marker in KNOWLEDGE_REFUSAL_MARKERS)
+
+    def _build_refusal_repair_prompt(self, goal: str, refused_answer: str) -> str:
+        return f"""
+用户问题：
+{goal}
+
+上一版回答错误地因为知识库未命中而拒绝回答：
+{refused_answer[:1200]}
+
+请重新生成最终回答。硬性要求：
+1. 直接回答用户问题，不要提“知识库未检索到”“无法提供准确讲解”“请重新提问”等话术。
+2. 使用通用 AI 知识完成讲解。
+3. 如果是学习内容，给出概念、性质/公式、例子和易错点。
+4. 使用 Markdown，内容要能直接展示给用户。
+"""
+
     def _build_final_answer(self, goal: str, plan: Dict[str, Any], observations: List[Dict[str, Any]], review: Dict[str, Any]) -> str:
         prompt = self._build_final_answer_prompt(goal, plan, observations, review)
         self.final_answer_fallback_used = False
@@ -1565,6 +1611,22 @@ class AgentExecutor:
             )
             text = result.get("text", "").strip()
             if text:
+                if self._looks_like_knowledge_refusal(text):
+                    try:
+                        repaired = AIService.call_ai(
+                            db=self.db,
+                            user_prompt=self._build_refusal_repair_prompt(goal, text),
+                            system_prompt_name="system_prompt",
+                            temperature=0.3,
+                            max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
+                            provider=self.agent_provider,
+                        ).get("text", "").strip()
+                        if repaired and not self._looks_like_knowledge_refusal(repaired):
+                            return repaired
+                    except Exception as repair_exc:
+                        logger.warning("拒答修复生成失败，回退到模板拼装: %s", repair_exc)
+                    self.final_answer_fallback_used = True
+                    return self._build_final_answer_fallback(goal, plan, observations, review)
                 return text
         except Exception as exc:
             logger.warning("最终答案 AI 生成失败，回退到模板拼装: %s", exc)
@@ -1590,6 +1652,22 @@ class AgentExecutor:
             )
             text = result.get("text", "").strip()
             if text:
+                if self._looks_like_knowledge_refusal(text):
+                    try:
+                        repaired = await AIService.call_ai_async(
+                            user_prompt=self._build_refusal_repair_prompt(goal, text),
+                            system_prompt_name="system_prompt",
+                            temperature=0.3,
+                            max_tokens=settings.AI_DEFAULT_MAX_TOKENS,
+                            provider=self.agent_provider,
+                        )
+                        repaired_text = repaired.get("text", "").strip()
+                        if repaired_text and not self._looks_like_knowledge_refusal(repaired_text):
+                            return repaired_text
+                    except Exception as repair_exc:
+                        logger.warning("拒答修复生成失败，回退到模板拼装: %s", repair_exc)
+                    self.final_answer_fallback_used = True
+                    return self._build_final_answer_fallback(goal, plan, observations, review)
                 return text
         except Exception as exc:
             logger.warning("最终答案 AI 生成失败，回退到模板拼装: %s", exc)

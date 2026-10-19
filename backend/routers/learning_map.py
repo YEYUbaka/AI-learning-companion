@@ -2,23 +2,40 @@
 知识图谱路由
 作者：智学伴开发团队
 """
+from typing import Optional
+
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from database import get_db
-from services.learning_map_service import LearningMapService
-from typing import Optional
+
 from core.security import get_current_user
+from database import get_db
 from schemas.learning_map import (
-    LearningMapUploadResponse,
+    LearningGraphResponse,
     LearningMapGenerateRequest,
     LearningMapGenerateResponse,
-    LearningGraphResponse,
     LearningMapHistoryResponse,
+    LearningMapUploadResponse,
 )
+from services.learning_map_service import LearningMapService
 
 
 router = APIRouter(prefix="/api/v1/learning-map", tags=["知识图谱"])
+
+
+def _create_learning_map_export_response(export_result: dict, export_format: str) -> Response:
+    media_type = (
+        "application/vnd.xmind.workbook"
+        if export_format == "xmind"
+        else "application/octet-stream"
+    )
+    return Response(
+        content=export_result["content"],
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{export_result["filename"]}"'
+        },
+    )
 
 
 @router.post("/upload-file", response_model=LearningMapUploadResponse)
@@ -31,8 +48,7 @@ async def upload_learning_file(
     上传资料并解析文本
     """
     try:
-        result = await LearningMapService.upload_file(db, user_id=user_id, file=file)
-        return result
+        return await LearningMapService.upload_file(db, user_id=user_id, file=file)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except Exception as exc:
@@ -51,7 +67,7 @@ async def generate_learning_map(
     根据文件或课程主题生成知识图谱
     """
     try:
-        result = LearningMapService.generate_graph(
+        return LearningMapService.generate_graph(
             db,
             user_id=request.user_id,
             file_id=request.file_id,
@@ -59,7 +75,6 @@ async def generate_learning_map(
             provider=request.provider,
             map_mode=request.map_mode,
         )
-        return result
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except Exception as exc:
@@ -79,8 +94,7 @@ async def get_learning_graph(
     获取用户知识图谱数据
     """
     try:
-        graph = LearningMapService.get_graph(db, user_id, session_id=session_id)
-        return graph
+        return LearningMapService.get_graph(db, user_id, session_id=session_id)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -118,7 +132,7 @@ async def delete_learning_map_session(
     """
     try:
         from repositories.learning_map_repo import LearningMapRepository
-        
+
         success = LearningMapRepository.delete_session(db, user_id, session_id)
         if not success:
             raise HTTPException(
@@ -140,7 +154,7 @@ async def export_learning_map(
     session_id: int,
     format: str = "xmind",
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
     """
     导出知识图谱
@@ -152,14 +166,7 @@ async def export_learning_map(
             session_id=session_id,
             export_format=format,
         )
-        media_type = "application/vnd.xmind.workbook" if format == "xmind" else "application/octet-stream"
-        return Response(
-            content=export_result["content"],
-            media_type=media_type,
-            headers={
-                "Content-Disposition": f'attachment; filename="{export_result["filename"]}"'
-            },
-        )
+        return _create_learning_map_export_response(export_result, format)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except Exception as exc:
@@ -168,3 +175,26 @@ async def export_learning_map(
             detail=f"导出知识图谱失败: {exc}",
         )
 
+
+@router.get("/export/{format}/{session_id}")
+async def export_learning_map_legacy(
+    format: str,
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        export_result = LearningMapService.export_learning_map(
+            db=db,
+            user_id=current_user.id,
+            session_id=session_id,
+            export_format=format,
+        )
+        return _create_learning_map_export_response(export_result, format)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"导出知识图谱失败: {exc}",
+        )

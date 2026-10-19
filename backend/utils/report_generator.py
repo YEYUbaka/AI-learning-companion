@@ -196,7 +196,7 @@ def register_chinese_fonts(force_reregister=False):
     _font_registered = True
     _registered_font_name = registered_font
     
-    print(f"📝 最终使用的字体: {registered_font}", flush=True)
+    logger.info(f"[字体注册] 最终使用的字体: {registered_font}")
     return registered_font
 
 

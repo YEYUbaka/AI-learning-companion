@@ -524,6 +524,9 @@ PROVIDER_ALIASES: Dict[str, str] = {
 }
 
 
+# AI辅助生成: DeepSeek DeepSeek-V3 2025-12 — Provider抽象接口与注册工厂骨架
+# Prompt: "设计一个AI模型注册工厂，支持多Provider继承类、通用参数封装和统一调度..."
+# 修改: 人工调整类继承结构、确定参数映射关系、密钥解密逻辑、fallback链路、国内代理端点适配
 class AIProvider(ABC):
     def __init__(
         self,

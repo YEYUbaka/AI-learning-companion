@@ -236,8 +236,7 @@ async def ask_gpt_stream(prompt: str, provider: Optional[str] = None, history: O
         api_key = config.get("api_key")
         if not api_key:
             error_msg = f"错误：未配置 {provider.upper()}_API_KEY，请在 .env 文件中设置。当前尝试使用的模型: {provider}"
-            print(f"[ERROR] {error_msg}", flush=True)
-            print(f"[ERROR] 检查的环境变量: {provider.upper()}_API_KEY = {os.getenv(f'{provider.upper()}_API_KEY')}", flush=True)
+            logging.getLogger("zhixueban").error(error_msg)
             yield {
                 "type": "error",
                 "content": error_msg,
@@ -305,8 +304,7 @@ async def ask_gpt_stream(prompt: str, provider: Optional[str] = None, history: O
         
         sys.stdout.write(f"[消息构建] 完整消息列表（将发送给AI）:\n")
         for i, msg in enumerate(messages):
-            role_icon = "👤" if msg['role'] == 'user' else "🤖" if msg['role'] == 'assistant' else "⚙️"
-            sys.stdout.write(f"  {role_icon} [{i+1}] {msg['role']}: {msg['content'][:80]}...\n")
+            sys.stdout.write(f"  [{i+1}] {msg['role']}: {msg['content'][:80]}...\n")
         sys.stdout.write(f"[消息构建] ====================================\n\n")
         sys.stdout.flush()
         
@@ -344,7 +342,7 @@ async def ask_gpt_stream(prompt: str, provider: Optional[str] = None, history: O
                 temperature=0.7,
                 stream=True
             )
-            sys.stdout.write(f"[AI调用] ✅ API调用成功，开始流式返回（消息数: {len(messages)}）\n")
+            sys.stdout.write(f"[AI调用] API调用成功，开始流式返回（消息数: {len(messages)}）\n")
             sys.stdout.flush()
             
             # 记录API调用成功
@@ -360,7 +358,7 @@ async def ask_gpt_stream(prompt: str, provider: Optional[str] = None, history: O
                 pass
         except Exception as e:
             error_msg = f"API调用失败 - Provider: {provider_name}, Error: {str(e)}"
-            print(f"[ERROR] {error_msg}", flush=True)
+            logging.getLogger("zhixueban").error(error_msg)
             yield {
                 "type": "error",
                 "content": f"调用{provider_name} API失败: {str(e)}",

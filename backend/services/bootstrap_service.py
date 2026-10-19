@@ -38,6 +38,7 @@ class BootstrapService:
         prompt_changes = BootstrapService.sync_prompts_from_data(db, prompt_seeds)
         model_changes = BootstrapService.sync_models_from_data(db, model_seeds)
         FeatureModelConfigService.ensure_defaults(db)
+        BootstrapService.refresh_runtime_registry(db)
 
         if prompt_changes or model_changes:
             logger.info(
@@ -49,6 +50,13 @@ class BootstrapService:
             logger.info("未检测到需要同步的 Prompt / 模型配置")
 
         return {"prompts": prompt_changes, "models": model_changes}
+
+    @staticmethod
+    def refresh_runtime_registry(db: Session) -> None:
+        """Reload the in-memory provider registry after model config sync."""
+        from utils.model_registry import registry
+
+        registry.load_from_db(db)
 
     @staticmethod
     def sync_prompts_from_data(db: Session, seeds: List[Dict[str, Any]]) -> int:

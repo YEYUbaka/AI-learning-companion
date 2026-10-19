@@ -332,7 +332,7 @@ export const deleteLearningMapSession = async (userId, sessionId) => {
 };
 
 export const exportLearningMapXMind = async (sessionId) => {
-  return api.get(`/api/v1/learning-map/export/xmind/${sessionId}`, {
+  return api.get(`/api/v1/learning-map/${sessionId}/export?format=xmind`, {
     responseType: 'blob',
   });
 };

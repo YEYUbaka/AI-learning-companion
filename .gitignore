@@ -178,3 +178,14 @@ CLAUDE.md
 DEPLOYMENT.md
 build_index2.py
 
+
+# CodeGraph local index
+.codegraph/
+
+# ---- 归档排除：测试产物 / 部署包 / 本地 AI 工具配置（2026-10-19）----
+test/*.png
+test/screenshots/
+test/artifacts-p0-*/
+*.tar.gz
+.agents/
+.codex/
